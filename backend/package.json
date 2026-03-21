@@ -1,0 +1,47 @@
+{
+  "name": "seekers-ai-agency-os-backend",
+  "version": "1.0.0",
+  "description": "Seekers AI Agency OS — Hono + Drizzle + PostgreSQL API",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev":          "tsx watch src/index.ts",
+    "build":        "tsup src/index.ts --format cjs --dts --out-dir dist",
+    "start":        "node dist/index.js",
+    "db:generate":  "drizzle-kit generate:pg",
+    "db:push":      "drizzle-kit push:pg",
+    "db:migrate":   "drizzle-kit migrate:pg",
+    "db:studio":    "drizzle-kit studio",
+    "seed":         "tsx scripts/seed.ts",
+    "typecheck":    "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1",
+    "bcrypt":            "^5",
+    "bullmq":            "^5",
+    "dotenv":            "^16",
+    "drizzle-orm":       "^0.30",
+    "hono":              "^4",
+    "ioredis":           "^5",
+    "jose":              "^5",
+    "multer":            "^1",
+    "nodemailer":        "^6",
+    "openai":            "^4",
+    "pdf-parse":         "^1",
+    "pg":                "^8",
+    "uuid":              "^9",
+    "zod":               "^3"
+  },
+  "devDependencies": {
+    "@types/bcrypt":     "^5",
+    "@types/multer":     "^1",
+    "@types/node":       "^20",
+    "@types/nodemailer": "^6",
+    "@types/pdf-parse":  "^1",
+    "@types/pg":         "^8",
+    "drizzle-kit":       "^0.20",
+    "tsup":              "^8",
+    "tsx":               "^4",
+    "typescript":        "^5"
+  }
+}

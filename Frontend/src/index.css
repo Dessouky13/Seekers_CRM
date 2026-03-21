@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Seekers AI — Primary: SF Pro Display, Mono: IBM Plex Mono */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+/*
+ * Seekers AI brand palette (dark theme — app is dark-only)
+ *   Electric Indigo   #3730A3  → hsl(244, 54%, 41%)
+ *   Lavender Haze     #7C3AED  → hsl(262, 83%, 58%)  ← primary
+ *   Midnight Ultra.   #1E1B4B  → hsl(244, 47%, 20%)  ← base background family
+ *   Soft Violet Acc.  #A78BFA  → hsl(255, 91%, 76%)  ← secondary / accent
+ *   Light Lavender    #F5F3FF  → hsl(250, 100%, 98%)
+ */
+
+@layer base {
+  :root {
+    /* Background family — derived from Midnight Ultramarine */
+    --background: 244 48% 8%;
+    --foreground: 250 20% 90%;
+
+    --card: 244 45% 11%;
+    --card-foreground: 250 20% 90%;
+
+    --popover: 244 45% 11%;
+    --popover-foreground: 250 20% 90%;
+
+    /* Primary — Lavender Haze #7C3AED */
+    --primary: 262 83% 58%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary — Soft Violet Accent #A78BFA */
+    --secondary: 255 91% 76%;
+    --secondary-foreground: 244 48% 10%;
+
+    --muted: 244 40% 16%;
+    --muted-foreground: 250 15% 55%;
+
+    /* Accent — Soft Violet Accent */
+    --accent: 255 91% 76%;
+    --accent-foreground: 244 48% 10%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 244 35% 18%;
+    --input: 244 35% 18%;
+    --ring: 262 83% 58%;
+
+    --radius: 0.5rem;
+
+    /* Sidebar — even darker Midnight Ultramarine */
+    --sidebar-background: 244 50% 6%;
+    --sidebar-foreground: 250 15% 65%;
+    --sidebar-primary: 262 83% 58%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 244 45% 13%;
+    --sidebar-accent-foreground: 250 20% 90%;
+    --sidebar-border: 244 35% 13%;
+    --sidebar-ring: 262 83% 58%;
+
+    --success: 152 60% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 0 0% 10%;
+    --info: 210 80% 55%;
+    --info-foreground: 0 0% 100%;
+
+    /* Chart colors — Seekers palette */
+    --chart-1: 262 83% 58%;
+    --chart-2: 255 91% 76%;
+    --chart-3: 152 60% 45%;
+    --chart-4: 38 92% 55%;
+    --chart-5: 0 72% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted));
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-card/60 backdrop-blur-xl border border-border/50;
+  }
+  .glow-sm {
+    box-shadow: 0 0 20px -5px hsl(var(--primary) / 0.2);
+  }
+  .glow-md {
+    box-shadow: 0 0 40px -10px hsl(var(--primary) / 0.25);
+  }
+}

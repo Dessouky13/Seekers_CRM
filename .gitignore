@@ -1,0 +1,43 @@
+# Dependencies
+node_modules
+bun.lockb
+package-lock.json
+yarn.lock
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist
+build
+.tsup-cache
+*.tsbuildinfo
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+.thumbs.db
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Upload directories
+backend/uploads
+
+# Temp
+tmp
+temp
+.temp

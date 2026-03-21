@@ -1,0 +1,22 @@
+import { cors } from "hono/cors";
+
+const DEV_ORIGINS = [
+  "http://localhost:5173",
+  "http://localhost:8080",
+  "http://localhost:3000",
+];
+
+export const corsMiddleware = cors({
+  origin: (origin) => {
+    const frontendUrl = process.env.FRONTEND_URL;
+    const allowed = [...DEV_ORIGINS, ...(frontendUrl ? [frontendUrl] : [])];
+    // In development, allow all origins for convenience
+    if (process.env.NODE_ENV === "development") return origin;
+    return allowed.includes(origin) ? origin : null;
+  },
+  credentials:    true,
+  allowHeaders:   ["Authorization", "Content-Type"],
+  allowMethods:   ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  exposeHeaders:  ["Content-Length"],
+  maxAge:         600,
+});
