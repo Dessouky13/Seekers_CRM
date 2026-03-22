@@ -239,3 +239,27 @@ export const teamNotes = pgTable("team_notes", {
   content:   text("content").notNull().default(""),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ── Idea Board (shared team moodboard) ────────────────────
+export const ideaBoard = pgTable("idea_board", {
+  id:         uuid("id").primaryKey().defaultRandom(),
+  content:    text("content").notNull(),
+  color:      text("color").notNull().default("yellow"),
+  authorId:   uuid("author_id").references(() => profiles.id, { onDelete: "set null" }),
+  authorName: text("author_name"),
+  createdAt:  timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ── Vault (shared password store) ─────────────────────────
+export const vaultEntries = pgTable("vault_entries", {
+  id:        uuid("id").primaryKey().defaultRandom(),
+  title:     text("title").notNull(),
+  username:  text("username"),
+  password:  text("password").notNull(),
+  url:       text("url"),
+  category:  text("category").notNull().default("General"),
+  notes:     text("notes"),
+  createdBy: uuid("created_by").references(() => profiles.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

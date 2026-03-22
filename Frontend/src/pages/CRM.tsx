@@ -255,7 +255,7 @@ export default function CRM() {
   }
 
   return (
-    <div className="space-y-6 max-w-full">
+    <div className="space-y-6 w-full overflow-hidden">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-foreground">CRM</h1>

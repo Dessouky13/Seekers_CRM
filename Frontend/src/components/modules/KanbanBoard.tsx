@@ -43,7 +43,7 @@ export function KanbanBoard<T>({ columns, renderCard, onMoveItem, getItemId }: K
               {col.items.length}
             </span>
           </div>
-          <div className="p-2 space-y-2 min-h-[100px]">
+          <div className="p-2 space-y-2 min-h-[200px]">
             {col.items.map((item) => (
               <div
                 key={getItemId(item)}

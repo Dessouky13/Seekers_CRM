@@ -12,6 +12,7 @@ import Clients from "./pages/Clients";
 import Login from "./pages/Login";
 import Goals from "./pages/Goals";
 import Notes from "./pages/Notes";
+import Vault from "./pages/Vault";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
@@ -43,6 +44,7 @@ const App = () => (
                     <Route path="/crm" element={<CRM />} />
                     <Route path="/goals" element={<Goals />} />
                     <Route path="/notes" element={<Notes />} />
+                    <Route path="/vault" element={<Vault />} />
                     <Route path="/settings" element={<Settings />} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>

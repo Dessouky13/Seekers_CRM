@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { db } from "../db/client";
-import { teamNotes } from "../db/schema";
+import { teamNotes, ideaBoard } from "../db/schema";
 import { authMiddleware } from "../middleware/auth";
 import { z } from "zod";
 import type { AppEnv } from "../types";
@@ -46,6 +46,46 @@ notesRouter.put("/my", authMiddleware, async (c) => {
     .values({ userId, content })
     .returning();
   return c.json({ content: created.content, updatedAt: created.updatedAt });
+});
+
+// ── Idea Board ────────────────────────────────────────────
+
+const ideaSchema = z.object({
+  content: z.string().min(1),
+  color:   z.enum(["yellow", "blue", "green", "pink", "purple"]).default("yellow"),
+});
+
+// GET /notes/board — list all idea cards
+notesRouter.get("/board", authMiddleware, async (c) => {
+  const cards = await db
+    .select()
+    .from(ideaBoard)
+    .orderBy(desc(ideaBoard.createdAt));
+  return c.json(cards);
+});
+
+// POST /notes/board — add a card
+notesRouter.post("/board", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const { content, color } = ideaSchema.parse(await c.req.json());
+  const [card] = await db
+    .insert(ideaBoard)
+    .values({ content, color, authorId: user.id, authorName: user.name })
+    .returning();
+  return c.json(card, 201);
+});
+
+// DELETE /notes/board/:id — delete a card (own card or admin)
+notesRouter.delete("/board/:id", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const { id } = c.req.param();
+  const [card] = await db.select().from(ideaBoard).where(eq(ideaBoard.id, id)).limit(1);
+  if (!card) return c.json({ error: "Not found" }, 404);
+  if (card.authorId !== user.id && user.role !== "admin") {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+  await db.delete(ideaBoard).where(eq(ideaBoard.id, id));
+  return c.json({ ok: true });
 });
 
 export default notesRouter;

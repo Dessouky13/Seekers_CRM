@@ -14,6 +14,7 @@ import dashboardRouter    from "./routes/dashboard";
 import knowledgeRouter    from "./routes/knowledge";
 import notificationsRouter from "./routes/notifications";
 import notesRouter         from "./routes/notes";
+import vaultRouter         from "./routes/vault";
 import type { AppEnv } from "./types";
 
 const app = new Hono<AppEnv>();
@@ -41,6 +42,7 @@ api.route("/dashboard",     dashboardRouter);
 api.route("/knowledge",     knowledgeRouter);
 api.route("/notifications", notificationsRouter);
 api.route("/notes",         notesRouter);
+api.route("/vault",         vaultRouter);
 
 app.route("/api/v1", api);
 
