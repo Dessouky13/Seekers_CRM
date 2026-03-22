@@ -55,6 +55,14 @@ export function useUpdateLead() {
   });
 }
 
+export function useDeleteLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch(`/crm/leads/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+  });
+}
+
 export function useAddLeadActivity() {
   const qc = useQueryClient();
   return useMutation({

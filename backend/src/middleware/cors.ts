@@ -8,9 +8,12 @@ const DEV_ORIGINS = [
 
 export const corsMiddleware = cors({
   origin: (origin) => {
-    const frontendUrl = process.env.FRONTEND_URL;
-    const allowed = [...DEV_ORIGINS, ...(frontendUrl ? [frontendUrl] : [])];
-    // In development, allow all origins for convenience
+    // Support comma-separated list of allowed origins: FRONTEND_URL=https://a.com,https://b.com
+    const frontendUrls = (process.env.FRONTEND_URL ?? "")
+      .split(",")
+      .map((u) => u.trim())
+      .filter(Boolean);
+    const allowed = [...DEV_ORIGINS, ...frontendUrls];
     if (process.env.NODE_ENV === "development") return origin;
     return allowed.includes(origin) ? origin : null;
   },

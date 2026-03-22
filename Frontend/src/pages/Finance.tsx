@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import type { ApiTransaction } from "@/lib/types";
 
 const fmt = (n: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+  `EGP ${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n)}`;
 
 const EGP_CATEGORIES = ["Client Setup Fee", "Client Recurring Fee", "Other Income", "Salary", "Tools", "Marketing", "Other"];
 

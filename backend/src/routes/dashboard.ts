@@ -25,14 +25,12 @@ dashboard.get("/summary", authMiddleware, async (c) => {
   const today = now.toISOString().slice(0, 10);
 
   const [financeData, taskData, leadData, goalsData] = await Promise.all([
-    // Finance
+    // Finance — KPI totals are all-time; charts use rolling windows
     (async () => {
       const [totals] = await db.select({
         total_income:   sql<number>`SUM(CASE WHEN type = 'income'  THEN amount::numeric ELSE 0 END)`,
         total_expenses: sql<number>`SUM(CASE WHEN type = 'expense' THEN amount::numeric ELSE 0 END)`,
-      }).from(transactions).where(
-        and(sql`date >= ${periodStart}`, sql`date < ${nextMonth}`)
-      );
+      }).from(transactions);
 
       const income   = Number(totals.total_income   ?? 0);
       const expenses = Number(totals.total_expenses ?? 0);

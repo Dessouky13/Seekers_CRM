@@ -16,7 +16,7 @@ import { useClients, useClientDetail, useCreateClient, useDeleteClient } from "@
 import { cn } from "@/lib/utils";
 import type { ApiClient } from "@/lib/types";
 
-const fmt = (n: string | number) => `$${Number(n).toLocaleString()}`;
+const fmt = (n: string | number) => `EGP ${Number(n).toLocaleString()}`;
 
 const statusColors: Record<ApiClient["status"], string> = {
   active:   "bg-success/15 text-success",

@@ -45,6 +45,9 @@ export function useDeleteClient() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch(`/clients/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["clients"] }),
+    onSuccess: (_data, id) => {
+      qc.removeQueries({ queryKey: ["clients", id, "detail"] });
+      qc.invalidateQueries({ queryKey: ["clients"] });
+    },
   });
 }

@@ -6,7 +6,7 @@ import { useDashboardSummary } from "@/hooks/useDashboard";
 import { useCurrentUser } from "@/hooks/useAuth";
 
 const COLORS = ["hsl(246,90%,60%)", "hsl(255,40%,72%)", "hsl(152,60%,45%)", "hsl(38,92%,55%)", "hsl(0,72%,55%)"];
-const fmt = (n: number) => `$${n.toLocaleString()}`;
+const fmt = (n: number) => `EGP ${n.toLocaleString()}`;
 
 const priorityColors: Record<string, string> = {
   low:      "bg-muted text-muted-foreground",
@@ -64,7 +64,7 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={revenueData} barSize={28}>
                 <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: "hsl(226,12%,55%)", fontSize: 12 }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: "hsl(226,12%,55%)", fontSize: 12 }} tickFormatter={(v) => `$${v / 1000}k`} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: "hsl(226,12%,55%)", fontSize: 12 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                 <Tooltip
                   contentStyle={{ background: "hsl(230,22%,12%)", border: "1px solid hsl(230,16%,18%)", borderRadius: 8, fontSize: 12 }}
                   labelStyle={{ color: "hsl(226,20%,88%)" }}
