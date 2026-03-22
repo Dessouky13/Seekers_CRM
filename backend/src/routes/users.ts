@@ -6,8 +6,9 @@ import { profiles, teamInvites } from "../db/schema";
 import { authMiddleware, adminOnly } from "../middleware/auth";
 import { updateProfileSchema, inviteUserSchema } from "../utils/validators";
 import { sendInviteEmail } from "../services/email";
-import { toSafeProfile } from "../services/auth";
+import { toSafeProfile, hashPassword } from "../services/auth";
 import { randomUUID } from "crypto";
+import { z } from "zod";
 import type { AppEnv } from "../types";
 
 const users = new Hono<AppEnv>();
@@ -89,6 +90,32 @@ users.post("/invite", authMiddleware, adminOnly, async (c) => {
   await sendInviteEmail(body.email, inviteUrl, body.role);
 
   return c.json({ message: "Invite sent" }, 200);
+});
+
+// POST /users/create — admin only, create user directly with password
+users.post("/create", authMiddleware, adminOnly, async (c) => {
+  const schema = z.object({
+    name:     z.string().min(1),
+    email:    z.string().email(),
+    password: z.string().min(6),
+    role:     z.enum(["admin", "member"]).default("member"),
+  });
+  const body = schema.parse(await c.req.json());
+
+  const [existing] = await db
+    .select({ id: profiles.id })
+    .from(profiles)
+    .where(eq(profiles.email, body.email))
+    .limit(1);
+  if (existing) return c.json({ error: "Email already in use" }, 409);
+
+  const password = await hashPassword(body.password);
+  const [created] = await db
+    .insert(profiles)
+    .values({ name: body.name, email: body.email, password, role: body.role })
+    .returning();
+
+  return c.json(toSafeProfile(created), 201);
 });
 
 export default users;

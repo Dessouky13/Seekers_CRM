@@ -11,9 +11,8 @@ import CRM from "./pages/CRM";
 import Clients from "./pages/Clients";
 import Login from "./pages/Login";
 import Goals from "./pages/Goals";
-import Knowledge from "./pages/Knowledge";
+import Notes from "./pages/Notes";
 import Settings from "./pages/Settings";
-import Placeholder from "./pages/Placeholder";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -43,7 +42,7 @@ const App = () => (
                     <Route path="/clients" element={<Clients />} />
                     <Route path="/crm" element={<CRM />} />
                     <Route path="/goals" element={<Goals />} />
-                    <Route path="/knowledge" element={<Knowledge />} />
+                    <Route path="/notes" element={<Notes />} />
                     <Route path="/settings" element={<Settings />} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>

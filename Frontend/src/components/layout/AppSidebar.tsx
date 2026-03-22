@@ -1,4 +1,4 @@
-import { LayoutDashboard, DollarSign, CheckSquare, Users, Target, BookOpen, Settings, ChevronLeft, Building2 } from "lucide-react";
+import { LayoutDashboard, DollarSign, CheckSquare, Users, Target, StickyNote, Settings, ChevronLeft, Building2 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import {
@@ -17,7 +17,7 @@ const navItems = [
   { title: "Clients", url: "/clients", icon: Building2 },
   { title: "CRM", url: "/crm", icon: Users },
   { title: "Goals", url: "/goals", icon: Target },
-  { title: "Knowledge Base", url: "/knowledge", icon: BookOpen },
+  { title: "Notes", url: "/notes", icon: StickyNote },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
@@ -66,7 +66,7 @@ export function AppSidebar() {
             <SidebarMenu>
               {navItems.map((item) => {
                 const isActive = item.url === "/" ? location.pathname === "/" : location.pathname.startsWith(item.url);
-                const isPlaceholder = ["/goals", "/knowledge", "/settings"].includes(item.url);
+                const isPlaceholder = false;
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton asChild className={cn(

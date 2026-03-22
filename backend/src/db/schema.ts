@@ -208,7 +208,7 @@ export const kbChunks = pgTable("kb_chunks", {
   content:    text("content").notNull(),
   // NOTE: On VPS (Linux), change this to: vector("embedding", { dimensions: 1536 })
   // Requires: CREATE EXTENSION vector; (pgvector — not available as prebuilt on Windows)
-  embedding:  text("embedding"),
+  embedding:  vector("embedding", { dimensions: 1536 }),
   chunkIndex: integer("chunk_index").notNull(),
   createdAt:  timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
@@ -231,3 +231,11 @@ export const notifications = pgTable("notifications", {
 }, (t) => ({
   userIdx: index("idx_notifications_user").on(t.userId, t.read, t.createdAt),
 }));
+
+// ── Team Notes (personal notepad per user) ────────────────
+export const teamNotes = pgTable("team_notes", {
+  id:        uuid("id").primaryKey().defaultRandom(),
+  userId:    uuid("user_id").notNull().references(() => profiles.id, { onDelete: "cascade" }).unique(),
+  content:   text("content").notNull().default(""),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
