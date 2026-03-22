@@ -33,18 +33,11 @@ export function AppSidebar() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5 overflow-hidden">
             {/* Seekers AI Logo */}
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg overflow-hidden bg-primary/10">
-              {/* SEEKERS-TODO: Upload /public/logo-symbol.png — the Seekers symbol mark */}
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg overflow-hidden bg-primary/20 ring-1 ring-primary/30">
               <img
                 src="/logo-symbol.png"
                 alt="Seekers AI"
-                className="h-6 w-6 object-contain"
-                onError={(e) => {
-                  // Fallback: show "S" initial if logo not yet uploaded
-                  (e.currentTarget as HTMLImageElement).style.display = "none";
-                  (e.currentTarget.parentElement as HTMLElement).innerHTML =
-                    '<span class="text-primary text-sm font-bold">S</span>';
-                }}
+                className="h-5 w-5 object-contain"
               />
             </div>
             {!collapsed && (

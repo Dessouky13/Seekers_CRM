@@ -114,3 +114,29 @@
     box-shadow: 0 0 40px -10px hsl(var(--primary) / 0.25);
   }
 }
+
+/* ── Seekers animated background ───────────────────────── */
+@keyframes seekers-drift-1 {
+  0%, 100% { transform: translate(0px,   0px)   rotate(0deg)   scale(1);    }
+  25%       { transform: translate(35px, -55px)  rotate(18deg)  scale(1.06); }
+  50%       { transform: translate(-25px,-80px)  rotate(-10deg) scale(0.94); }
+  75%       { transform: translate(50px, -30px)  rotate(24deg)  scale(1.03); }
+}
+@keyframes seekers-drift-2 {
+  0%, 100% { transform: translate(0px,  0px)   rotate(0deg)   scale(1);    }
+  33%       { transform: translate(-50px, 40px) rotate(-15deg) scale(1.08); }
+  66%       { transform: translate(30px,  65px) rotate(10deg)  scale(0.92); }
+}
+@keyframes seekers-drift-3 {
+  0%, 100% { transform: translate(0px,   0px)  rotate(0deg)   scale(1);    }
+  40%       { transform: translate(60px, -45px) rotate(-22deg) scale(1.1);  }
+  80%       { transform: translate(-30px, 35px) rotate(14deg)  scale(0.96); }
+}
+@keyframes seekers-pulse-opacity {
+  0%, 100% { opacity: var(--s-op, 0.04); }
+  50%       { opacity: calc(var(--s-op, 0.04) * 1.8); }
+}
+@keyframes seekers-glow-pulse {
+  0%, 100% { filter: blur(32px) brightness(1);   }
+  50%       { filter: blur(40px) brightness(1.4); }
+}

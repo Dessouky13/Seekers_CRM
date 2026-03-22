@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { SeekersBackground } from "@/components/SeekersBackground";
 import { isAuthenticated } from "@/lib/auth";
 import Dashboard from "./pages/Dashboard";
 import Finance from "./pages/Finance";
@@ -28,6 +29,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Sonner />
+      <SeekersBackground />
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
