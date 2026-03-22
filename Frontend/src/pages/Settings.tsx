@@ -37,7 +37,7 @@ export default function Settings() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["users"] });
       setCreateOpen(false);
-      toast.success("User created — they can log in immediately");
+      toast.success("User created successfully");
     },
     onError: (err) => toast.error(err.message),
   });

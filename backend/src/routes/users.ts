@@ -105,14 +105,14 @@ users.post("/create", authMiddleware, adminOnly, async (c) => {
   const [existing] = await db
     .select({ id: profiles.id })
     .from(profiles)
-    .where(eq(profiles.email, body.email))
+    .where(eq(profiles.email, body.email.toLowerCase()))
     .limit(1);
   if (existing) return c.json({ error: "Email already in use" }, 409);
 
   const password = await hashPassword(body.password);
   const [created] = await db
     .insert(profiles)
-    .values({ name: body.name, email: body.email, password, role: body.role })
+    .values({ name: body.name, email: body.email.toLowerCase(), password, role: body.role })
     .returning();
 
   return c.json(toSafeProfile(created), 201);
