@@ -74,3 +74,11 @@ export function useAddLeadActivity() {
     },
   });
 }
+
+export function useStaleLeads() {
+  return useQuery<ApiLead[]>({
+    queryKey: ["stale-leads"],
+    queryFn:  () => apiFetch("/crm/stale-leads"),
+    staleTime: 60_000,
+  });
+}

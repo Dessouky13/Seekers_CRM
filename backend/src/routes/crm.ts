@@ -64,6 +64,27 @@ crm.post("/leads", authMiddleware, async (c) => {
   return c.json(lead, 201);
 });
 
+// GET /crm/stale-leads — leads not updated in 2+ days (active only)
+crm.get("/stale-leads", authMiddleware, async (c) => {
+  const rows = await db
+    .select({
+      lead:         leads,
+      assigneeName: profiles.name,
+    })
+    .from(leads)
+    .leftJoin(profiles, eq(leads.assigneeId, profiles.id))
+    .where(and(
+      not(inArray(leads.stage, ["closed_won", "closed_lost"])),
+      sql`(${leads.lastActivity} IS NULL OR ${leads.lastActivity}::date <= CURRENT_DATE - INTERVAL '2 days')`,
+    ))
+    .orderBy(sql`${leads.lastActivity} ASC NULLS FIRST`);
+
+  return c.json(rows.map(({ lead, assigneeName }) => ({
+    ...lead,
+    assignee_name: assigneeName,
+  })));
+});
+
 // GET /crm/leads/:id — with activities
 crm.get("/leads/:id", authMiddleware, async (c) => {
   const id = c.req.param("id");

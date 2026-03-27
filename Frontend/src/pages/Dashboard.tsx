@@ -1,8 +1,9 @@
-import { DollarSign, TrendingUp, Users, CheckCircle, AlertTriangle, Target } from "lucide-react";
+import { DollarSign, TrendingUp, Users, CheckCircle, AlertTriangle, Target, Clock } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import { StatCard } from "@/components/modules/StatCard";
 import { Progress } from "@/components/ui/progress";
 import { useDashboardSummary } from "@/hooks/useDashboard";
+import { useStaleLeads } from "@/hooks/useCRM";
 import { useCurrentUser } from "@/hooks/useAuth";
 
 const COLORS = ["hsl(246,90%,60%)", "hsl(255,40%,72%)", "hsl(152,60%,45%)", "hsl(38,92%,55%)", "hsl(0,72%,55%)"];
@@ -18,6 +19,7 @@ const priorityColors: Record<string, string> = {
 export default function Dashboard() {
   const user    = useCurrentUser();
   const { data, isLoading } = useDashboardSummary();
+  const { data: staleLeads = [] } = useStaleLeads();
 
   const income      = data?.finance.total_income   ?? 0;
   const expenses    = data?.finance.total_expenses ?? 0;
@@ -107,7 +109,42 @@ export default function Dashboard() {
       </div>
 
       {/* Bottom row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Stale leads alert */}
+        <div className="rounded-xl border border-border bg-card p-5 animate-fade-in" style={{ animationDelay: "250ms" }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Clock className="h-4 w-4 text-destructive" />
+            <h2 className="text-sm font-semibold text-foreground">Stale Leads</h2>
+            {staleLeads.length > 0 && (
+              <span className="ml-auto text-xs font-semibold text-destructive bg-destructive/10 px-2 py-0.5 rounded-full">
+                {staleLeads.length}
+              </span>
+            )}
+          </div>
+          {staleLeads.length === 0 ? (
+            <p className="text-sm text-muted-foreground">All leads are up to date</p>
+          ) : (
+            <div className="space-y-3">
+              {staleLeads.slice(0, 5).map((lead) => (
+                <div key={lead.id} className="flex items-center justify-between rounded-lg bg-destructive/5 border border-destructive/10 p-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{lead.name}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {lead.company}{lead.lastActivity ? ` · Last: ${lead.lastActivity}` : " · No activity"}
+                    </p>
+                  </div>
+                  <span className="capitalize text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                    {lead.stage.replace(/_/g, " ")}
+                  </span>
+                </div>
+              ))}
+              {staleLeads.length > 5 && (
+                <p className="text-xs text-muted-foreground text-center">+{staleLeads.length - 5} more stale leads</p>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Overdue tasks */}
         <div className="rounded-xl border border-border bg-card p-5 animate-fade-in" style={{ animationDelay: "300ms" }}>
           <div className="flex items-center gap-2 mb-4">

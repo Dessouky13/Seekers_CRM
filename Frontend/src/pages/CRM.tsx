@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Mail, Phone, Calendar, FileText, Globe, Trash2 } from "lucide-react";
+import { Plus, Mail, Phone, Calendar, FileText, Globe, Trash2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -24,6 +24,11 @@ const LEAD_STAGES: { key: LeadStage; label: string }[] = [
   { key: "closed_lost",    label: "Closed Lost" },
 ];
 
+const LEAD_SOURCES = [
+  "Instagram", "Facebook", "TikTok", "LinkedIn",
+  "Email", "Website", "Phone", "Referral", "Other",
+] as const;
+
 const activityIcons: Record<string, typeof Mail> = {
   email: Mail, call: Phone, meeting: Calendar, form: Globe,
 };
@@ -34,8 +39,11 @@ function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; onClose: 
   const { data: lead, isLoading } = useLeadDetail(leadId);
   const addActivity  = useAddLeadActivity();
   const deleteLead   = useDeleteLead();
+  const updateLead   = useUpdateLead();
+  const { data: users = [] } = useUsers();
   const [activityOpen,  setActivityOpen]  = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [editMode, setEditMode]           = useState(false);
 
   const handleAddActivity = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -65,25 +73,35 @@ function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; onClose: 
 
   return (
     <>
-      <Sheet open={!!leadId} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <Sheet open={!!leadId} onOpenChange={(o) => { if (!o) { onClose(); setEditMode(false); } }}>
         <SheetContent className="w-full sm:max-w-md overflow-y-auto">
           {/* Always render SheetTitle for accessibility — shown or visually hidden */}
           <SheetHeader className="flex flex-row items-center justify-between pr-0">
             <SheetTitle>{lead?.name ?? (isLoading ? "Loading…" : "Lead")}</SheetTitle>
             {lead && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 text-destructive hover:text-destructive"
-                onClick={() => setDeleteConfirm(true)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-primary hover:text-primary"
+                  onClick={() => setEditMode(!editMode)}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-destructive hover:text-destructive"
+                  onClick={() => setDeleteConfirm(true)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             )}
           </SheetHeader>
 
           {isLoading && <p className="text-sm text-muted-foreground mt-6">Loading…</p>}
-          {lead && (
+          {lead && !editMode && (
             <div className="mt-6 space-y-6">
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">Company</span><span>{lead.company}</span></div>
@@ -135,6 +153,71 @@ function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; onClose: 
                 )}
               </div>
             </div>
+          )}
+
+          {/* Edit mode */}
+          {lead && editMode && (
+            <form
+              className="mt-6 space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const fd = new FormData(e.currentTarget);
+                updateLead.mutate(
+                  {
+                    id:          lead.id,
+                    name:        fd.get("name") as string,
+                    company:     fd.get("company") as string,
+                    email:       (fd.get("email") as string) || undefined,
+                    source:      (fd.get("source") as string) || undefined,
+                    deal_value:  Number(fd.get("deal_value")) || 0,
+                    stage:       fd.get("stage") as string,
+                    assignee_id: (fd.get("assignee_id") as string) || undefined,
+                    notes:       (fd.get("notes") as string) || undefined,
+                  },
+                  {
+                    onSuccess: () => {
+                      setEditMode(false);
+                      toast.success("Lead updated");
+                    },
+                    onError: (err) => toast.error(err.message),
+                  },
+                );
+              }}
+            >
+              <div className="grid grid-cols-2 gap-4">
+                <div><Label>Name</Label><Input name="name" defaultValue={lead.name} required className="mt-1" /></div>
+                <div><Label>Company</Label><Input name="company" defaultValue={lead.company} required className="mt-1" /></div>
+                <div><Label>Email</Label><Input name="email" type="email" defaultValue={lead.email ?? ""} className="mt-1" /></div>
+                <div>
+                  <Label>Source</Label>
+                  <select name="source" defaultValue={lead.source ?? ""} className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
+                    <option value="">None</option>
+                    {LEAD_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div><Label>Deal Value (EGP)</Label><Input name="deal_value" type="number" min="0" defaultValue={Number(lead.dealValue)} className="mt-1" /></div>
+                <div>
+                  <Label>Stage</Label>
+                  <select name="stage" defaultValue={lead.stage} className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
+                    {LEAD_STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <Label>Assigned To</Label>
+                  <select name="assignee_id" defaultValue={lead.assigneeId ?? ""} className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
+                    <option value="">Unassigned</option>
+                    {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div><Label>Notes</Label><Textarea name="notes" rows={3} defaultValue={lead.notes ?? ""} className="mt-1" /></div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="ghost" onClick={() => setEditMode(false)}>Cancel</Button>
+                <Button type="submit" disabled={updateLead.isPending}>
+                  {updateLead.isPending ? "Saving…" : "Save Changes"}
+                </Button>
+              </div>
+            </form>
           )}
 
           {/* Add Activity Dialog */}
@@ -234,21 +317,39 @@ export default function CRM() {
     .filter((l) => !["closed_won", "closed_lost"].includes(l.stage))
     .reduce((s, l) => s + Number(l.dealValue), 0);
 
-  const LeadCard = ({ lead }: { lead: ApiLead }) => (
-    <div
-      onClick={() => setSelectedId(lead.id)}
-      className="rounded-lg border border-border bg-card p-3 space-y-2 hover:border-primary/30 transition-colors cursor-pointer"
-    >
-      <div>
-        <p className="text-sm font-medium text-foreground">{lead.name}</p>
-        <p className="text-xs text-muted-foreground">{lead.company}</p>
+  const LeadCard = ({ lead }: { lead: ApiLead }) => {
+    const isStale = lead.lastActivity
+      ? (Date.now() - new Date(lead.lastActivity).getTime()) > 2 * 24 * 60 * 60 * 1000
+      : true;
+    const isActive = !["closed_won", "closed_lost"].includes(lead.stage);
+
+    return (
+      <div
+        onClick={() => setSelectedId(lead.id)}
+        className={cn(
+          "rounded-lg border bg-card p-3 space-y-2 hover:border-primary/30 transition-colors cursor-pointer",
+          isStale && isActive ? "border-destructive/40" : "border-border",
+        )}
+      >
+        <div>
+          <p className="text-sm font-medium text-foreground">{lead.name}</p>
+          <p className="text-xs text-muted-foreground">{lead.company}</p>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-primary tabular-nums">{fmt(lead.dealValue)}</span>
+          <div className="flex items-center gap-1.5">
+            {lead.source && (
+              <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{lead.source}</span>
+            )}
+            {isStale && isActive && (
+              <span className="text-[10px] text-destructive font-semibold">⚠</span>
+            )}
+            <span className="text-[10px] text-muted-foreground">{lead.lastActivity ?? "—"}</span>
+          </div>
+        </div>
       </div>
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-primary tabular-nums">{fmt(lead.dealValue)}</span>
-        <span className="text-[10px] text-muted-foreground">{lead.lastActivity ?? "—"}</span>
-      </div>
-    </div>
-  );
+    );
+  };
 
   if (isLoading) {
     return <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">Loading leads…</div>;
@@ -279,7 +380,7 @@ export default function CRM() {
                 <div>
                   <Label>Source</Label>
                   <select name="source" className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
-                    {["Referral", "LinkedIn", "Website", "Conference", "Cold Outreach", "Other"].map((s) => (
+                    {LEAD_SOURCES.map((s) => (
                       <option key={s} value={s}>{s}</option>
                     ))}
                   </select>

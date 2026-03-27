@@ -70,6 +70,15 @@ export function useToggleSubtask() {
   });
 }
 
+export function useUpdateTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string } & Record<string, unknown>) =>
+      apiFetch<ApiTask>(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks"] }),
+  });
+}
+
 export function useDeleteTask() {
   const qc = useQueryClient();
   return useMutation({

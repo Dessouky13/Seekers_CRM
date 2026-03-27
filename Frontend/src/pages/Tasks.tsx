@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, List, Columns3, Trash2 } from "lucide-react";
+import { Plus, List, Columns3, Trash2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { KanbanBoard } from "@/components/modules/KanbanBoard";
 import { toast } from "sonner";
-import { useTasks, useProjects, useUsers, useCreateTask, useMoveTask, useToggleSubtask, useDeleteTask } from "@/hooks/useTasks";
+import { useTasks, useProjects, useUsers, useCreateTask, useMoveTask, useUpdateTask, useToggleSubtask, useDeleteTask } from "@/hooks/useTasks";
 import { cn } from "@/lib/utils";
 import type { ApiTask } from "@/lib/types";
 
@@ -38,6 +38,7 @@ export default function Tasks() {
   const [isOpen, setIsOpen]   = useState(false);
   const [detailTask, setDetailTask] = useState<ApiTask | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [editMode, setEditMode] = useState(false);
 
   const { data: tasksRes, isLoading } = useTasks(
     projectFilter !== "all" ? { project_id: projectFilter } : undefined,
@@ -46,6 +47,7 @@ export default function Tasks() {
   const { data: users    = [] } = useUsers();
   const createTask  = useCreateTask();
   const moveTask    = useMoveTask();
+  const updateTask  = useUpdateTask();
   const toggleSub   = useToggleSubtask();
   const deleteTask  = useDeleteTask();
 
@@ -83,30 +85,38 @@ export default function Tasks() {
     );
   };
 
-  const TaskCard = ({ task }: { task: ApiTask }) => (
-    <div
-      onClick={() => setDetailTask(task)}
-      className="rounded-lg border border-border bg-card p-3 space-y-2 hover:border-primary/30 transition-colors cursor-pointer"
-    >
-      <p className="text-sm font-medium text-foreground leading-snug">{task.title}</p>
-      {task.client_name && <p className="text-[10px] text-secondary">{task.client_name}</p>}
-      <div className="flex items-center justify-between">
-        <span className={cn("text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded", priorityColors[task.priority])}>
-          {task.priority}
-        </span>
-        <div className="flex items-center gap-2">
-          {task.dueDate && (
-            <span className="text-[10px] text-muted-foreground">{task.dueDate.slice(5)}</span>
-          )}
-          {task.assignee_avatar && (
-            <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-[8px] font-semibold text-primary">
-              {task.assignee_avatar}
-            </div>
-          )}
+  const TaskCard = ({ task }: { task: ApiTask }) => {
+    const isOverdue = task.dueDate && task.status !== "done" && new Date(task.dueDate) < new Date();
+    return (
+      <div
+        onClick={() => setDetailTask(task)}
+        className={cn(
+          "rounded-lg border bg-card p-3 space-y-2 hover:border-primary/30 transition-colors cursor-pointer",
+          isOverdue ? "border-destructive/40" : "border-border",
+        )}
+      >
+        <p className="text-sm font-medium text-foreground leading-snug">{task.title}</p>
+        {task.client_name && <p className="text-[10px] text-secondary">{task.client_name}</p>}
+        <div className="flex items-center justify-between">
+          <span className={cn("text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded", priorityColors[task.priority])}>
+            {task.priority}
+          </span>
+          <div className="flex items-center gap-2">
+            {task.dueDate && (
+              <span className={cn("text-[10px]", isOverdue ? "text-destructive font-semibold" : "text-muted-foreground")}>
+                {isOverdue ? "⚠ " : ""}{task.dueDate.slice(5)}
+              </span>
+            )}
+            {task.assignee_name && (
+              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-[8px] font-semibold text-primary" title={task.assignee_name}>
+                {task.assignee_name.split(" ").map(n => n[0]).join("")}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   if (isLoading) {
     return (
@@ -239,23 +249,35 @@ export default function Tasks() {
       )}
 
       {/* Task detail dialog */}
-      <Dialog open={!!detailTask} onOpenChange={(o) => { if (!o) setDetailTask(null); }}>
+      <Dialog open={!!detailTask} onOpenChange={(o) => { if (!o) { setDetailTask(null); setEditMode(false); } }}>
         <DialogContent className="max-w-lg">
-          {detailTask && (
+          {detailTask && !editMode && (
             <>
               <DialogHeader className="flex flex-row items-center justify-between">
                 <DialogTitle>{detailTask.title}</DialogTitle>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 text-destructive"
-                  onClick={() => setDeleteConfirmId(detailTask.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-primary"
+                    onClick={() => setEditMode(true)}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-destructive"
+                    onClick={() => setDeleteConfirmId(detailTask.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </DialogHeader>
               <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">{detailTask.description}</p>
+                {detailTask.description && (
+                  <p className="text-sm text-muted-foreground">{detailTask.description}</p>
+                )}
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div><span className="text-muted-foreground">Assignee:</span>{" "}<span>{detailTask.assignee_name ?? "Unassigned"}</span></div>
                   <div>
@@ -266,8 +288,9 @@ export default function Tasks() {
                   </div>
                   <div><span className="text-muted-foreground">Due:</span>{" "}<span>{detailTask.dueDate ?? "—"}</span></div>
                   <div><span className="text-muted-foreground">Project:</span>{" "}<span>{detailTask.project_name ?? "—"}</span></div>
+                  <div><span className="text-muted-foreground">Status:</span>{" "}<span className="capitalize">{detailTask.status.replace("_", " ")}</span></div>
                   {detailTask.client_name && (
-                    <div className="col-span-2">
+                    <div>
                       <span className="text-muted-foreground">Client:</span>{" "}
                       <span>{detailTask.client_name}</span>
                     </div>
@@ -294,6 +317,84 @@ export default function Tasks() {
                   </div>
                 )}
               </div>
+            </>
+          )}
+
+          {/* Edit mode */}
+          {detailTask && editMode && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Edit Task</DialogTitle>
+              </DialogHeader>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const fd = new FormData(e.currentTarget);
+                  updateTask.mutate(
+                    {
+                      id:          detailTask.id,
+                      title:       fd.get("title") as string,
+                      description: (fd.get("description") as string) || undefined,
+                      assignee_id: (fd.get("assignee_id") as string) || undefined,
+                      priority:    (fd.get("priority") as TaskPriority) || "medium",
+                      status:      (fd.get("status") as TaskStatus) || detailTask.status,
+                      due_date:    (fd.get("due_date") as string) || undefined,
+                      project_id:  (fd.get("project_id") as string) || undefined,
+                    },
+                    {
+                      onSuccess: () => {
+                        setEditMode(false);
+                        setDetailTask(null);
+                        toast.success("Task updated");
+                      },
+                      onError: (err) => toast.error(err.message),
+                    },
+                  );
+                }}
+                className="space-y-4"
+              >
+                <div><Label>Title</Label><Input name="title" defaultValue={detailTask.title} required className="mt-1" /></div>
+                <div><Label>Description</Label><Textarea name="description" defaultValue={detailTask.description ?? ""} rows={2} className="mt-1" /></div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>Assignee</Label>
+                    <select name="assignee_id" defaultValue={detailTask.assigneeId ?? ""} className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
+                      <option value="">Unassigned</option>
+                      {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Priority</Label>
+                    <select name="priority" defaultValue={detailTask.priority} className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
+                      {(["low", "medium", "high", "critical"] as const).map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Status</Label>
+                    <select name="status" defaultValue={detailTask.status} className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
+                      {statusColumns.map((s) => (
+                        <option key={s.key} value={s.key}>{s.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div><Label>Due Date</Label><Input name="due_date" type="date" defaultValue={detailTask.dueDate ?? ""} className="mt-1" /></div>
+                  <div className="col-span-2">
+                    <Label>Project</Label>
+                    <select name="project_id" defaultValue={detailTask.projectId ?? ""} className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
+                      <option value="">No project</option>
+                      {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="ghost" onClick={() => setEditMode(false)}>Cancel</Button>
+                  <Button type="submit" disabled={updateTask.isPending}>
+                    {updateTask.isPending ? "Saving…" : "Save Changes"}
+                  </Button>
+                </DialogFooter>
+              </form>
             </>
           )}
         </DialogContent>
