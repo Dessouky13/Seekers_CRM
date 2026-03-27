@@ -285,11 +285,11 @@ export default function Finance() {
                         <td className="px-4 py-3 text-muted-foreground tabular-nums text-xs">{t.date}</td>
                         <td className="px-4 py-3">
                           <Badge variant="outline" className={cn("text-[10px]",
-                            t.type === "income" ? "border-green-300 bg-green-50 text-green-700" : "border-red-300 bg-red-50 text-red-700",
+                            t.type === "income" ? "border-green-500/30 bg-green-500/10 text-green-400" : "border-red-500/30 bg-red-500/10 text-red-400",
                           )}>{t.type}</Badge>
                         </td>
                         <td className={cn("px-4 py-3 font-medium tabular-nums",
-                          t.type === "income" ? "text-green-600" : "text-red-600",
+                          t.type === "income" ? "text-green-400" : "text-red-400",
                         )}>
                           {t.type === "expense" ? "−" : "+"}{fmt(Number(t.amount))}
                         </td>

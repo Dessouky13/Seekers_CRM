@@ -406,6 +406,39 @@ export default function CRM() {
         </Dialog>
       </div>
 
+      {/* Pipeline Stats */}
+      {(() => {
+        const won      = leads.filter(l => l.stage === "closed_won");
+        const lost     = leads.filter(l => l.stage === "closed_lost");
+        const active   = leads.filter(l => !["closed_won","closed_lost"].includes(l.stage));
+        const wonValue = won.reduce((s, l) => s + Number(l.dealValue), 0);
+        const total    = won.length + lost.length;
+        const convRate = total > 0 ? Math.round((won.length / total) * 100) : 0;
+        return (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="rounded-lg border border-border bg-card p-3">
+              <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Active Leads</p>
+              <p className="text-lg font-bold text-foreground">{active.length}</p>
+              <p className="text-[11px] text-muted-foreground">{fmt(totalPipeline)} in pipeline</p>
+            </div>
+            <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-3">
+              <p className="text-[11px] text-green-400 uppercase tracking-wide">Won</p>
+              <p className="text-lg font-bold text-green-400">{won.length}</p>
+              <p className="text-[11px] text-green-400/70">{fmt(wonValue)} closed</p>
+            </div>
+            <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-3">
+              <p className="text-[11px] text-red-400 uppercase tracking-wide">Lost</p>
+              <p className="text-lg font-bold text-red-400">{lost.length}</p>
+            </div>
+            <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+              <p className="text-[11px] text-primary uppercase tracking-wide">Conversion</p>
+              <p className="text-lg font-bold text-primary">{convRate}%</p>
+              <p className="text-[11px] text-muted-foreground">{total} total closed</p>
+            </div>
+          </div>
+        );
+      })()}
+
       <KanbanBoard
         columns={columns}
         renderCard={(lead) => <LeadCard lead={lead} />}

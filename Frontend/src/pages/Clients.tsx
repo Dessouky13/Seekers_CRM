@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Mail, Phone, ExternalLink, Building2, Search, Trash2 } from "lucide-react";
+import { Plus, Mail, Phone, ExternalLink, Building2, Search, Trash2, Pencil } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { StatCard } from "@/components/modules/StatCard";
 import { toast } from "sonner";
-import { useClients, useClientDetail, useCreateClient, useDeleteClient } from "@/hooks/useClients";
+import { useClients, useClientDetail, useCreateClient, useUpdateClient, useDeleteClient } from "@/hooks/useClients";
 import { cn } from "@/lib/utils";
 import type { ApiClient } from "@/lib/types";
 
@@ -34,8 +34,10 @@ const priorityColors: Record<string, string> = {
 function ClientDetailSheet({ clientId, onClose }: { clientId: string | null; onClose: () => void }) {
   const navigate = useNavigate();
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [editMode, setEditMode] = useState(false);
   const { data: detail, isLoading } = useClientDetail(clientId);
   const deleteClient = useDeleteClient();
+  const updateClient = useUpdateClient();
 
   const handleDelete = () => {
     if (clientId) {
@@ -52,7 +54,7 @@ function ClientDetailSheet({ clientId, onClose }: { clientId: string | null; onC
 
   return (
     <>
-      <Sheet open={!!clientId} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <Sheet open={!!clientId} onOpenChange={(o) => { if (!o) { onClose(); setEditMode(false); } }}>
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           {isLoading && <p className="text-sm text-muted-foreground p-6">Loading…</p>}
           {detail && (
@@ -64,15 +66,75 @@ function ClientDetailSheet({ clientId, onClose }: { clientId: string | null; onC
                     {detail.status}
                   </Badge>
                 </SheetTitle>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 text-destructive"
-                  onClick={() => setDeleteConfirm(true)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-primary hover:text-primary"
+                    onClick={() => setEditMode(!editMode)}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-destructive"
+                    onClick={() => setDeleteConfirm(true)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </SheetHeader>
+            {/* Edit mode */}
+            {editMode ? (
+              <form
+                className="mt-6 space-y-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!clientId) return;
+                  const fd = new FormData(e.currentTarget);
+                  updateClient.mutate(
+                    {
+                      id:       clientId,
+                      name:     fd.get("name") as string,
+                      company:  fd.get("company") as string,
+                      email:    (fd.get("email") as string) || undefined,
+                      phone:    (fd.get("phone") as string) || undefined,
+                      status:   (fd.get("status") as string) || "prospect",
+                      industry: (fd.get("industry") as string) || undefined,
+                      notes:    (fd.get("notes") as string) || undefined,
+                    },
+                    {
+                      onSuccess: () => { setEditMode(false); toast.success("Client updated"); },
+                      onError: (err) => toast.error(err.message),
+                    },
+                  );
+                }}
+              >
+                <div className="grid grid-cols-2 gap-4">
+                  <div><Label>Name</Label><Input name="name" defaultValue={detail.name} required className="mt-1" /></div>
+                  <div><Label>Company</Label><Input name="company" defaultValue={detail.company} required className="mt-1" /></div>
+                  <div><Label>Email</Label><Input name="email" type="email" defaultValue={detail.email ?? ""} className="mt-1" /></div>
+                  <div><Label>Phone</Label><Input name="phone" defaultValue={detail.phone ?? ""} className="mt-1" /></div>
+                  <div><Label>Industry</Label><Input name="industry" defaultValue={detail.industry ?? ""} className="mt-1" /></div>
+                  <div>
+                    <Label>Status</Label>
+                    <select name="status" defaultValue={detail.status} className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
+                      <option value="active">Active</option>
+                      <option value="prospect">Prospect</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </div>
+                </div>
+                <div><Label>Notes</Label><Textarea name="notes" rows={3} defaultValue={detail.notes ?? ""} className="mt-1" /></div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button type="button" variant="ghost" onClick={() => setEditMode(false)}>Cancel</Button>
+                  <Button type="submit" disabled={updateClient.isPending}>
+                    {updateClient.isPending ? "Saving…" : "Save Changes"}
+                  </Button>
+                </div>
+              </form>
+            ) : (
             <div className="mt-6 space-y-6">
               {/* Contact info */}
               <div className="space-y-3 text-sm">
@@ -156,6 +218,7 @@ function ClientDetailSheet({ clientId, onClose }: { clientId: string | null; onC
                 )}
               </div>
             </div>
+            )}
           </>
         )}
       </SheetContent>

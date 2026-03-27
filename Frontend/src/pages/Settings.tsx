@@ -84,7 +84,7 @@ export default function Settings() {
           <div>
             <p className="font-medium text-foreground">{currentUser?.name}</p>
             <p className="text-sm text-muted-foreground">{currentUser?.email}</p>
-            <Badge variant="outline" className={cn("text-[10px] mt-1", currentUser?.role === "admin" ? "border-primary/30 text-primary" : "")}>
+            <Badge variant="outline" className={cn("text-[10px] mt-1", currentUser?.role === "admin" ? "border-primary/40 bg-primary/10 text-primary" : "border-muted-foreground/30 bg-muted text-muted-foreground")}>
               {currentUser?.role}
             </Badge>
           </div>
@@ -195,7 +195,7 @@ export default function Settings() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <Badge variant="outline" className={cn("text-[10px]", u.role === "admin" ? "border-primary/30 text-primary" : "")}>
+                  <Badge variant="outline" className={cn("text-[10px]", u.role === "admin" ? "border-primary/40 bg-primary/10 text-primary" : "border-muted-foreground/30 bg-muted text-muted-foreground")}>
                     {u.role === "admin" ? <Shield className="h-2.5 w-2.5 mr-1 inline" /> : <User className="h-2.5 w-2.5 mr-1 inline" />}
                     {u.role}
                   </Badge>

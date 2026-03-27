@@ -45,7 +45,13 @@ export default function Dashboard() {
     <div className="space-y-6 max-w-7xl">
       <div>
         <h1 className="text-xl font-semibold text-foreground">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Welcome back, {user?.name ?? "…"}. Here's your overview.</p>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          {(() => {
+            const h = new Date().getHours();
+            const greeting = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+            return `${greeting}, ${user?.name ?? "…"}. Here's your overview.`;
+          })()}
+        </p>
       </div>
 
       {/* Stat cards */}

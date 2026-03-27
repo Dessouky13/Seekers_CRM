@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Target, Pencil, Trash2 } from "lucide-react";
+import { Plus, Target, Pencil, Trash2, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -140,6 +140,41 @@ export default function Goals() {
                     <span className="text-sm font-semibold text-primary">{g.progress_pct}%</span>
                   </div>
                   <Progress value={g.progress_pct} className="h-2" />
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      onClick={() => updateGoal.mutate({ id: g.id, current: Math.max(0, current - 1) }, {
+                        onSuccess: () => toast.success("Progress updated"),
+                        onError: (err) => toast.error(err.message),
+                      })}
+                      disabled={current <= 0}
+                      className="h-7 w-7 rounded-md border border-border bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40 transition-colors"
+                    >
+                      <Minus className="h-3 w-3" />
+                    </button>
+                    <Input
+                      type="number"
+                      value={current}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        if (!isNaN(val) && val >= 0) {
+                          updateGoal.mutate({ id: g.id, current: val }, {
+                            onError: (err) => toast.error(err.message),
+                          });
+                        }
+                      }}
+                      className="h-7 w-20 text-center text-xs"
+                      min={0}
+                    />
+                    <button
+                      onClick={() => updateGoal.mutate({ id: g.id, current: current + 1 }, {
+                        onSuccess: () => toast.success("Progress updated"),
+                        onError: (err) => toast.error(err.message),
+                      })}
+                      className="h-7 w-7 rounded-md border border-border bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  </div>
                 </div>
                 {g.owner_name && (
                   <p className="text-xs text-muted-foreground">Owner: {g.owner_name}</p>

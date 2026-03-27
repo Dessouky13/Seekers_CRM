@@ -31,12 +31,15 @@ export function useCreateClient() {
   });
 }
 
-export function useUpdateClient(id: string) {
+export function useUpdateClient() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: Record<string, unknown>) =>
+    mutationFn: ({ id, ...body }: { id: string } & Record<string, unknown>) =>
       apiFetch<ApiClient>(`/clients/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["clients"] }),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: ["clients"] });
+      qc.invalidateQueries({ queryKey: ["clients", id, "detail"] });
+    },
   });
 }
 
