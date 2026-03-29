@@ -15,8 +15,12 @@ const tasksRouter = new Hono<AppEnv>();
 // ── Projects ──────────────────────────────────────────────
 
 tasksRouter.get("/projects", authMiddleware, async (c) => {
-  const rows = await db.select().from(projects).orderBy(projects.createdAt);
-  return c.json(rows);
+  const rows = await db
+    .select({ project: projects, clientName: clients.name })
+    .from(projects)
+    .leftJoin(clients, eq(projects.clientId, clients.id))
+    .orderBy(projects.createdAt);
+  return c.json(rows.map(({ project, clientName }) => ({ ...project, client_name: clientName ?? null })));
 });
 
 tasksRouter.post("/projects", authMiddleware, async (c) => {
@@ -246,8 +250,12 @@ export default tasksRouter;
 export const projectsRouter = new Hono<AppEnv>();
 
 projectsRouter.get("/", authMiddleware, async (c) => {
-  const rows = await db.select().from(projects).orderBy(projects.createdAt);
-  return c.json(rows);
+  const rows = await db
+    .select({ project: projects, clientName: clients.name })
+    .from(projects)
+    .leftJoin(clients, eq(projects.clientId, clients.id))
+    .orderBy(projects.createdAt);
+  return c.json(rows.map(({ project, clientName }) => ({ ...project, client_name: clientName ?? null })));
 });
 
 projectsRouter.post("/", authMiddleware, async (c) => {

@@ -1,6 +1,6 @@
 // Sprint 2 — Clients endpoints
 import { Hono } from "hono";
-import { eq, ilike, or, sql, inArray } from "drizzle-orm";
+import { eq, and, ilike, or, sql, inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import { clients, projects, tasks, transactions } from "../db/schema";
 import { authMiddleware, adminOnly } from "../middleware/auth";
@@ -13,21 +13,24 @@ const clientsRouter = new Hono<AppEnv>();
 clientsRouter.get("/", authMiddleware, async (c) => {
   const { status, search } = c.req.query() as Record<string, string>;
 
-  let query = db.select().from(clients).$dynamic();
-
+  const conditions = [];
   if (status && status !== "all") {
-    query = query.where(eq(clients.status, status as "active" | "inactive" | "prospect"));
+    conditions.push(eq(clients.status, status as "active" | "inactive" | "prospect"));
   }
   if (search) {
-    query = query.where(
+    conditions.push(
       or(
-        ilike(clients.name, `%${search}%`),
+        ilike(clients.name,    `%${search}%`),
         ilike(clients.company, `%${search}%`),
-      ),
+      )!,
     );
   }
 
-  const rows = await query.orderBy(clients.createdAt);
+  const rows = await db
+    .select()
+    .from(clients)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(clients.createdAt);
 
   // Attach project count — single batch query instead of N+1
   const projectCounts = rows.length > 0

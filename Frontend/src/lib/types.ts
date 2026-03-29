@@ -64,6 +64,7 @@ export interface ApiProject {
   id: string;
   name: string;
   clientId: string | null;
+  client_name: string | null;
   createdAt: string;
 }
 
@@ -99,7 +100,9 @@ export interface ApiLead {
   name: string;
   company: string;
   email: string | null;
+  phone: string | null;
   source: string | null;
+  category: string | null;
   dealValue: string;
   stage: LeadStage;
   assigneeId: string | null;

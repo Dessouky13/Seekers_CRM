@@ -147,7 +147,9 @@ export const leads = pgTable("leads", {
   name:         text("name").notNull(),
   company:      text("company").notNull(),
   email:        text("email"),
+  phone:        text("phone"),
   source:       text("source"),
+  category:     text("category"),   // niche / industry vertical
   dealValue:    numeric("deal_value", { precision: 12, scale: 2 }).notNull().default("0"),
   stage:        text("stage", {
     enum: ["new_lead", "contacted", "call_scheduled", "proposal_sent", "negotiation", "closed_won", "closed_lost"],
@@ -158,7 +160,8 @@ export const leads = pgTable("leads", {
   createdAt:    timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt:    timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
-  stageIdx: index("idx_leads_stage").on(t.stage),
+  stageIdx:    index("idx_leads_stage").on(t.stage),
+  categoryIdx: index("idx_leads_category").on(t.category),
 }));
 
 // ── Lead Activities ───────────────────────────────────────

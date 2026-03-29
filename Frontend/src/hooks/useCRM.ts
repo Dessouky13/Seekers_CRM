@@ -2,10 +2,17 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type { ApiLead, ApiLeadDetail } from "@/lib/types";
 
-export function useLeads(params: { stage?: string; assignee_id?: string } = {}) {
+export function useLeads(params: {
+  stage?: string;
+  assignee_id?: string;
+  search?: string;
+  category?: string;
+} = {}) {
   const qs = new URLSearchParams();
-  if (params.stage)       qs.set("stage", params.stage);
+  if (params.stage)       qs.set("stage",       params.stage);
   if (params.assignee_id) qs.set("assignee_id", params.assignee_id);
+  if (params.search)      qs.set("search",      params.search);
+  if (params.category)    qs.set("category",    params.category);
   const query = qs.toString();
 
   return useQuery<ApiLead[]>({
@@ -22,12 +29,23 @@ export function useLeadDetail(id: string | null) {
   });
 }
 
+export function useLeadCategories() {
+  return useQuery<string[]>({
+    queryKey: ["lead-categories"],
+    queryFn:  () => apiFetch("/crm/categories"),
+    staleTime: 60_000,
+  });
+}
+
 export function useCreateLead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       apiFetch<ApiLead>("/crm/leads", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["lead-categories"] });
+    },
   });
 }
 

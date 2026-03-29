@@ -2,10 +2,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type { ApiTask, ApiProject, ApiUser } from "@/lib/types";
 
-export function useTasks(params?: { project_id?: string; status?: string }) {
+export function useTasks(params?: { project_id?: string; status?: string; client_id?: string }) {
   const qs = new URLSearchParams();
   if (params?.project_id) qs.set("project_id", params.project_id);
-  if (params?.status) qs.set("status", params.status);
+  if (params?.status)     qs.set("status",     params.status);
+  if (params?.client_id)  qs.set("client_id",  params.client_id);
   const query = qs.toString();
 
   return useQuery<{ data: ApiTask[] }>({
@@ -37,13 +38,21 @@ export function useCreateTask() {
   });
 }
 
+export function useCreateProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; client_id?: string }) =>
+      apiFetch<ApiProject>("/projects", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
+  });
+}
+
 export function useMoveTask() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       apiFetch(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
     onMutate: async ({ id, status }) => {
-      // Optimistic update — swap status locally before server confirms
       await qc.cancelQueries({ queryKey: ["tasks"] });
       const prev = qc.getQueriesData<{ data: ApiTask[] }>({ queryKey: ["tasks"] });
       qc.setQueriesData<{ data: ApiTask[] }>({ queryKey: ["tasks"] }, (old) =>

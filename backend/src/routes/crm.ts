@@ -1,6 +1,6 @@
 // Sprint 3 — CRM / Leads endpoints
 import { Hono } from "hono";
-import { eq, and, ne, not, inArray, sql } from "drizzle-orm";
+import { eq, and, ne, not, inArray, ilike, or, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { leads, leadActivities, profiles } from "../db/schema";
 import { authMiddleware, adminOnly } from "../middleware/auth";
@@ -18,6 +18,15 @@ crm.get("/leads", authMiddleware, async (c) => {
   const conditions = [];
   if (q.stage)       conditions.push(eq(leads.stage, q.stage as any));
   if (q.assignee_id) conditions.push(eq(leads.assigneeId, q.assignee_id));
+  if (q.category)    conditions.push(eq(leads.category, q.category));
+  if (q.search) {
+    conditions.push(
+      or(
+        ilike(leads.name,    `%${q.search}%`),
+        ilike(leads.company, `%${q.search}%`),
+      )!,
+    );
+  }
 
   const rows = await db
     .select({
@@ -45,11 +54,13 @@ crm.post("/leads", authMiddleware, async (c) => {
     .values({
       name:       body.name,
       company:    body.company,
-      email:      body.email   || null,
-      source:     body.source  || null,
+      email:      body.email    || null,
+      phone:      body.phone    || null,
+      source:     body.source   || null,
+      category:   body.category || null,
       dealValue:  body.deal_value ? String(body.deal_value) : "0",
       assigneeId: body.assignee_id ?? user.id,
-      notes:      body.notes   ?? null,
+      notes:      body.notes    ?? null,
     })
     .returning();
 
@@ -121,12 +132,19 @@ crm.patch("/leads/:id", authMiddleware, async (c) => {
   const [updated] = await db
     .update(leads)
     .set({
-      ...body,
-      dealValue:  body.deal_value ? String(body.deal_value) : undefined,
-      assigneeId: body.assignee_id ?? undefined,
+      name:         body.name        ?? existing.name,
+      company:      body.company     ?? existing.company,
+      email:        body.email       !== undefined ? (body.email || null) : existing.email,
+      phone:        body.phone       !== undefined ? (body.phone || null) : existing.phone,
+      source:       body.source      !== undefined ? (body.source || null) : existing.source,
+      category:     body.category    !== undefined ? (body.category || null) : existing.category,
+      dealValue:    body.deal_value  !== undefined ? String(body.deal_value) : existing.dealValue,
+      stage:        (body.stage      ?? existing.stage) as any,
+      assigneeId:   body.assignee_id !== undefined ? (body.assignee_id || null) : existing.assigneeId,
+      notes:        body.notes       !== undefined ? (body.notes || null) : existing.notes,
       lastActivity: stageChanged ? new Date().toISOString().slice(0, 10) : existing.lastActivity,
-      updatedAt: new Date(),
-    } as any)
+      updatedAt:    new Date(),
+    })
     .where(eq(leads.id, id))
     .returning();
 
@@ -173,13 +191,21 @@ crm.post("/leads/:id/activities", authMiddleware, async (c) => {
     })
     .returning();
 
-  // Update lastActivity on lead
   await db
     .update(leads)
     .set({ lastActivity: activity.date, updatedAt: new Date() })
     .where(eq(leads.id, leadId));
 
   return c.json(activity, 201);
+});
+
+// GET /crm/categories — distinct categories in use
+crm.get("/categories", authMiddleware, async (c) => {
+  const rows = await db
+    .selectDistinct({ category: leads.category })
+    .from(leads)
+    .where(sql`${leads.category} IS NOT NULL`);
+  return c.json(rows.map((r) => r.category).filter(Boolean));
 });
 
 // GET /crm/pipeline-summary
@@ -196,8 +222,8 @@ crm.get("/pipeline-summary", authMiddleware, async (c) => {
 
   const rows = await db
     .select({
-      stage: leads.stage,
-      count: sql<number>`COUNT(*)::int`,
+      stage:       leads.stage,
+      count:       sql<number>`COUNT(*)::int`,
       total_value: sql<number>`SUM(deal_value::numeric)`,
     })
     .from(leads)
