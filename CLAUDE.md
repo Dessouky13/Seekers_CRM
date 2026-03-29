@@ -1,12 +1,12 @@
 # CLAUDE.md — AI Agency OS Backend Build Guide
 ## Project: Seekers AI Internal Operations Platform
-## Version: 2.1 — Self-Hosted Stack (VPS + Vercel, Zero External Paid Services)
+## Version: 2.2 — Self-Hosted Stack (VPS + Vercel, Zero External Paid Services)
 
 ---
 
-### BUILD STATUS (Last updated: 2026-03-21)
+### BUILD STATUS (Last updated: 2026-03-29)
 
-All 6 sprints are **complete**. The full-stack app is wired — no mock-data anywhere.
+All 6 sprints are **complete** + post-sprint improvements applied.
 
 #### ✅ Completed
 - **Sprint 1** — Backend foundation: Hono API, JWT auth, all middleware, `/health`, DB schema, Drizzle migrations, seed script
@@ -15,6 +15,10 @@ All 6 sprints are **complete**. The full-stack app is wired — no mock-data any
 - **Sprint 4** — Dashboard KPI summary (parallel queries); Goals CRUD page — frontend wired
 - **Sprint 5** — Knowledge Base: document upload, BullMQ embedding queue, RAG query (Agency Brain) — frontend wired
 - **Sprint 6** — Notifications (bell in Topbar), Settings page (team management + user invite)
+- **Post-Sprint 7** — CRM + Tasks major upgrade (2026-03-29):
+  - **CRM**: phone + category/niche fields on leads; search bar (name/company ilike); category + stage filters; kanban/list view toggle; lead deduplication; activity timeline newest-first; category badges on cards; "Convert to Client" button for closed_won leads; GET /crm/categories endpoint
+  - **Tasks**: client filter; "New Project" dialog with client association; projects return `client_name`; project dropdowns show client name; task cards show project + client; list view adds Client column
+  - **Bug fixes**: `clients.ts` search+status double-where override (missing `and()`); leads PATCH uses explicit field mapping
 
 #### ⚠️ Windows Dev Environment Notes
 - **PostgreSQL 18** (service `postgresql-x64-18`, port 5432, password `seekers2026`)
@@ -25,6 +29,8 @@ All 6 sprints are **complete**. The full-stack app is wired — no mock-data any
 
 #### Known SQL Fix Applied
 - `finance.ts` and `dashboard.ts` had `::text` cast on date arithmetic causing `operator does not exist: date >= text` on PG18. Fixed to use `sql\`${transactions.date} >= (CURRENT_DATE - INTERVAL '5 months')\``
+- `clients.ts` GET search+status filters: calling `.where()` twice on a `$dynamic()` query overrides the first clause. Fixed to use `and(...conditions)` pattern (same as crm.ts and tasks.ts).
+- **Local schema migration**: `drizzle-kit push:pg` fails on Windows PG18 when `embedding` column tries to change to `vector` type. New columns (e.g. `phone`, `category`) must be added manually via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` or direct SQL.
 
 #### Frontend Structure
 ```
