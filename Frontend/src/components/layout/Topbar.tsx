@@ -8,7 +8,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useCurrentUser, useLogout } from "@/hooks/useAuth";
-import { useNotifications, useMarkAllRead, useDeleteNotification } from "@/hooks/useNotifications";
+import { useNotifications, useMarkAllRead, useDeleteNotification, useMarkRead } from "@/hooks/useNotifications";
 import { cn } from "@/lib/utils";
 
 export function Topbar() {
@@ -21,6 +21,7 @@ export function Topbar() {
 
   const { data: notifications = [] } = useNotifications();
   const markAllRead = useMarkAllRead();
+  const markRead = useMarkRead();
   const deleteNotif = useDeleteNotification();
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -138,11 +139,17 @@ export function Topbar() {
             ) : (
               notifications.slice(0, 20).map((n) => (
                 <div key={n.id} className={cn("px-3 py-2.5 border-b border-border/50 hover:bg-muted/30 flex items-start justify-between gap-2", !n.read && "bg-primary/5")}>
-                  <div className="flex-1 min-w-0">
+                  <button
+                    onClick={() => {
+                      if (!n.read) markRead.mutate({ id: n.id, read: true });
+                      if (n.link) navigate(n.link);
+                    }}
+                    className="flex-1 min-w-0 text-left"
+                  >
                     <p className={cn("text-xs font-medium truncate", !n.read && "text-foreground")}>{n.title}</p>
                     {n.body && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>}
                     <p className="text-[10px] text-muted-foreground mt-1">{n.createdAt.slice(0, 10)}</p>
-                  </div>
+                  </button>
                   <button onClick={() => deleteNotif.mutate(n.id)} className="shrink-0 p-0.5 text-muted-foreground hover:text-destructive">
                     <Trash2 className="h-3 w-3" />
                   </button>

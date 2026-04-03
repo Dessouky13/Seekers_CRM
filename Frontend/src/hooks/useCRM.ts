@@ -2,17 +2,28 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type { ApiLead, ApiLeadDetail } from "@/lib/types";
 
+export interface CrmInsights {
+  period: { from: string; to: string; granularity: string };
+  outreach_per_day: { date: string; count: number }[];
+  niches_contacted: { niche: string; count: number }[];
+  message_summary: string | null;
+  suggestions: string[];
+  response_rate: { sent: number; replied: number; percentage: number };
+}
+
 export function useLeads(params: {
   stage?: string;
   assignee_id?: string;
   search?: string;
   category?: string;
+  limit?: number;
 } = {}) {
   const qs = new URLSearchParams();
   if (params.stage)       qs.set("stage",       params.stage);
   if (params.assignee_id) qs.set("assignee_id", params.assignee_id);
   if (params.search)      qs.set("search",      params.search);
   if (params.category)    qs.set("category",    params.category);
+  if (params.limit)       qs.set("limit",       String(params.limit));
   const query = qs.toString();
 
   return useQuery<ApiLead[]>({
@@ -97,6 +108,25 @@ export function useStaleLeads() {
   return useQuery<ApiLead[]>({
     queryKey: ["stale-leads"],
     queryFn:  () => apiFetch("/crm/stale-leads"),
+    staleTime: 60_000,
+  });
+}
+
+export function useCrmInsights(params: {
+  period?: "daily" | "weekly" | "monthly";
+  from?: string;
+  to?: string;
+  include_ai?: boolean;
+} = {}) {
+  const qs = new URLSearchParams();
+  if (params.period) qs.set("period", params.period);
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  if (params.include_ai) qs.set("include_ai", "true");
+
+  return useQuery<CrmInsights>({
+    queryKey: ["crm-insights", params],
+    queryFn: () => apiFetch(`/crm/insights${qs.toString() ? `?${qs.toString()}` : ""}`),
     staleTime: 60_000,
   });
 }

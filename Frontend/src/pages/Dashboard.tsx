@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import { StatCard } from "@/components/modules/StatCard";
 import { Progress } from "@/components/ui/progress";
 import { useDashboardSummary } from "@/hooks/useDashboard";
-import { useStaleLeads } from "@/hooks/useCRM";
+import { useCrmInsights, useStaleLeads } from "@/hooks/useCRM";
 import { useCurrentUser } from "@/hooks/useAuth";
 
 const COLORS = ["hsl(246,90%,60%)", "hsl(255,40%,72%)", "hsl(152,60%,45%)", "hsl(38,92%,55%)", "hsl(0,72%,55%)"];
@@ -20,6 +20,7 @@ export default function Dashboard() {
   const user    = useCurrentUser();
   const { data, isLoading } = useDashboardSummary();
   const { data: staleLeads = [] } = useStaleLeads();
+  const { data: insights } = useCrmInsights({ period: "weekly", include_ai: true });
 
   const income      = data?.finance.total_income   ?? 0;
   const expenses    = data?.finance.total_expenses ?? 0;
@@ -200,6 +201,48 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-5 animate-fade-in" style={{ animationDelay: "450ms" }}>
+        <h2 className="text-sm font-semibold text-foreground mb-3">Outreach Insights (7d)</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="rounded-lg bg-muted/30 p-3">
+            <p className="text-xs text-muted-foreground">Response Rate</p>
+            <p className="text-lg font-semibold text-foreground">{insights?.response_rate.percentage ?? 0}%</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {insights?.response_rate.replied ?? 0} replied / {insights?.response_rate.sent ?? 0} sent
+            </p>
+          </div>
+          <div className="rounded-lg bg-muted/30 p-3 md:col-span-2">
+            <p className="text-xs text-muted-foreground mb-2">Top Niches Contacted</p>
+            <div className="flex flex-wrap gap-2">
+              {(insights?.niches_contacted ?? []).slice(0, 6).map((niche) => (
+                <span key={niche.niche} className="text-xs px-2 py-1 rounded-full bg-primary/10 text-primary">
+                  {niche.niche} ({niche.count})
+                </span>
+              ))}
+              {(insights?.niches_contacted?.length ?? 0) === 0 && (
+                <span className="text-xs text-muted-foreground">No outreach activity in selected period</span>
+              )}
+            </div>
+          </div>
+        </div>
+        {insights?.message_summary && (
+          <div className="mt-4 rounded-lg border border-border bg-muted/20 p-3">
+            <p className="text-xs text-muted-foreground mb-1">Message Summary</p>
+            <p className="text-sm text-foreground whitespace-pre-line">{insights.message_summary}</p>
+          </div>
+        )}
+        {insights?.suggestions?.length ? (
+          <div className="mt-3">
+            <p className="text-xs text-muted-foreground mb-1">Suggestions</p>
+            <ul className="space-y-1">
+              {insights.suggestions.map((suggestion) => (
+                <li key={suggestion} className="text-sm text-foreground">• {suggestion}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
     </div>
   );

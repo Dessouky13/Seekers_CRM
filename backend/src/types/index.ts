@@ -11,8 +11,10 @@ import type {
   kbDocuments,
   kbChunks,
   notifications,
+  notificationEvents,
   refreshTokens,
   teamInvites,
+  vaultCategories,
 } from "../db/schema";
 
 // ── Drizzle inferred types ────────────────────────────────
@@ -52,6 +54,12 @@ export type NewKbChunk      = typeof kbChunks.$inferInsert;
 
 export type Notification    = typeof notifications.$inferSelect;
 export type NewNotification = typeof notifications.$inferInsert;
+
+export type NotificationEvent    = typeof notificationEvents.$inferSelect;
+export type NewNotificationEvent = typeof notificationEvents.$inferInsert;
+
+export type VaultCategory    = typeof vaultCategories.$inferSelect;
+export type NewVaultCategory = typeof vaultCategories.$inferInsert;
 
 export type RefreshToken    = typeof refreshTokens.$inferSelect;
 export type TeamInvite      = typeof teamInvites.$inferSelect;

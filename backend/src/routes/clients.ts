@@ -79,14 +79,27 @@ clientsRouter.get("/:id", authMiddleware, async (c) => {
     db.select({ id: projects.id, name: projects.name }).from(projects).where(eq(projects.clientId, id)),
     db.select().from(tasks).where(eq(tasks.clientId, id)).orderBy(tasks.createdAt),
     db.select().from(transactions).where(eq(transactions.clientId, id))
-      .orderBy(sql`${transactions.date} DESC`).limit(5),
+      .orderBy(sql`${transactions.date} DESC`).limit(20),
   ]);
+
+  const [feeSummary] = await db
+    .select({
+      total_income: sql<number>`SUM(CASE WHEN ${transactions.type} = 'income' THEN ${transactions.amount}::numeric ELSE 0 END)`,
+      total_expense: sql<number>`SUM(CASE WHEN ${transactions.type} = 'expense' THEN ${transactions.amount}::numeric ELSE 0 END)`,
+    })
+    .from(transactions)
+    .where(eq(transactions.clientId, id));
 
   return c.json({
     ...client,
     projects:             clientProjects,
     tasks:                clientTasks,
     recent_transactions:  recentTransactions,
+    fee_summary: {
+      total_income: Number(feeSummary?.total_income ?? 0),
+      total_expense: Number(feeSummary?.total_expense ?? 0),
+      net: Number(feeSummary?.total_income ?? 0) - Number(feeSummary?.total_expense ?? 0),
+    },
   });
 });
 

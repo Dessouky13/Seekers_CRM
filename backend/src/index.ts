@@ -15,6 +15,7 @@ import knowledgeRouter    from "./routes/knowledge";
 import notificationsRouter from "./routes/notifications";
 import notesRouter         from "./routes/notes";
 import vaultRouter         from "./routes/vault";
+import { runStaleLeadNotificationSweep } from "./services/notifications";
 import type { AppEnv } from "./types";
 
 const app = new Hono<AppEnv>();
@@ -61,5 +62,17 @@ serve({ fetch: app.fetch, port }, () => {
   console.log(`   API:    http://localhost:${port}/api/v1`);
   console.log(`   Mode:   ${process.env.NODE_ENV ?? "development"}`);
 });
+
+const staleLeadSweepMinutes = Number(process.env.STALE_LEAD_SWEEP_MINUTES ?? 10);
+setInterval(async () => {
+  try {
+    const count = await runStaleLeadNotificationSweep(Number(process.env.LEAD_NO_RESPONSE_HOURS ?? 48));
+    if (count > 0) {
+      console.log(`[notifications] stale lead sweep processed ${count} leads`);
+    }
+  } catch (error) {
+    console.error("[notifications] stale lead sweep failed", error);
+  }
+}, Math.max(1, staleLeadSweepMinutes) * 60_000);
 
 export default app;

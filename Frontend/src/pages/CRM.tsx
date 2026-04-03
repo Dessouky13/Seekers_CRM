@@ -23,6 +23,7 @@ import {
   useLeads, useLeadDetail, useCreateLead, useUpdateLead, useDeleteLead,
   useAddLeadActivity, useLeadCategories,
 } from "@/hooks/useCRM";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useUsers } from "@/hooks/useTasks";
 import { useCreateClient } from "@/hooks/useClients";
 import { cn } from "@/lib/utils";
@@ -347,11 +348,13 @@ export default function CRM() {
   const [search,      setSearch]      = useState("");
   const [catFilter,   setCatFilter]   = useState("");
   const [stageFilter, setStageFilter] = useState("");
+  const debouncedSearch = useDebouncedValue(search.trim(), 350);
 
   const { data: rawLeads = [], isLoading } = useLeads({
-    search:   search   || undefined,
+    search:   debouncedSearch || undefined,
     category: catFilter || undefined,
     stage:    stageFilter || undefined,
+    limit:    100,
   });
 
   const { data: users    = [] } = useUsers();

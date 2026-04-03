@@ -139,6 +139,7 @@ export const transactions = pgTable("transactions", {
 }, (t) => ({
   dateIdx: index("idx_transactions_date").on(t.date),
   typeIdx: index("idx_transactions_type").on(t.type),
+  clientIdx: index("idx_transactions_client").on(t.clientId),
 }));
 
 // ── Leads ─────────────────────────────────────────────────
@@ -162,6 +163,8 @@ export const leads = pgTable("leads", {
 }, (t) => ({
   stageIdx:    index("idx_leads_stage").on(t.stage),
   categoryIdx: index("idx_leads_category").on(t.category),
+  nameIdx:     index("idx_leads_name").on(t.name),
+  companyIdx:  index("idx_leads_company").on(t.company),
 }));
 
 // ── Lead Activities ───────────────────────────────────────
@@ -235,6 +238,16 @@ export const notifications = pgTable("notifications", {
   userIdx: index("idx_notifications_user").on(t.userId, t.read, t.createdAt),
 }));
 
+// ── Notification Events (dedupe/idempotency) ─────────────
+export const notificationEvents = pgTable("notification_events", {
+  id:        uuid("id").primaryKey().defaultRandom(),
+  userId:    uuid("user_id").notNull().references(() => profiles.id, { onDelete: "cascade" }),
+  eventKey:  text("event_key").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  userEventIdx: index("idx_notification_events_user_event").on(t.userId, t.eventKey),
+}));
+
 // ── Team Notes (personal notepad per user) ────────────────
 export const teamNotes = pgTable("team_notes", {
   id:        uuid("id").primaryKey().defaultRandom(),
@@ -266,3 +279,15 @@ export const vaultEntries = pgTable("vault_entries", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ── Vault Categories (dynamic, team-managed) ─────────────
+export const vaultCategories = pgTable("vault_categories", {
+  id:        uuid("id").primaryKey().defaultRandom(),
+  name:      text("name").notNull().unique(),
+  isActive:  boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(100),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  activeSortIdx: index("idx_vault_categories_active_sort").on(t.isActive, t.sortOrder),
+}));

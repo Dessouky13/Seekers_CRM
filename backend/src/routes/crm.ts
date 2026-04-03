@@ -1,12 +1,14 @@
 // Sprint 3 — CRM / Leads endpoints
 import { Hono } from "hono";
-import { eq, and, ne, not, inArray, ilike, or, sql } from "drizzle-orm";
+import { eq, and, not, inArray, ilike, or, sql, gte } from "drizzle-orm";
 import { db } from "../db/client";
 import { leads, leadActivities, profiles } from "../db/schema";
 import { authMiddleware, adminOnly } from "../middleware/auth";
 import {
   createLeadSchema, updateLeadSchema, createLeadActivitySchema,
+  crmInsightsQuerySchema,
 } from "../utils/validators";
+import { getOpenAIClient } from "../services/openai";
 import type { AppEnv } from "../types";
 
 const crm = new Hono<AppEnv>();
@@ -14,16 +16,19 @@ const crm = new Hono<AppEnv>();
 // GET /crm/leads
 crm.get("/leads", authMiddleware, async (c) => {
   const q = c.req.query() as Record<string, string>;
+  const rawLimit = Number(q.limit ?? 50);
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 200)) : 50;
+  const search = q.search?.trim();
 
   const conditions = [];
   if (q.stage)       conditions.push(eq(leads.stage, q.stage as any));
   if (q.assignee_id) conditions.push(eq(leads.assigneeId, q.assignee_id));
   if (q.category)    conditions.push(eq(leads.category, q.category));
-  if (q.search) {
+  if (search) {
     conditions.push(
       or(
-        ilike(leads.name,    `%${q.search}%`),
-        ilike(leads.company, `%${q.search}%`),
+        ilike(leads.name,    `%${search}%`),
+        ilike(leads.company, `%${search}%`),
       )!,
     );
   }
@@ -36,7 +41,8 @@ crm.get("/leads", authMiddleware, async (c) => {
     .from(leads)
     .leftJoin(profiles, eq(leads.assigneeId, profiles.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(sql`${leads.updatedAt} DESC`);
+    .orderBy(sql`${leads.updatedAt} DESC`)
+    .limit(limit);
 
   return c.json(rows.map(({ lead, assigneeName }) => ({
     ...lead,
@@ -238,6 +244,135 @@ crm.get("/pipeline-summary", authMiddleware, async (c) => {
       total_value: Number(r.total_value ?? 0),
     })),
   );
+});
+
+// GET /crm/insights — outreach analytics + optional AI summary
+crm.get("/insights", authMiddleware, async (c) => {
+  const parsed = crmInsightsQuerySchema.parse(c.req.query());
+  const to = parsed.to ?? new Date().toISOString().slice(0, 10);
+
+  const defaultFrom = (() => {
+    const now = new Date();
+    if (parsed.period === "weekly") {
+      now.setDate(now.getDate() - 7);
+    } else if (parsed.period === "monthly") {
+      now.setDate(now.getDate() - 30);
+    } else {
+      now.setDate(now.getDate() - 14);
+    }
+    return now.toISOString().slice(0, 10);
+  })();
+
+  const from = parsed.from ?? defaultFrom;
+
+  const outreachPerDay = await db
+    .select({
+      date: leadActivities.date,
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(leadActivities)
+    .where(and(
+      gte(leadActivities.date, from),
+      sql`${leadActivities.date} <= ${to}`,
+      inArray(leadActivities.type, ["email", "call", "meeting", "form"]),
+    ))
+    .groupBy(leadActivities.date)
+    .orderBy(leadActivities.date);
+
+  const nichesContacted = await db
+    .select({
+      niche: leads.category,
+      count: sql<number>`COUNT(DISTINCT ${leads.id})::int`,
+    })
+    .from(leads)
+    .leftJoin(leadActivities, eq(leadActivities.leadId, leads.id))
+    .where(and(
+      sql`${leads.category} IS NOT NULL`,
+      gte(leadActivities.date, from),
+      sql`${leadActivities.date} <= ${to}`,
+      inArray(leadActivities.type, ["email", "call", "meeting", "form"]),
+    ))
+    .groupBy(leads.category)
+    .orderBy(sql`COUNT(DISTINCT ${leads.id}) DESC`);
+
+  const [{ sent_count }] = await db
+    .select({ sent_count: sql<number>`COUNT(*)::int` })
+    .from(leadActivities)
+    .where(and(
+      gte(leadActivities.date, from),
+      sql`${leadActivities.date} <= ${to}`,
+      inArray(leadActivities.type, ["email", "call", "form"]),
+    ));
+
+  const [{ replied_count }] = await db
+    .select({ replied_count: sql<number>`COUNT(*)::int` })
+    .from(leads)
+    .where(and(
+      inArray(leads.stage, ["call_scheduled", "proposal_sent", "negotiation", "closed_won"]),
+      sql`${leads.updatedAt}::date >= ${from}`,
+      sql`${leads.updatedAt}::date <= ${to}`,
+    ));
+
+  const sent = Number(sent_count ?? 0);
+  const replied = Number(replied_count ?? 0);
+  const responseRate = sent > 0 ? Math.min(100, Math.round((replied / sent) * 100)) : 0;
+
+  let messageSummary: string | null = null;
+  let suggestions: string[] = [];
+
+  if (parsed.include_ai === "true" && process.env.OPENAI_API_KEY) {
+    const sampleMessages = await db
+      .select({ description: leadActivities.description })
+      .from(leadActivities)
+      .where(and(
+        gte(leadActivities.date, from),
+        sql`${leadActivities.date} <= ${to}`,
+        inArray(leadActivities.type, ["email", "call", "meeting", "form"]),
+      ))
+      .orderBy(sql`${leadActivities.createdAt} DESC`)
+      .limit(50);
+
+    if (sampleMessages.length > 0) {
+      const openai = getOpenAIClient();
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        temperature: 0.3,
+        messages: [
+          {
+            role: "system",
+            content: "You are a CRM outreach analyst. Return concise operational output only.",
+          },
+          {
+            role: "user",
+            content: `Summarize outreach quality and provide 3 practical message-improvement suggestions.\n\nOutreach notes:\n${sampleMessages.map((m) => `- ${m.description}`).join("\n")}`,
+          },
+        ],
+      });
+
+      const raw = completion.choices[0]?.message?.content?.trim() ?? "";
+      messageSummary = raw || null;
+      suggestions = raw
+        .split("\n")
+        .map((line) => line.replace(/^[-\d.)\s]+/, "").trim())
+        .filter(Boolean)
+        .slice(0, 3);
+    }
+  }
+
+  return c.json({
+    period: { from, to, granularity: parsed.period ?? "daily" },
+    outreach_per_day: outreachPerDay,
+    niches_contacted: nichesContacted
+      .filter((row) => row.niche)
+      .map((row) => ({ niche: row.niche, count: row.count })),
+    message_summary: messageSummary,
+    suggestions,
+    response_rate: {
+      sent,
+      replied,
+      percentage: responseRate,
+    },
+  });
 });
 
 export default crm;

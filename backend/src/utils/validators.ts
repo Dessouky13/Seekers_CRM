@@ -153,4 +153,22 @@ export const ragQuerySchema = z.object({
 
 // ── Notifications ─────────────────────────────────────────
 
-// (no request body schemas needed — only query params)
+export const externalNotificationSchema = z.object({
+  user_id: z.string().uuid().optional(),
+  target: z.enum(["all", "admins", "members"]).optional(),
+  type: z.string().min(1).max(100),
+  title: z.string().min(1).max(200),
+  message: z.string().min(1).max(1000),
+  link: z.string().max(300).optional(),
+}).refine((value) => value.user_id || value.target, {
+  message: "Either user_id or target is required",
+});
+
+// ── CRM Insights ─────────────────────────────────────────
+
+export const crmInsightsQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  period: z.enum(["daily", "weekly", "monthly"]).optional(),
+  include_ai: z.enum(["true", "false"]).optional(),
+});

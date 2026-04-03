@@ -24,8 +24,6 @@ interface VaultEntry {
   createdAt: string;
 }
 
-const CATEGORIES = ["General", "Social Media", "Email", "Hosting", "Tools", "Clients", "Finance", "Other"];
-
 function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -55,10 +53,12 @@ function PasswordCell({ password }: { password: string }) {
 
 function EntryForm({
   initial,
+  categories,
   onSubmit,
   isPending,
 }: {
   initial?: Partial<VaultEntry>;
+  categories: string[];
   onSubmit: (data: Record<string, string>) => void;
   isPending: boolean;
 }) {
@@ -84,7 +84,7 @@ function EntryForm({
         <div>
           <Label>Category</Label>
           <select name="category" defaultValue={initial?.category ?? "General"} className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
-            {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
       </div>
@@ -107,10 +107,17 @@ export default function Vault() {
   const [editEntry, setEditEntry]   = useState<VaultEntry | null>(null);
   const [deleteId, setDeleteId]     = useState<string | null>(null);
   const [catFilter, setCatFilter]   = useState("All");
+  const [newCategory, setNewCategory] = useState("");
 
   const { data: entries = [], isLoading } = useQuery<VaultEntry[]>({
     queryKey: ["vault"],
     queryFn:  () => apiFetch("/vault"),
+  });
+
+  const { data: categoryOptions = [] } = useQuery<string[]>({
+    queryKey: ["vault-categories"],
+    queryFn: () => apiFetch("/vault/categories"),
+    staleTime: 60_000,
   });
 
   const create = useMutation({
@@ -133,6 +140,23 @@ export default function Vault() {
     onError:   (err) => toast.error(err.message),
   });
 
+  const createCategory = useMutation({
+    mutationFn: (name: string) => apiFetch("/vault/categories", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["vault-categories"] });
+      setNewCategory("");
+      toast.success("Category added");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const effectiveCategoryOptions = categoryOptions.length > 0
+    ? categoryOptions
+    : ["General", "API", "Other"];
+
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>, isEdit = false) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
@@ -142,7 +166,7 @@ export default function Vault() {
     else create.mutate(data);
   };
 
-  const categories = ["All", ...Array.from(new Set(entries.map((e) => e.category)))];
+  const categories = ["All", ...Array.from(new Set([...effectiveCategoryOptions, ...entries.map((e) => e.category)]))];
   const filtered = catFilter === "All" ? entries : entries.filter((e) => e.category === catFilter);
   const deleteTarget = entries.find((e) => e.id === deleteId);
 
@@ -164,11 +188,30 @@ export default function Vault() {
           <DialogContent>
             <DialogHeader><DialogTitle>Add Vault Entry</DialogTitle></DialogHeader>
             <form onSubmit={(e) => handleSubmit(e)}>
-              <EntryForm onSubmit={() => {}} isPending={create.isPending} />
+              <EntryForm categories={effectiveCategoryOptions} onSubmit={() => {}} isPending={create.isPending} />
             </form>
           </DialogContent>
         </Dialog>
       </div>
+
+      {currentUser?.role === "admin" && (
+        <div className="flex items-center gap-2">
+          <Input
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            placeholder="Add vault category"
+            className="h-8 w-56"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!newCategory.trim() || createCategory.isPending}
+            onClick={() => createCategory.mutate(newCategory.trim())}
+          >
+            Add Category
+          </Button>
+        </div>
+      )}
 
       {/* Category filter tabs */}
       <div className="flex gap-2 flex-wrap">
@@ -257,7 +300,7 @@ export default function Vault() {
           <DialogHeader><DialogTitle>Edit Entry</DialogTitle></DialogHeader>
           {editEntry && (
             <form onSubmit={(e) => handleSubmit(e, true)}>
-              <EntryForm initial={editEntry} onSubmit={() => {}} isPending={update.isPending} />
+              <EntryForm initial={editEntry} categories={effectiveCategoryOptions} onSubmit={() => {}} isPending={update.isPending} />
             </form>
           )}
         </DialogContent>

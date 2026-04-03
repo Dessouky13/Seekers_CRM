@@ -4,6 +4,7 @@ import { eq, and, sql, inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import { tasks, subtasks, projects, profiles, clients } from "../db/schema";
 import { authMiddleware } from "../middleware/auth";
+import { notifyTaskAssigned } from "../services/notifications";
 import {
   createTaskSchema, updateTaskSchema,
   createSubtaskSchema, createProjectSchema,
@@ -111,6 +112,15 @@ tasksRouter.post("/", authMiddleware, async (c) => {
     })
     .returning();
 
+  if (task.assigneeId && task.assigneeId !== user.id) {
+    await notifyTaskAssigned({
+      taskId: task.id,
+      assigneeId: task.assigneeId,
+      taskTitle: task.title,
+      assignedByName: user.name,
+    });
+  }
+
   return c.json({ ...task, subtasks: [] }, 201);
 });
 
@@ -152,7 +162,16 @@ tasksRouter.get("/:id", authMiddleware, async (c) => {
 // PATCH /tasks/:id
 tasksRouter.patch("/:id", authMiddleware, async (c) => {
   const id   = c.req.param("id");
+  const user = c.get("user");
   const body = updateTaskSchema.parse(await c.req.json());
+
+  const [existing] = await db
+    .select({ id: tasks.id, assigneeId: tasks.assigneeId, title: tasks.title })
+    .from(tasks)
+    .where(eq(tasks.id, id))
+    .limit(1);
+
+  if (!existing) return c.json({ error: "Task not found" }, 404);
 
   // When status → done, record completedAt
   const completedAt =
@@ -180,7 +199,16 @@ tasksRouter.patch("/:id", authMiddleware, async (c) => {
     .where(eq(tasks.id, id))
     .returning();
 
-  if (!updated) return c.json({ error: "Task not found" }, 404);
+  const assigneeChanged = existing.assigneeId !== updated.assigneeId;
+  if (assigneeChanged && updated.assigneeId && updated.assigneeId !== user.id) {
+    await notifyTaskAssigned({
+      taskId: updated.id,
+      assigneeId: updated.assigneeId,
+      taskTitle: updated.title,
+      assignedByName: user.name,
+    });
+  }
+
   return c.json(updated);
 });
 

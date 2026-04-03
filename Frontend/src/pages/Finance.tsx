@@ -14,6 +14,7 @@ import {
   useTransactions, useFinanceSummary, useCategories,
   useCreateTransaction, useUpdateTransaction, useDeleteTransaction,
 } from "@/hooks/useFinance";
+import { useClients } from "@/hooks/useClients";
 import { cn } from "@/lib/utils";
 import type { ApiTransaction } from "@/lib/types";
 
@@ -92,6 +93,7 @@ export default function Finance() {
   });
   const { data: summary } = useFinanceSummary({ from: fromDate || undefined, to: toDate || undefined });
   const { data: categories = [] } = useCategories();
+  const { data: clients = [] } = useClients();
 
   const createTx = useCreateTransaction();
   const updateTx = useUpdateTransaction();
@@ -113,7 +115,7 @@ export default function Finance() {
       type:        fd.get("type") as string,
       amount:      Number(fd.get("amount")),
       category:    fd.get("category") as string,
-      client_name: (fd.get("client_name") as string) || undefined,
+      client_id:   (fd.get("client_id") as string) || undefined,
       status:      "completed",
       notes:       (fd.get("notes") as string) || undefined,
     };
@@ -175,7 +177,19 @@ export default function Finance() {
                   <datalist id="cat-list">{allCats.map((c) => <option key={c} value={c} />)}</datalist>
                 </div>
               </div>
-              <div><Label>Client (optional)</Label><Input name="client_name" defaultValue={editTx?.clientName ?? undefined} className="mt-1" /></div>
+              <div>
+                <Label>Client (optional)</Label>
+                <select
+                  name="client_id"
+                  defaultValue={editTx?.clientId ?? ""}
+                  className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">Unassigned</option>
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>{client.name} · {client.company}</option>
+                  ))}
+                </select>
+              </div>
               <div><Label>Notes</Label><Textarea name="notes" defaultValue={editTx?.notes ?? undefined} rows={2} className="mt-1" /></div>
               <DialogFooter>
                 <DialogClose asChild><Button variant="ghost" type="button">Cancel</Button></DialogClose>

@@ -2,13 +2,31 @@
 import { Hono } from "hono";
 import { eq, and, gte, lte, sql, count } from "drizzle-orm";
 import { db } from "../db/client";
-import { transactions } from "../db/schema";
+import { transactions, clients } from "../db/schema";
 import { authMiddleware } from "../middleware/auth";
 import { createTransactionSchema, updateTransactionSchema } from "../utils/validators";
 import { parsePagination, paginate } from "../utils/pagination";
 import type { AppEnv } from "../types";
 
 const finance = new Hono<AppEnv>();
+
+async function resolveClient(clientId?: string | null, clientName?: string | null) {
+  if (!clientId) {
+    return { clientId: null as string | null, clientName: clientName ?? null };
+  }
+
+  const [client] = await db
+    .select({ id: clients.id, name: clients.name })
+    .from(clients)
+    .where(eq(clients.id, clientId))
+    .limit(1);
+
+  if (!client) {
+    throw new Error("Invalid client_id");
+  }
+
+  return { clientId: client.id, clientName: client.name };
+}
 
 // GET /finance/transactions
 finance.get("/transactions", authMiddleware, async (c) => {
@@ -24,7 +42,9 @@ finance.get("/transactions", authMiddleware, async (c) => {
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
   const [rows, [{ total }]] = await Promise.all([
-    db.select().from(transactions)
+    db.select({ tx: transactions, resolvedClientName: clients.name })
+      .from(transactions)
+      .leftJoin(clients, eq(transactions.clientId, clients.id))
       .where(where)
       .orderBy(sql`${transactions.date} DESC`)
       .limit(limit)
@@ -32,13 +52,30 @@ finance.get("/transactions", authMiddleware, async (c) => {
     db.select({ total: count() }).from(transactions).where(where),
   ]);
 
-  return c.json(paginate(rows, total, page, limit));
+  return c.json(
+    paginate(
+      rows.map(({ tx, resolvedClientName }) => ({
+        ...tx,
+        clientName: resolvedClientName ?? tx.clientName,
+      })),
+      total,
+      page,
+      limit,
+    ),
+  );
 });
 
 // POST /finance/transactions
 finance.post("/transactions", authMiddleware, async (c) => {
   const user = c.get("user");
   const body = createTransactionSchema.parse(await c.req.json());
+
+  let clientRelation: { clientId: string | null; clientName: string | null };
+  try {
+    clientRelation = await resolveClient(body.client_id ?? null, body.client_name ?? null);
+  } catch {
+    return c.json({ error: "Invalid client_id" }, 400);
+  }
 
   const [tx] = await db
     .insert(transactions)
@@ -48,8 +85,8 @@ finance.post("/transactions", authMiddleware, async (c) => {
       amount:     String(body.amount),
       currency:   body.currency ?? "USD",
       category:   body.category,
-      clientId:   body.client_id   ?? null,
-      clientName: body.client_name ?? null,
+      clientId:   clientRelation.clientId,
+      clientName: clientRelation.clientName,
       status:     body.status      ?? "completed",
       notes:      body.notes       ?? null,
       createdBy:  user.id,
@@ -74,15 +111,32 @@ finance.get("/transactions/:id", authMiddleware, async (c) => {
 finance.patch("/transactions/:id", authMiddleware, async (c) => {
   const body = updateTransactionSchema.parse(await c.req.json());
 
+  const patchData: Record<string, unknown> = {
+    date: body.date,
+    type: body.type,
+    currency: body.currency,
+    category: body.category,
+    status: body.status,
+    notes: body.notes,
+    amount:    body.amount ? String(body.amount) : undefined,
+    updatedAt: new Date(),
+  };
+
+  if (Object.prototype.hasOwnProperty.call(body, "client_id") || Object.prototype.hasOwnProperty.call(body, "client_name")) {
+    let clientRelation: { clientId: string | null; clientName: string | null };
+    try {
+      clientRelation = await resolveClient(body.client_id ?? null, body.client_name ?? null);
+    } catch {
+      return c.json({ error: "Invalid client_id" }, 400);
+    }
+
+    patchData.clientId = clientRelation.clientId;
+    patchData.clientName = clientRelation.clientName;
+  }
+
   const [updated] = await db
     .update(transactions)
-    .set({
-      ...body,
-      amount:     body.amount ? String(body.amount) : undefined,
-      clientId:   body.client_id   ?? undefined,
-      clientName: body.client_name ?? undefined,
-      updatedAt:  new Date(),
-    } as any)
+    .set(patchData as any)
     .where(eq(transactions.id, c.req.param("id")))
     .returning();
 
