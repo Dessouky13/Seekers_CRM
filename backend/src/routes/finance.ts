@@ -173,37 +173,45 @@ finance.get("/summary", authMiddleware, async (c) => {
     .from(transactions)
     .where(where);
 
-  const income   = Number(summary.total_income   ?? 0);
-  const expenses = Number(summary.total_expenses ?? 0);
+  const income   = Number(summary?.total_income   ?? 0);
+  const expenses = Number(summary?.total_expenses ?? 0);
   const profit   = income - expenses;
 
-  // Revenue by month — last 6 months
-  const revenueByMonth = await db
+  // Revenue by month — last 6 months, fill gaps with 0
+  const revRows = await db
     .select({
-      month:   sql<string>`TO_CHAR(DATE_TRUNC('month', date::date), 'Mon')`,
-      revenue: sql<number>`SUM(amount::numeric)`,
+      monthStart: sql<string>`DATE_TRUNC('month', ${transactions.date}::date)::date`,
+      revenue:    sql<number>`SUM(${transactions.amount}::numeric)`,
     })
     .from(transactions)
     .where(and(
       eq(transactions.type, "income"),
-      sql`${transactions.date} >= (CURRENT_DATE - INTERVAL '5 months')`,
+      sql`${transactions.date} >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '5 months')`,
     ))
-    .groupBy(sql`DATE_TRUNC('month', date::date)`)
-    .orderBy(sql`DATE_TRUNC('month', date::date)`);
+    .groupBy(sql`DATE_TRUNC('month', ${transactions.date}::date)`)
+    .orderBy(sql`DATE_TRUNC('month', ${transactions.date}::date)`);
+
+  const revByMonth = new Map(revRows.map((r) => [r.monthStart.slice(0, 7), Number(r.revenue ?? 0)]));
+  const now = new Date();
+  const revenueByMonth: { month: string; revenue: number }[] = [];
+  const monthFmt = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    revenueByMonth.push({ month: monthFmt[d.getMonth()], revenue: revByMonth.get(key) ?? 0 });
+  }
 
   // Expense breakdown by category (filtered period)
+  const expenseConditions = [eq(transactions.type, "expense"), ...conditions];
   const expenseByCategory = await db
     .select({
       name:  transactions.category,
-      value: sql<number>`SUM(amount::numeric)`,
+      value: sql<number>`SUM(${transactions.amount}::numeric)`,
     })
     .from(transactions)
-    .where(and(
-      eq(transactions.type, "expense"),
-      ...(conditions),
-    ))
+    .where(and(...expenseConditions))
     .groupBy(transactions.category)
-    .orderBy(sql`SUM(amount::numeric) DESC`);
+    .orderBy(sql`SUM(${transactions.amount}::numeric) DESC`);
 
   return c.json({
     total_income:         income,
@@ -211,7 +219,7 @@ finance.get("/summary", authMiddleware, async (c) => {
     net_profit:           profit,
     profit_margin:        income > 0 ? Math.round((profit / income) * 100) : 0,
     revenue_by_month:     revenueByMonth,
-    expense_by_category:  expenseByCategory,
+    expense_by_category:  expenseByCategory.map((row) => ({ name: row.name, value: Number(row.value ?? 0) })),
   });
 });
 

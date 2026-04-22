@@ -64,6 +64,7 @@ export function useCreateTransaction() {
       qc.invalidateQueries({ queryKey: ["finance-summary"] });
       qc.invalidateQueries({ queryKey: ["finance-categories"] });
       qc.invalidateQueries({ queryKey: ["clients"] });
+      qc.invalidateQueries({ queryKey: ["dashboard-summary"] });
     },
   });
 }
@@ -77,6 +78,7 @@ export function useUpdateTransaction() {
       qc.invalidateQueries({ queryKey: ["transactions"] });
       qc.invalidateQueries({ queryKey: ["finance-summary"] });
       qc.invalidateQueries({ queryKey: ["clients"] });
+      qc.invalidateQueries({ queryKey: ["dashboard-summary"] });
     },
   });
 }
@@ -90,6 +92,7 @@ export function useDeleteTransaction() {
       qc.invalidateQueries({ queryKey: ["transactions"] });
       qc.invalidateQueries({ queryKey: ["finance-summary"] });
       qc.invalidateQueries({ queryKey: ["clients"] });
+      qc.invalidateQueries({ queryKey: ["dashboard-summary"] });
     },
   });
 }

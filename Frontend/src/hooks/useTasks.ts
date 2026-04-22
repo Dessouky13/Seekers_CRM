@@ -34,7 +34,10 @@ export function useCreateTask() {
   return useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       apiFetch<ApiTask>("/tasks", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["dashboard-summary"] });
+    },
   });
 }
 
@@ -84,7 +87,10 @@ export function useUpdateTask() {
   return useMutation({
     mutationFn: ({ id, ...body }: { id: string } & Record<string, unknown>) =>
       apiFetch<ApiTask>(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["dashboard-summary"] });
+    },
   });
 }
 
@@ -93,6 +99,9 @@ export function useDeleteTask() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch(`/tasks/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["dashboard-summary"] });
+    },
   });
 }

@@ -32,20 +32,43 @@ clientsRouter.get("/", authMiddleware, async (c) => {
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(clients.createdAt);
 
-  // Attach project count — single batch query instead of N+1
-  const projectCounts = rows.length > 0
-    ? await db
-        .select({ clientId: projects.clientId, count: sql<number>`COUNT(*)::int` })
-        .from(projects)
-        .where(inArray(projects.clientId, rows.map((r) => r.id)))
-        .groupBy(projects.clientId)
-    : [];
+  if (rows.length === 0) return c.json([]);
 
-  const countMap = new Map(projectCounts.map((p) => [p.clientId, p.count]));
-  const withCounts = rows.map((client) => ({
-    ...client,
-    project_count: countMap.get(client.id) ?? 0,
-  }));
+  const clientIds = rows.map((r) => r.id);
+
+  // Parallel batch queries: project counts + revenue totals from transactions
+  const [projectCounts, revenueTotals] = await Promise.all([
+    db
+      .select({ clientId: projects.clientId, count: sql<number>`COUNT(*)::int` })
+      .from(projects)
+      .where(inArray(projects.clientId, clientIds))
+      .groupBy(projects.clientId),
+    db
+      .select({
+        clientId: transactions.clientId,
+        income:   sql<number>`SUM(CASE WHEN ${transactions.type} = 'income'  THEN ${transactions.amount}::numeric ELSE 0 END)`,
+        expense:  sql<number>`SUM(CASE WHEN ${transactions.type} = 'expense' THEN ${transactions.amount}::numeric ELSE 0 END)`,
+      })
+      .from(transactions)
+      .where(inArray(transactions.clientId, clientIds))
+      .groupBy(transactions.clientId),
+  ]);
+
+  const countMap   = new Map(projectCounts.map((p) => [p.clientId, p.count]));
+  const revenueMap = new Map(revenueTotals.map((r) => [r.clientId, r]));
+
+  const withCounts = rows.map((client) => {
+    const rev = revenueMap.get(client.id);
+    const income  = Number(rev?.income  ?? 0);
+    const expense = Number(rev?.expense ?? 0);
+    return {
+      ...client,
+      // Overwrite stored totalRevenue with live-computed net revenue from transactions
+      totalRevenue:  String(income),
+      project_count: countMap.get(client.id) ?? 0,
+      revenue_summary: { income, expense, net: income - expense },
+    };
+  });
 
   return c.json(withCounts);
 });
@@ -90,15 +113,20 @@ clientsRouter.get("/:id", authMiddleware, async (c) => {
     .from(transactions)
     .where(eq(transactions.clientId, id));
 
+  const income  = Number(feeSummary?.total_income  ?? 0);
+  const expense = Number(feeSummary?.total_expense ?? 0);
+
   return c.json({
     ...client,
+    // Live-computed from transactions, overrides stale stored value
+    totalRevenue:         String(income),
     projects:             clientProjects,
     tasks:                clientTasks,
     recent_transactions:  recentTransactions,
     fee_summary: {
-      total_income: Number(feeSummary?.total_income ?? 0),
-      total_expense: Number(feeSummary?.total_expense ?? 0),
-      net: Number(feeSummary?.total_income ?? 0) - Number(feeSummary?.total_expense ?? 0),
+      total_income:  income,
+      total_expense: expense,
+      net:           income - expense,
     },
   });
 });

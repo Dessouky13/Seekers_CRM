@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { corsMiddleware } from "./middleware/cors";
 import { errorHandler } from "./middleware/error-handler";
 import authRouter         from "./routes/auth";
@@ -15,6 +16,8 @@ import knowledgeRouter    from "./routes/knowledge";
 import notificationsRouter from "./routes/notifications";
 import notesRouter         from "./routes/notes";
 import vaultRouter         from "./routes/vault";
+import { db } from "./db/client";
+import { tasks } from "./db/schema";
 import { runStaleLeadNotificationSweep } from "./services/notifications";
 import type { AppEnv } from "./types";
 
@@ -74,5 +77,37 @@ setInterval(async () => {
     console.error("[notifications] stale lead sweep failed", error);
   }
 }, Math.max(1, staleLeadSweepMinutes) * 60_000);
+
+// ── Task auto-cleanup: delete tasks completed > N days ago ────────────
+async function runTaskCleanupSweep(retentionDays: number) {
+  if (retentionDays <= 0) return 0;
+  const deleted = await db
+    .delete(tasks)
+    .where(and(
+      eq(tasks.status, "done"),
+      sql`${tasks.completedAt} IS NOT NULL`,
+      lt(tasks.completedAt, sql`NOW() - (${retentionDays} || ' days')::interval`),
+    ))
+    .returning({ id: tasks.id });
+  return deleted.length;
+}
+
+const taskCleanupMinutes = Number(process.env.TASK_CLEANUP_SWEEP_MINUTES ?? 60);
+const taskRetentionDays  = Number(process.env.TASK_AUTO_DELETE_DAYS ?? 30);
+setInterval(async () => {
+  try {
+    const count = await runTaskCleanupSweep(taskRetentionDays);
+    if (count > 0) {
+      console.log(`[tasks] auto-deleted ${count} completed tasks older than ${taskRetentionDays}d`);
+    }
+  } catch (error) {
+    console.error("[tasks] auto-cleanup sweep failed", error);
+  }
+}, Math.max(1, taskCleanupMinutes) * 60_000);
+
+// Run once on boot
+runTaskCleanupSweep(taskRetentionDays).then((count) => {
+  if (count > 0) console.log(`[tasks] boot cleanup removed ${count} completed tasks`);
+}).catch((err) => console.error("[tasks] boot cleanup failed", err));
 
 export default app;

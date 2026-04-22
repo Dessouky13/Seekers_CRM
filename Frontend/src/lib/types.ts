@@ -18,17 +18,19 @@ export interface ApiClient {
   phone: string | null;
   status: "active" | "inactive" | "prospect";
   industry: string | null;
-  totalRevenue: string; // numeric → string from Postgres
+  totalRevenue: string; // live-computed sum of income transactions
   notes: string | null;
   createdAt: string;
   updatedAt: string;
   project_count: number;
+  revenue_summary?: { income: number; expense: number; net: number };
 }
 
-export interface ApiClientDetail extends Omit<ApiClient, "project_count"> {
+export interface ApiClientDetail extends Omit<ApiClient, "project_count" | "revenue_summary"> {
   projects: { id: string; name: string }[];
   tasks: ApiTask[];
   recent_transactions: ApiTransaction[];
+  fee_summary: { total_income: number; total_expense: number; net: number };
 }
 
 export interface ApiSubtask {

@@ -154,13 +154,47 @@ function ClientDetailSheet({ clientId, onClose }: { clientId: string | null; onC
                 )}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Total Revenue</span>
-                  <span className="font-semibold text-primary">{fmt(detail.totalRevenue)}</span>
+                  <span className="font-semibold text-primary">{fmt(detail.fee_summary?.total_income ?? detail.totalRevenue)}</span>
                 </div>
+                {detail.fee_summary && (detail.fee_summary.total_expense > 0 || detail.fee_summary.net !== detail.fee_summary.total_income) && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Expenses</span>
+                      <span className="text-destructive">{fmt(detail.fee_summary.total_expense)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Net</span>
+                      <span className="font-semibold text-success">{fmt(detail.fee_summary.net)}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Client Since</span>
                   <span>{detail.createdAt.slice(0, 10)}</span>
                 </div>
               </div>
+
+              {/* Recent transactions */}
+              {detail.recent_transactions.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                    Recent Transactions
+                  </p>
+                  <div className="space-y-1.5">
+                    {detail.recent_transactions.slice(0, 5).map((tx) => (
+                      <div key={tx.id} className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-3 py-2">
+                        <div className="flex flex-col">
+                          <span className="text-foreground">{tx.category}</span>
+                          <span className="text-muted-foreground text-[10px]">{tx.date}</span>
+                        </div>
+                        <span className={cn("font-semibold tabular-nums", tx.type === "income" ? "text-success" : "text-destructive")}>
+                          {tx.type === "income" ? "+" : "−"}{fmt(Number(tx.amount))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {detail.notes && (
                 <div>

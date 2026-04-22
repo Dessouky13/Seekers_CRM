@@ -127,7 +127,7 @@ export const transactions = pgTable("transactions", {
   date:       date("date").notNull(),
   type:       text("type", { enum: ["income", "expense"] }).notNull(),
   amount:     numeric("amount", { precision: 12, scale: 2 }).notNull(),
-  currency:   text("currency").notNull().default("USD"),
+  currency:   text("currency").notNull().default("EGP"),
   category:   text("category").notNull(),
   clientId:   uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
   clientName: text("client_name"),

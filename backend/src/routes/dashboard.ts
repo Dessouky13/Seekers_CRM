@@ -36,23 +36,32 @@ dashboard.get("/summary", authMiddleware, async (c) => {
       const expenses = Number(totals.total_expenses ?? 0);
       const profit   = income - expenses;
 
-      const revenueByMonth = await db.select({
-        month:   sql<string>`TO_CHAR(DATE_TRUNC('month', date::date), 'Mon')`,
-        revenue: sql<number>`SUM(amount::numeric)`,
+      const revRows = await db.select({
+        monthStart: sql<string>`DATE_TRUNC('month', ${transactions.date}::date)::date`,
+        revenue:    sql<number>`SUM(${transactions.amount}::numeric)`,
       }).from(transactions).where(and(
         eq(transactions.type, "income"),
-        sql`${transactions.date} >= (CURRENT_DATE - INTERVAL '5 months')`,
-      )).groupBy(sql`DATE_TRUNC('month', date::date)`)
-        .orderBy(sql`DATE_TRUNC('month', date::date)`);
+        sql`${transactions.date} >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '5 months')`,
+      )).groupBy(sql`DATE_TRUNC('month', ${transactions.date}::date)`)
+        .orderBy(sql`DATE_TRUNC('month', ${transactions.date}::date)`);
+
+      const revByMonth = new Map(revRows.map((r) => [r.monthStart.slice(0, 7), Number(r.revenue ?? 0)]));
+      const monthFmt = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const revenueByMonth: { month: string; revenue: number }[] = [];
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        revenueByMonth.push({ month: monthFmt[d.getMonth()], revenue: revByMonth.get(key) ?? 0 });
+      }
 
       const expenseByCategory = await db.select({
         name:  transactions.category,
-        value: sql<number>`SUM(amount::numeric)`,
+        value: sql<number>`SUM(${transactions.amount}::numeric)`,
       }).from(transactions).where(and(
         eq(transactions.type, "expense"),
-        sql`date >= ${periodStart}`,
-        sql`date < ${nextMonth}`,
-      )).groupBy(transactions.category).orderBy(sql`SUM(amount::numeric) DESC`);
+        sql`${transactions.date} >= ${periodStart}`,
+        sql`${transactions.date} < ${nextMonth}`,
+      )).groupBy(transactions.category).orderBy(sql`SUM(${transactions.amount}::numeric) DESC`);
 
       return {
         total_income:        income,
@@ -60,7 +69,7 @@ dashboard.get("/summary", authMiddleware, async (c) => {
         net_profit:          profit,
         profit_margin:       income > 0 ? Math.round((profit / income) * 100) : 0,
         revenue_by_month:    revenueByMonth,
-        expense_by_category: expenseByCategory,
+        expense_by_category: expenseByCategory.map((row) => ({ name: row.name, value: Number(row.value ?? 0) })),
       };
     })(),
 

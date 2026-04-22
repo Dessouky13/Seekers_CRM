@@ -173,10 +173,6 @@ tasksRouter.patch("/:id", authMiddleware, async (c) => {
 
   if (!existing) return c.json({ error: "Task not found" }, 404);
 
-  // When status → done, record completedAt
-  const completedAt =
-    body.status === "done" ? new Date() : undefined;
-
   const updateData: Record<string, unknown> = {
     ...body,
     assigneeId: (body as any).assignee_id ?? undefined,
@@ -191,7 +187,9 @@ tasksRouter.patch("/:id", authMiddleware, async (c) => {
   delete updateData.client_id;
   delete updateData.due_date;
 
-  if (completedAt !== undefined) updateData.completedAt = completedAt;
+  // Track completedAt: set when entering "done", clear when leaving "done"
+  if (body.status === "done") updateData.completedAt = new Date();
+  else if (body.status !== undefined) updateData.completedAt = null;
 
   const [updated] = await db
     .update(tasks)
