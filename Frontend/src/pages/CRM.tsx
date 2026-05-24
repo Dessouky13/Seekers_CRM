@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { KanbanBoard } from "@/components/modules/KanbanBoard";
 import { AgentPanel } from "@/components/modules/AgentPanel";
+import { LeadOutreachPanel } from "@/components/modules/LeadOutreachPanel";
 import { toast } from "sonner";
 import {
   useLeads, useLeadDetail, useCreateLead, useUpdateLead, useDeleteLead,
@@ -214,6 +215,11 @@ function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; onClose: 
                     })}
                   </div>
                 )}
+              </div>
+
+              {/* Outreach */}
+              <div className="border-t border-border pt-4">
+                <LeadOutreachPanel leadId={lead.id} category={lead.category} />
               </div>
 
               {/* AI Agents */}

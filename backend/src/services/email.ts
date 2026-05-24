@@ -39,6 +39,48 @@ export async function sendInviteEmail(
   });
 }
 
+export interface SendOutreachEmailResult {
+  messageId: string;
+  accepted:  string[];
+  rejected:  string[];
+}
+
+// Generic outreach send. body can be plain text (we'll wrap it in HTML) or HTML directly.
+export async function sendOutreachEmail(opts: {
+  to:       string;
+  subject:  string;
+  body:     string;
+  fromName?: string;
+  replyTo?:  string;
+}): Promise<SendOutreachEmailResult> {
+  const from = opts.fromName
+    ? `"${opts.fromName}" <${process.env.EMAIL_FROM ?? "Team@seekersai.org"}>`
+    : FROM;
+
+  // If body doesn't look like HTML, convert newlines to <br> and wrap minimally
+  const isHtml = /<\/?[a-z][\s\S]*>/i.test(opts.body);
+  const html = isHtml
+    ? opts.body
+    : `<div style="font-family:sans-serif;max-width:560px;line-height:1.55;color:#222">
+         ${opts.body.split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`).join("")}
+       </div>`;
+
+  const info = await getTransporter().sendMail({
+    from,
+    to:       opts.to,
+    subject:  opts.subject,
+    html,
+    text:     isHtml ? undefined : opts.body,
+    replyTo:  opts.replyTo,
+  });
+
+  return {
+    messageId: info.messageId ?? "",
+    accepted:  (info.accepted as string[]) ?? [],
+    rejected:  (info.rejected as string[]) ?? [],
+  };
+}
+
 export async function sendPasswordResetEmail(
   to: string,
   resetUrl: string,

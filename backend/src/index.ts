@@ -17,9 +17,11 @@ import notificationsRouter from "./routes/notifications";
 import notesRouter         from "./routes/notes";
 import vaultRouter         from "./routes/vault";
 import agentsRouter        from "./routes/agents";
+import outreachRouter      from "./routes/outreach";
 import { db } from "./db/client";
 import { tasks } from "./db/schema";
 import { runStaleLeadNotificationSweep } from "./services/notifications";
+import { processDueSends } from "./services/outreach";
 import type { AppEnv } from "./types";
 
 const app = new Hono<AppEnv>();
@@ -49,6 +51,7 @@ api.route("/notifications", notificationsRouter);
 api.route("/notes",         notesRouter);
 api.route("/vault",         vaultRouter);
 api.route("/agents",        agentsRouter);
+api.route("/outreach",      outreachRouter);
 
 app.route("/api/v1", api);
 
@@ -111,5 +114,18 @@ setInterval(async () => {
 runTaskCleanupSweep(taskRetentionDays).then((count) => {
   if (count > 0) console.log(`[tasks] boot cleanup removed ${count} completed tasks`);
 }).catch((err) => console.error("[tasks] boot cleanup failed", err));
+
+// ── Outreach scheduler: send due sequence steps every N minutes ─────
+const outreachSweepMinutes = Number(process.env.OUTREACH_SWEEP_MINUTES ?? 5);
+setInterval(async () => {
+  try {
+    const result = await processDueSends(50);
+    if (result.processed > 0) {
+      console.log(`[outreach] tick: processed=${result.processed} sent=${result.sent} failed=${result.failed}`);
+    }
+  } catch (error) {
+    console.error("[outreach] sweep failed", error);
+  }
+}, Math.max(1, outreachSweepMinutes) * 60_000);
 
 export default app;

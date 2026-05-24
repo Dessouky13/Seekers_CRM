@@ -302,6 +302,73 @@ export const agentRuns = pgTable("agent_runs", {
   contextIdx: index("idx_agent_runs_context").on(t.scope, t.contextId),
 }));
 
+// ── Outreach Sequences ────────────────────────────────────
+export const outreachSequences = pgTable("outreach_sequences", {
+  id:           uuid("id").primaryKey().defaultRandom(),
+  name:         text("name").notNull(),
+  description:  text("description"),
+  category:     text("category"),                                              // niche this sequence is for, optional
+  isActive:     boolean("is_active").notNull().default(true),
+  // If set, auto-enroll new leads with matching category. NULL = manual only.
+  autoEnrollOnCategory: boolean("auto_enroll_on_category").notNull().default(false),
+  createdBy:    uuid("created_by").references(() => profiles.id, { onDelete: "set null" }),
+  createdAt:    timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:    timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  activeIdx:   index("idx_sequences_active").on(t.isActive),
+  categoryIdx: index("idx_sequences_category").on(t.category),
+}));
+
+// ── Outreach Steps (a sequence has many steps) ───────────
+export const outreachSteps = pgTable("outreach_steps", {
+  id:              uuid("id").primaryKey().defaultRandom(),
+  sequenceId:      uuid("sequence_id").notNull().references(() => outreachSequences.id, { onDelete: "cascade" }),
+  position:        integer("position").notNull(),                              // 0,1,2,... for ordering
+  dayOffset:       integer("day_offset").notNull(),                            // days after enrollment to send
+  channel:         text("channel", { enum: ["email", "linkedin", "note"] }).notNull().default("email"),
+  subjectTemplate: text("subject_template"),
+  bodyTemplate:    text("body_template"),                                      // mustache-style {{name}}, {{company}}
+  agentId:         text("agent_id"),                                           // if set, agent generates body per-lead
+  createdAt:       timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  sequenceIdx: index("idx_steps_sequence").on(t.sequenceId, t.position),
+}));
+
+// ── Outreach Enrollments (a lead's progress through a sequence) ─
+export const outreachEnrollments = pgTable("outreach_enrollments", {
+  id:                  uuid("id").primaryKey().defaultRandom(),
+  leadId:              uuid("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
+  sequenceId:          uuid("sequence_id").notNull().references(() => outreachSequences.id, { onDelete: "cascade" }),
+  currentStep:         integer("current_step").notNull().default(0),
+  status:              text("status", { enum: ["active", "paused", "completed", "failed", "replied"] }).notNull().default("active"),
+  enrolledAt:          timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
+  nextSendAt:          timestamp("next_send_at", { withTimezone: true }),
+  lastStepCompletedAt: timestamp("last_step_completed_at", { withTimezone: true }),
+  completedAt:         timestamp("completed_at", { withTimezone: true }),
+  pausedReason:        text("paused_reason"),
+  enrolledBy:          uuid("enrolled_by").references(() => profiles.id, { onDelete: "set null" }),
+}, (t) => ({
+  leadIdx:     index("idx_enrollments_lead").on(t.leadId),
+  statusIdx:   index("idx_enrollments_status").on(t.status, t.nextSendAt),
+  uniqueIdx:   index("idx_enrollments_unique").on(t.leadId, t.sequenceId),     // prevent dupes
+}));
+
+// ── Outreach Sends (audit log of every email sent) ───────
+export const outreachSends = pgTable("outreach_sends", {
+  id:           uuid("id").primaryKey().defaultRandom(),
+  enrollmentId: uuid("enrollment_id").notNull().references(() => outreachEnrollments.id, { onDelete: "cascade" }),
+  stepId:       uuid("step_id").references(() => outreachSteps.id, { onDelete: "set null" }),
+  channel:      text("channel").notNull().default("email"),
+  subject:      text("subject"),
+  body:         text("body"),
+  sentAt:       timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  status:       text("status", { enum: ["sent", "failed"] }).notNull().default("sent"),
+  messageId:    text("message_id"),
+  error:        text("error"),
+}, (t) => ({
+  enrollmentIdx: index("idx_sends_enrollment").on(t.enrollmentId, t.sentAt),
+}));
+
 // ── Vault Categories (dynamic, team-managed) ─────────────
 export const vaultCategories = pgTable("vault_categories", {
   id:        uuid("id").primaryKey().defaultRandom(),
