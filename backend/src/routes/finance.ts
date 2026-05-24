@@ -157,12 +157,23 @@ finance.delete("/transactions/:id", authMiddleware, async (c) => {
 
 // GET /finance/summary — aggregated P&L
 finance.get("/summary", authMiddleware, async (c) => {
-  const { from, to } = c.req.query() as Record<string, string>;
+  const { from, to, mode } = c.req.query() as Record<string, string>;
 
-  const conditions = [];
-  if (from) conditions.push(gte(transactions.date, from));
-  if (to)   conditions.push(lte(transactions.date, to));
-  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  // Mode: 'range' (default) filters from→to, 'cumulative' shows all time up to 'to' date
+  const dateMode = mode === "cumulative" ? "cumulative" : "range";
+
+  const conditions = [eq(transactions.status, "completed")]; // Only count completed transactions
+  
+  if (dateMode === "cumulative") {
+    // Cumulative: from beginning of time until 'to' date
+    if (to) conditions.push(lte(transactions.date, to));
+  } else {
+    // Range: between 'from' and 'to'
+    if (from) conditions.push(gte(transactions.date, from));
+    if (to)   conditions.push(lte(transactions.date, to));
+  }
+  
+  const where = and(...conditions);
 
   // Single query: conditional aggregation
   const [summary] = await db
@@ -177,7 +188,7 @@ finance.get("/summary", authMiddleware, async (c) => {
   const expenses = Number(summary?.total_expenses ?? 0);
   const profit   = income - expenses;
 
-  // Revenue by month — last 6 months, fill gaps with 0
+  // Revenue by month — last 6 months, fill gaps with 0 (only completed transactions)
   const revRows = await db
     .select({
       monthStart: sql<string>`DATE_TRUNC('month', ${transactions.date}::date)::date`,
@@ -186,6 +197,7 @@ finance.get("/summary", authMiddleware, async (c) => {
     .from(transactions)
     .where(and(
       eq(transactions.type, "income"),
+      eq(transactions.status, "completed"),
       sql`${transactions.date} >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '5 months')`,
     ))
     .groupBy(sql`DATE_TRUNC('month', ${transactions.date}::date)`)
@@ -201,15 +213,14 @@ finance.get("/summary", authMiddleware, async (c) => {
     revenueByMonth.push({ month: monthFmt[d.getMonth()], revenue: revByMonth.get(key) ?? 0 });
   }
 
-  // Expense breakdown by category (filtered period)
-  const expenseConditions = [eq(transactions.type, "expense"), ...conditions];
+  // Expense breakdown by category (filtered period, only completed)
   const expenseByCategory = await db
     .select({
       name:  transactions.category,
       value: sql<number>`SUM(${transactions.amount}::numeric)`,
     })
     .from(transactions)
-    .where(and(...expenseConditions))
+    .where(and(eq(transactions.type, "expense"), ...conditions))
     .groupBy(transactions.category)
     .orderBy(sql`SUM(${transactions.amount}::numeric) DESC`);
 

@@ -280,6 +280,28 @@ export const vaultEntries = pgTable("vault_entries", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ── AI Agent Runs (audit log + history) ──────────────────
+export const agentRuns = pgTable("agent_runs", {
+  id:           uuid("id").primaryKey().defaultRandom(),
+  agentId:      text("agent_id").notNull(),
+  scope:        text("scope", { enum: ["lead", "client", "task", "pipeline", "global"] }).notNull(),
+  contextId:    uuid("context_id"),                  // lead/client/task id
+  contextLabel: text("context_label"),               // human-readable label
+  inputSummary: text("input_summary"),
+  output:       text("output").notNull(),
+  model:        text("model").notNull(),
+  tokensIn:     integer("tokens_in").notNull().default(0),
+  tokensOut:    integer("tokens_out").notNull().default(0),
+  costUsd:      numeric("cost_usd", { precision: 10, scale: 5 }).notNull().default("0"),
+  status:       text("status", { enum: ["success", "error"] }).notNull().default("success"),
+  error:        text("error"),
+  createdBy:    uuid("created_by").references(() => profiles.id, { onDelete: "set null" }),
+  createdAt:    timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  agentIdx:   index("idx_agent_runs_agent").on(t.agentId, t.createdAt),
+  contextIdx: index("idx_agent_runs_context").on(t.scope, t.contextId),
+}));
+
 // ── Vault Categories (dynamic, team-managed) ─────────────
 export const vaultCategories = pgTable("vault_categories", {
   id:        uuid("id").primaryKey().defaultRandom(),

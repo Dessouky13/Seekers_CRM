@@ -5,6 +5,7 @@ import { Progress } from "@/components/ui/progress";
 import { useDashboardSummary } from "@/hooks/useDashboard";
 import { useCrmInsights, useStaleLeads } from "@/hooks/useCRM";
 import { useCurrentUser } from "@/hooks/useAuth";
+import { AgentPanel } from "@/components/modules/AgentPanel";
 
 const COLORS = ["hsl(246,90%,60%)", "hsl(255,40%,72%)", "hsl(152,60%,45%)", "hsl(38,92%,55%)", "hsl(0,72%,55%)"];
 const fmt = (n: number) => `EGP ${n.toLocaleString()}`;
@@ -243,6 +244,11 @@ export default function Dashboard() {
             </ul>
           </div>
         ) : null}
+      </div>
+
+      {/* Pipeline Analyst Agent */}
+      <div className="rounded-xl border border-border bg-card p-5 animate-fade-in" style={{ animationDelay: "500ms" }}>
+        <AgentPanel scope="pipeline" contextLabel="Weekly pipeline health" />
       </div>
     </div>
   );

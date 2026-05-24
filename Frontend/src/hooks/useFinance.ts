@@ -27,10 +27,11 @@ export function useTransactions(params: TransactionParams = {}) {
   });
 }
 
-export function useFinanceSummary(params: { from?: string; to?: string } = {}) {
+export function useFinanceSummary(params: { from?: string; to?: string; mode?: "range" | "cumulative" } = {}) {
   const qs = new URLSearchParams();
   if (params.from) qs.set("from", params.from);
   if (params.to)   qs.set("to",   params.to);
+  if (params.mode) qs.set("mode", params.mode);
   const query = qs.toString();
 
   return useQuery<{

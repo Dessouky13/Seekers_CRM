@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { StatCard } from "@/components/modules/StatCard";
 import { toast } from "sonner";
 import { useClients, useClientDetail, useCreateClient, useUpdateClient, useDeleteClient } from "@/hooks/useClients";
+import { AgentPanel } from "@/components/modules/AgentPanel";
 import { cn } from "@/lib/utils";
 import type { ApiClient } from "@/lib/types";
 
@@ -250,6 +251,15 @@ function ClientDetailSheet({ clientId, onClose }: { clientId: string | null; onC
                     ))}
                   </div>
                 )}
+              </div>
+
+              {/* AI Agents */}
+              <div className="border-t border-border pt-4">
+                <AgentPanel
+                  scope="client"
+                  contextId={detail.id}
+                  contextLabel={`${detail.name} · ${detail.company}`}
+                />
               </div>
             </div>
             )}

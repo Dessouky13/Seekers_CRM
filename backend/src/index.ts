@@ -16,6 +16,7 @@ import knowledgeRouter    from "./routes/knowledge";
 import notificationsRouter from "./routes/notifications";
 import notesRouter         from "./routes/notes";
 import vaultRouter         from "./routes/vault";
+import agentsRouter        from "./routes/agents";
 import { db } from "./db/client";
 import { tasks } from "./db/schema";
 import { runStaleLeadNotificationSweep } from "./services/notifications";
@@ -47,6 +48,7 @@ api.route("/knowledge",     knowledgeRouter);
 api.route("/notifications", notificationsRouter);
 api.route("/notes",         notesRouter);
 api.route("/vault",         vaultRouter);
+api.route("/agents",        agentsRouter);
 
 app.route("/api/v1", api);
 

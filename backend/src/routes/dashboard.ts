@@ -25,12 +25,12 @@ dashboard.get("/summary", authMiddleware, async (c) => {
   const today = now.toISOString().slice(0, 10);
 
   const [financeData, taskData, leadData, goalsData] = await Promise.all([
-    // Finance — KPI totals are all-time; charts use rolling windows
+    // Finance — only completed transactions, all-time totals
     (async () => {
       const [totals] = await db.select({
         total_income:   sql<number>`SUM(CASE WHEN type = 'income'  THEN amount::numeric ELSE 0 END)`,
         total_expenses: sql<number>`SUM(CASE WHEN type = 'expense' THEN amount::numeric ELSE 0 END)`,
-      }).from(transactions);
+      }).from(transactions).where(eq(transactions.status, "completed"));
 
       const income   = Number(totals.total_income   ?? 0);
       const expenses = Number(totals.total_expenses ?? 0);
@@ -41,6 +41,7 @@ dashboard.get("/summary", authMiddleware, async (c) => {
         revenue:    sql<number>`SUM(${transactions.amount}::numeric)`,
       }).from(transactions).where(and(
         eq(transactions.type, "income"),
+        eq(transactions.status, "completed"),
         sql`${transactions.date} >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '5 months')`,
       )).groupBy(sql`DATE_TRUNC('month', ${transactions.date}::date)`)
         .orderBy(sql`DATE_TRUNC('month', ${transactions.date}::date)`);
@@ -59,6 +60,7 @@ dashboard.get("/summary", authMiddleware, async (c) => {
         value: sql<number>`SUM(${transactions.amount}::numeric)`,
       }).from(transactions).where(and(
         eq(transactions.type, "expense"),
+        eq(transactions.status, "completed"),
         sql`${transactions.date} >= ${periodStart}`,
         sql`${transactions.date} < ${nextMonth}`,
       )).groupBy(transactions.category).orderBy(sql`SUM(${transactions.amount}::numeric) DESC`);

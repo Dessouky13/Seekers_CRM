@@ -18,6 +18,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { KanbanBoard } from "@/components/modules/KanbanBoard";
+import { AgentPanel } from "@/components/modules/AgentPanel";
 import { toast } from "sonner";
 import {
   useLeads, useLeadDetail, useCreateLead, useUpdateLead, useDeleteLead,
@@ -213,6 +214,15 @@ function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; onClose: 
                     })}
                   </div>
                 )}
+              </div>
+
+              {/* AI Agents */}
+              <div className="border-t border-border pt-4">
+                <AgentPanel
+                  scope="lead"
+                  contextId={lead.id}
+                  contextLabel={`${lead.name} · ${lead.company}`}
+                />
               </div>
             </div>
           )}

@@ -77,6 +77,7 @@ export default function Finance() {
   const [catFilter,  setCatFilter]  = useState("all");
   const [fromDate,   setFromDate]   = useState("");
   const [toDate,     setToDate]     = useState("");
+  const [dateMode,   setDateMode]   = useState<"range" | "cumulative">("range");
   const [editTx, setEditTx]         = useState<ApiTransaction | null>(null);
   const [isOpen, setIsOpen]         = useState(false);
 
@@ -91,7 +92,11 @@ export default function Finance() {
     to:       toDate   || undefined,
     limit:    500,
   });
-  const { data: summary } = useFinanceSummary({ from: fromDate || undefined, to: toDate || undefined });
+  const { data: summary } = useFinanceSummary({ 
+    from: fromDate || undefined, 
+    to: toDate || undefined,
+    mode: dateMode,
+  });
   const { data: categories = [] } = useCategories();
   const { data: clients = [] } = useClients();
 
@@ -204,10 +209,34 @@ export default function Finance() {
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Total Income"   value={fmt(income)}   icon={TrendingUp}   changeType="positive" change="All time" />
-        <StatCard title="Total Expenses" value={fmt(expenses)} icon={TrendingDown} changeType="negative" change="All time" />
-        <StatCard title="Net Profit"     value={fmt(profit)}   icon={DollarSign}   changeType="positive" change={`${margin}% margin`} />
-        <StatCard title="Salaries Paid"  value={fmt(totalSalary)} icon={Users} changeType="negative" change="All time" />
+        <StatCard 
+          title="Total Income" 
+          value={fmt(income)} 
+          icon={TrendingUp} 
+          changeType="positive" 
+          change={dateMode === "cumulative" && toDate ? `Until ${toDate}` : "All time"} 
+        />
+        <StatCard 
+          title="Total Expenses" 
+          value={fmt(expenses)} 
+          icon={TrendingDown} 
+          changeType="negative" 
+          change={dateMode === "cumulative" && toDate ? `Until ${toDate}` : "All time"} 
+        />
+        <StatCard 
+          title="Net Profit" 
+          value={fmt(profit)} 
+          icon={DollarSign} 
+          changeType="positive" 
+          change={`${margin}% margin`} 
+        />
+        <StatCard 
+          title="Salaries Paid" 
+          value={fmt(totalSalary)} 
+          icon={Users} 
+          changeType="negative" 
+          change="All time" 
+        />
       </div>
 
       {/* Category summary row */}
@@ -265,8 +294,60 @@ export default function Finance() {
             <Select value={catFilter} onValueChange={setCatFilter}>
               <SelectTrigger className="w-48 h-8 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                {allCats.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            
+            {/* Date Mode Toggle */}
+            <div className="flex gap-1 rounded-md border border-border p-0.5 bg-muted/30">
+              <button
+                onClick={() => setDateMode("range")}
+                className={cn(
+                  "px-2.5 py-1 text-xs font-medium rounded transition-colors",
+                  dateMode === "range" 
+                    ? "bg-primary text-primary-foreground shadow-sm" 
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Range
+              </button>
+              <button
+                onClick={() => setDateMode("cumulative")}
+                className={cn(
+                  "px-2.5 py-1 text-xs font-medium rounded transition-colors",
+                  dateMode === "cumulative" 
+                    ? "bg-primary text-primary-foreground shadow-sm" 
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Cumulative
+              </button>
+            </div>
+
+            {dateMode === "range" ? (
+              <>
+                <Input 
+                  type="date" 
+                  value={fromDate} 
+                  onChange={(e) => setFromDate(e.target.value)} 
+                  className="h-8 text-sm w-36" 
+                  placeholder="From date"
+                />
+                <Input 
+                  type="date" 
+                  value={toDate} 
+                  onChange={(e) => setToDate(e.target.value)} 
+                  className="h-8 text-sm w-36" 
+                  placeholder="To date"
+                />
+              </>
+            ) : (
+              <Input 
+                type="date" 
+                value={toDate} 
+                onChange={(e) => setToDate(e.target.value)} 
+                className="h-8 text-sm w-36" 
+                placeholder="Until date"
+              />
+            )}
+            
               </SelectContent>
             </Select>
             <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-8 text-sm w-36" />
