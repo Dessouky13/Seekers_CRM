@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { UserPlus, Shield, User, Trash2, KeyRound } from "lucide-react";
+import { useState, useEffect } from "react";
+import { UserPlus, Shield, User, Trash2, KeyRound, Pencil, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
@@ -90,6 +91,9 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      {/* Email signature */}
+      {currentUser && <SignatureEditor user={currentUser} />}
 
       {/* Team Members */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -224,6 +228,136 @@ export default function Settings() {
           <p className="text-xs pt-1">API: <span className="font-mono">{import.meta.env.VITE_API_URL}</span></p>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Signature Editor ─────────────────────────────────────
+function SignatureEditor({ user }: { user: ApiUser }) {
+  const qc = useQueryClient();
+  const [editing,  setEditing]  = useState(false);
+  const [title,    setTitle]    = useState(user.title ?? "");
+  const [sig,      setSig]      = useState(user.signature ?? "");
+
+  // Keep local state in sync when user updates (e.g. after save)
+  useEffect(() => {
+    if (!editing) {
+      setTitle(user.title ?? "");
+      setSig(user.signature ?? "");
+    }
+  }, [user.title, user.signature, editing]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      apiFetch<ApiUser>(`/users/${user.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          title:     title.trim() || null,
+          signature: sig.trim()   || null,
+        }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["auth", "me"] });
+      qc.invalidateQueries({ queryKey: ["users"] });
+      setEditing(false);
+      toast.success("Signature saved");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const useDefault = () => setSig("");
+
+  const previewName  = user.name;
+  const previewTitle = title.trim() || "Seekers AI Automation Solutions";
+  const previewEmail = user.email;
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">Email Signature</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Appears at the bottom of every outreach email sent on your behalf. Leave the signature box empty to use the default with the Seekers logo.
+          </p>
+        </div>
+        {!editing && (
+          <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => setEditing(true)}>
+            <Pencil className="h-3.5 w-3.5" /> Edit
+          </Button>
+        )}
+      </div>
+
+      {editing ? (
+        <>
+          <div>
+            <Label>Title / Role</Label>
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Founder, Sales Lead"
+              maxLength={120}
+              className="mt-1"
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">Shown below your name in the default signature.</p>
+          </div>
+
+          <div>
+            <Label>Custom signature (HTML or plain text)</Label>
+            <Textarea
+              value={sig}
+              onChange={(e) => setSig(e.target.value)}
+              rows={6}
+              placeholder="Leave blank to use the default Seekers signature with logo."
+              maxLength={8000}
+              className="mt-1 font-mono text-xs"
+            />
+            <div className="flex items-center justify-between mt-1">
+              <p className="text-[10px] text-muted-foreground">
+                {sig.length} / 8000 chars. HTML supported. Use {`<img src="...">`} for inline images.
+              </p>
+              {sig && (
+                <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={useDefault}>Use default</Button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <Button variant="ghost" onClick={() => { setEditing(false); setTitle(user.title ?? ""); setSig(user.signature ?? ""); }}>
+              Cancel
+            </Button>
+            <Button onClick={() => save.mutate()} disabled={save.isPending} className="gap-1.5">
+              <Save className="h-3.5 w-3.5" /> {save.isPending ? "Saving…" : "Save Signature"}
+            </Button>
+          </div>
+        </>
+      ) : (
+        <div className="rounded-lg border border-border bg-muted/20 p-4">
+          {user.signature?.trim() ? (
+            <div
+              className="email-signature-preview"
+              dangerouslySetInnerHTML={{ __html: user.signature }}
+            />
+          ) : (
+            <div className="font-sans text-xs text-foreground" style={{ lineHeight: 1.5 }}>
+              <div style={{ paddingTop: 12, borderTop: "1px solid #e5e5e5" }}>
+                <div className="flex items-center gap-3">
+                  <img src="/logo-symbol.png" alt="Seekers" width={42} height={42} style={{ borderRadius: 6 }} />
+                  <div>
+                    <div className="font-semibold text-foreground text-sm">{previewName}</div>
+                    <div className="text-muted-foreground text-[11px]">{previewTitle}</div>
+                  </div>
+                </div>
+                <div className="mt-2 text-muted-foreground text-[11px]">
+                  <span className="text-primary">seekersai.org</span> · <span className="text-primary">{previewEmail}</span>
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-3 italic">
+                Default signature — click Edit to customize.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

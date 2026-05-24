@@ -1,0 +1,174 @@
+{
+  "name": "Seekers CRM — Apollo Lead Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "seekers-apollo",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "name": "Apollo Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "seekers-apollo",
+      "notes": "Set this URL in Apollo: Sequence Settings → Webhooks → POST contact data on enrollment."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "name",
+              "value": "={{ ($json.body.first_name || '') + ' ' + ($json.body.last_name || '') | trim }}"
+            },
+            {
+              "name": "company",
+              "value": "={{ $json.body.organization_name || $json.body.account_name || $json.body.company }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.body.email }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.body.phone_number || $json.body.phone || '' }}"
+            },
+            {
+              "name": "source",
+              "value": "apollo"
+            },
+            {
+              "name": "category",
+              "value": "={{ $json.body.industry || $json.body.organization_industry || $json.body.keywords || '' }}"
+            },
+            {
+              "name": "notes",
+              "value": "=Apollo:\\n• Title: {{ $json.body.title || '—' }}\\n• Seniority: {{ $json.body.seniority || '—' }}\\n• Employees: {{ $json.body.estimated_num_employees || $json.body.organization_employees || '—' }}\\n• Location: {{ $json.body.city || $json.body.state || $json.body.country || '—' }}\\n• LinkedIn: {{ $json.body.linkedin_url || '—' }}\\n• Website: {{ $json.body.organization_website_url || '—' }}"
+            }
+          ]
+        },
+        "options": {
+          "dotNotation": false
+        }
+      },
+      "name": "Map Apollo Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [480, 300],
+      "notes": "Apollo's exact field names. first_name + last_name → name; organization_name → company; industry → category. Title and LinkedIn URL go into notes for sales context."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "has-email",
+              "leftValue": "={{ $json.email }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [700, 300],
+      "notes": "Skip Apollo contacts without an email — can't email them anyway."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SEEKERS_API_BASE }}/outreach/leads/ingest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "name": "Ingest into Seekers CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [920, 240],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "seekers-crm-api-key",
+          "name": "Seekers CRM API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, lead: $json } }}",
+        "options": {}
+      },
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1140, 240]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, reason: 'no email' } }}",
+        "options": {
+          "responseCode": 422
+        }
+      },
+      "name": "Skip — No Email",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [920, 380]
+    }
+  ],
+  "connections": {
+    "Apollo Webhook": {
+      "main": [[{ "node": "Map Apollo Fields", "type": "main", "index": 0 }]]
+    },
+    "Map Apollo Fields": {
+      "main": [[{ "node": "Has Email?", "type": "main", "index": 0 }]]
+    },
+    "Has Email?": {
+      "main": [
+        [{ "node": "Ingest into Seekers CRM", "type": "main", "index": 0 }],
+        [{ "node": "Skip — No Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Ingest into Seekers CRM": {
+      "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "seekers-apollo-v1",
+  "id": "seekers-apollo",
+  "meta": {
+    "instanceId": "seekers-crm"
+  },
+  "tags": [
+    { "name": "Seekers" },
+    { "name": "Apollo" },
+    { "name": "Outreach" }
+  ]
+}

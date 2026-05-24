@@ -3,9 +3,9 @@ import { and, eq, lte, sql, asc, isNull, or } from "drizzle-orm";
 import { db } from "../db/client";
 import {
   outreachSequences, outreachSteps, outreachEnrollments, outreachSends,
-  leads, leadActivities,
+  leads, leadActivities, profiles,
 } from "../db/schema";
-import { sendOutreachEmail } from "./email";
+import { sendOutreachEmail, buildDefaultSignature } from "./email";
 import { findAgent, runAgent } from "./agents";
 
 // Mustache-lite template renderer. Supports {{name}}, {{company}}, etc.
@@ -194,8 +194,31 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
     body    = renderTemplate(step.bodyTemplate ?? "(no body template)", vars);
   }
 
+  // Resolve sender signature: prefer lead.assignee's signature, fall back to default
+  let signatureHtml: string;
+  let fromName: string | undefined;
+  if (lead.assigneeId) {
+    const [assignee] = await db
+      .select({ name: profiles.name, title: profiles.title, email: profiles.email, signature: profiles.signature })
+      .from(profiles)
+      .where(eq(profiles.id, lead.assigneeId))
+      .limit(1);
+    if (assignee) {
+      fromName = assignee.name;
+      signatureHtml = assignee.signature?.trim() || buildDefaultSignature({
+        name:  assignee.name,
+        title: assignee.title,
+        email: assignee.email,
+      });
+    } else {
+      signatureHtml = buildDefaultSignature({});
+    }
+  } else {
+    signatureHtml = buildDefaultSignature({});
+  }
+
   // Send
-  const result = await sendOutreachEmail({ to: lead.email, subject, body });
+  const result = await sendOutreachEmail({ to: lead.email, subject, body, fromName, signatureHtml });
 
   // Persist send
   await db.insert(outreachSends).values({

@@ -36,8 +36,10 @@ export const refreshTokenSchema = z.object({
 // ── Users ─────────────────────────────────────────────────
 
 export const updateProfileSchema = z.object({
-  name:   z.string().min(1).max(100).optional(),
-  avatar: z.string().max(255).optional(),
+  name:      z.string().min(1).max(100).optional(),
+  avatar:    z.string().max(255).optional(),
+  title:     z.string().max(120).optional().nullable(),
+  signature: z.string().max(8000).optional().nullable(),
 });
 
 export const inviteUserSchema = z.object({

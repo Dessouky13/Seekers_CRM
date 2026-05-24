@@ -49,17 +49,19 @@ In n8n, go to **Credentials → New**.
 
 ### Credential B: Outreach Email IMAP
 
-| Field | Gmail | Outlook |
-|---|---|---|
-| Credential Type | **IMAP** | **IMAP** |
-| Name | `Outreach Email IMAP` *(exact name matters)* | `Outreach Email IMAP` |
-| User | your-email@gmail.com | your-email@outlook.com |
-| Password | **App Password** (not your normal password — see below) | your password |
-| Host | `imap.gmail.com` | `outlook.office365.com` |
-| Port | `993` | `993` |
-| SSL/TLS | enabled | enabled |
+| Field | Namecheap PE (recommended) | Gmail | Outlook |
+|---|---|---|---|
+| Credential Type | **IMAP** | **IMAP** | **IMAP** |
+| Name | `Outreach Email IMAP` *(exact name matters)* | `Outreach Email IMAP` | `Outreach Email IMAP` |
+| User | team@seekersai.org | your-email@gmail.com | your-email@outlook.com |
+| Password | your PE mailbox password | **App Password** (see below) | your password |
+| Host | `mail.privateemail.com` | `imap.gmail.com` | `outlook.office365.com` |
+| Port | `993` | `993` | `993` |
+| SSL/TLS | enabled | enabled | enabled |
 
 **Gmail app password:** Google Account → Security → 2-Step Verification (must be on) → App passwords → generate one for "Mail". Use that 16-char string here.
+
+**Namecheap PE:** Just use your normal mailbox password from when you created the email account. No app password needed.
 
 ---
 
@@ -125,14 +127,29 @@ Open your CRM → **CRM** page → you'll see "Test Lead — Acme SaaS" with sou
 
 ## Step 6 — Wire your real lead sources
 
-### A. Apollo (Lists with webhook export)
-Apollo allows webhooks per saved search/list:
-- In Apollo, open the saved search → **Export** → choose **Webhook**
-- URL: your n8n webhook URL from Step 4
-- Format: JSON
-- Send leads as they appear
+### A. Apollo (Lists with webhook export) — recommended
 
-The `Map Fields` node already handles Apollo's `firstName`/`lastName`/`companyName`/`industry` fields. No changes needed.
+**Apollo has a dedicated workflow with cleaner field mapping.** Download it from your CRM:
+- [`seekers-apollo-workflow.json`](./seekers-apollo-workflow.json) — Apollo-specific fields (`first_name`, `last_name`, `organization_name`, `industry`, `title`, `linkedin_url`)
+- Imports the same way as the main workflow
+- Creates a separate webhook path so you can keep both running side-by-side
+
+**Apollo setup:**
+1. In Apollo, build a saved search (e.g., "Founders, SaaS, 10-200 employees, Egypt + UAE + Germany")
+2. Save it as a **Sequence** (Apollo's term for a campaign — you don't have to enroll them in Apollo's email steps; just use it as a webhook trigger)
+3. Sequence → Settings → **Webhooks** → "New webhook"
+4. Method: POST · URL: your n8n webhook URL from this Apollo workflow
+5. Trigger: "Contact enrolled in sequence"
+6. Save → enroll contacts → they flow into Seekers CRM
+
+**What lands in your CRM:**
+- `name` = first_name + last_name
+- `company` = organization_name
+- `email` = email
+- `category` = industry (used for auto-enrollment in matching sequences)
+- `source` = "apollo"
+- `notes` = title + seniority + employee count + location + LinkedIn URL (gold for sales context)
+- contacts without an email are auto-skipped (returns 422 to Apollo)
 
 ### B. Instantly / Lemlist / SalesQL / Hunter
 Same approach — set your tool's webhook URL to the n8n endpoint. The `Map Fields` node has fallbacks for the common field names.

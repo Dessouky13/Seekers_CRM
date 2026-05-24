@@ -6,6 +6,8 @@ export interface ApiUser {
   email: string;
   avatar: string | null;
   role: "admin" | "member";
+  title: string | null;
+  signature: string | null;
   createdAt: string;
   updatedAt: string;
 }

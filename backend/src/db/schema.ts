@@ -30,6 +30,10 @@ export const profiles = pgTable("profiles", {
   password:  text("password").notNull(),          // bcrypt hash
   avatar:    text("avatar"),
   role:      text("role", { enum: ["admin", "member"] }).notNull().default("member"),
+  // Optional role label shown in the email signature (e.g. "Founder", "Sales Lead")
+  title:     text("title"),
+  // Custom email signature HTML or plain text. If null, a default is built from name/title.
+  signature: text("signature"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

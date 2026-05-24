@@ -45,32 +45,73 @@ export interface SendOutreachEmailResult {
   rejected:  string[];
 }
 
+const LOGO_URL = process.env.LOGO_URL ?? "https://seekers-crm.vercel.app/logo-symbol.png";
+const SITE_URL = process.env.SITE_URL ?? "https://seekersai.org";
+
+// Build a default signature when a rep hasn't set their own.
+// Uses brand colors + the hosted logo so it renders consistently in any client.
+export function buildDefaultSignature(opts: {
+  name?:  string | null;
+  title?: string | null;
+  email?: string | null;
+}): string {
+  const name  = opts.name  ?? "The Seekers team";
+  const title = opts.title ?? "Seekers AI Automation Solutions";
+  const email = opts.email ?? process.env.EMAIL_FROM ?? "team@seekersai.org";
+
+  return `
+    <div style="margin-top:32px;padding-top:16px;border-top:1px solid #e5e5e5;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;color:#555;line-height:1.5">
+      <div style="display:flex;align-items:center;gap:12px">
+        <img src="${LOGO_URL}" alt="Seekers AI" width="42" height="42" style="display:block;border-radius:6px"/>
+        <div>
+          <div style="color:#111;font-weight:600;font-size:14px">${escapeHtml(name)}</div>
+          <div style="color:#666;font-size:12px">${escapeHtml(title)}</div>
+        </div>
+      </div>
+      <div style="margin-top:10px;color:#666;font-size:12px">
+        <a href="${SITE_URL}" style="color:#7c3aed;text-decoration:none">${SITE_URL.replace(/^https?:\/\//, "")}</a>
+        &nbsp;·&nbsp;
+        <a href="mailto:${escapeHtml(email)}" style="color:#7c3aed;text-decoration:none">${escapeHtml(email)}</a>
+      </div>
+    </div>
+  `.trim();
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 // Generic outreach send. body can be plain text (we'll wrap it in HTML) or HTML directly.
+// signatureHtml is appended AFTER the body in the rendered HTML.
 export async function sendOutreachEmail(opts: {
-  to:       string;
-  subject:  string;
-  body:     string;
-  fromName?: string;
-  replyTo?:  string;
+  to:            string;
+  subject:       string;
+  body:          string;
+  fromName?:     string;
+  replyTo?:      string;
+  signatureHtml?: string;
 }): Promise<SendOutreachEmailResult> {
   const from = opts.fromName
-    ? `"${opts.fromName}" <${process.env.EMAIL_FROM ?? "Team@seekersai.org"}>`
+    ? `"${opts.fromName}" <${process.env.EMAIL_FROM ?? "team@seekersai.org"}>`
     : FROM;
 
   // If body doesn't look like HTML, convert newlines to <br> and wrap minimally
   const isHtml = /<\/?[a-z][\s\S]*>/i.test(opts.body);
-  const html = isHtml
+  const bodyHtml = isHtml
     ? opts.body
-    : `<div style="font-family:sans-serif;max-width:560px;line-height:1.55;color:#222">
-         ${opts.body.split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`).join("")}
-       </div>`;
+    : opts.body.split(/\n{2,}/).map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br>")}</p>`).join("");
+
+  const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:560px;line-height:1.55;color:#222">
+${bodyHtml}
+${opts.signatureHtml ?? ""}
+</div>`;
 
   const info = await getTransporter().sendMail({
     from,
     to:       opts.to,
     subject:  opts.subject,
     html,
-    text:     isHtml ? undefined : opts.body,
+    text:     isHtml ? undefined : opts.body,    // text version is body only (no signature)
     replyTo:  opts.replyTo,
   });
 

@@ -650,18 +650,20 @@ Response:
       </div>
 
       <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ready-to-import n8n workflow</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ready-to-import n8n workflows</p>
         <p className="text-xs text-muted-foreground">
-          Pre-built workflow with two pieces:
-          <strong className="text-foreground"> (1) a webhook for lead ingestion</strong> any tool can POST to,
-          and <strong className="text-foreground">(2) an IMAP email trigger</strong> that watches your inbox for replies and fires the reply webhook.
+          <strong className="text-foreground">Main workflow:</strong> generic ingestion webhook (any tool) + IMAP reply detection.<br/>
+          <strong className="text-foreground">Apollo workflow:</strong> tailored field mapping for Apollo's exact data shape — drop your Apollo webhook URL straight in.
         </p>
         <div className="flex gap-2 flex-wrap">
           <a href="/n8n/seekers-crm-automation.json" download className="inline-block">
-            <Button size="sm" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Download workflow JSON</Button>
+            <Button size="sm" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Main workflow</Button>
+          </a>
+          <a href="/n8n/seekers-apollo-workflow.json" download className="inline-block">
+            <Button size="sm" variant="outline" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Apollo workflow</Button>
           </a>
           <a href="/n8n/SETUP.md" target="_blank" rel="noopener noreferrer" className="inline-block">
-            <Button size="sm" variant="outline" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Setup guide</Button>
+            <Button size="sm" variant="ghost" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Setup guide</Button>
           </a>
         </div>
       </div>
