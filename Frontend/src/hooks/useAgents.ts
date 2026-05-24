@@ -60,3 +60,38 @@ export function useRunAgent() {
     },
   });
 }
+
+export function useSaveRunAsActivity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId, type }: { runId: string; type?: "email" | "call" | "meeting" | "form" | "note" }) =>
+      apiFetch(`/agents/runs/${runId}/save-as-activity`, {
+        method: "POST",
+        body: JSON.stringify({ type: type ?? "note" }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["lead-detail"] });
+    },
+  });
+}
+
+export function useCreateTasksFromRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId, titles, project_id, priority }: {
+      runId: string;
+      titles: string[];
+      project_id?: string;
+      priority?: "low" | "medium" | "high" | "critical";
+    }) =>
+      apiFetch<{ created: number; tasks: unknown[] }>(`/agents/runs/${runId}/create-tasks`, {
+        method: "POST",
+        body: JSON.stringify({ titles, project_id, priority }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["dashboard-summary"] });
+    },
+  });
+}
