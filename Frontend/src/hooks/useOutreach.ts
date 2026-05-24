@@ -187,3 +187,35 @@ export function useEnrollmentSends(enrollmentId: string | null) {
     enabled:  !!enrollmentId,
   });
 }
+
+// ── Analytics ─────────────────────────────────────────────
+export interface OutreachAnalytics {
+  totals: {
+    enrollments_total:  number;
+    replied:            number;
+    reply_rate:         number;
+    sends_last_30_days: number;
+  };
+  by_status:    { status: EnrollmentStatus; count: number }[];
+  sends_by_day: { day: string; count: number }[];
+  per_sequence: {
+    sequence_id:   string;
+    sequence_name: string;
+    category:      string | null;
+    is_active:     boolean;
+    enrolled:      number;
+    active:        number;
+    replied:       number;
+    completed:     number;
+    sends:         number;
+    reply_rate:    number;
+  }[];
+}
+
+export function useOutreachAnalytics() {
+  return useQuery<OutreachAnalytics>({
+    queryKey: ["outreach", "analytics"],
+    queryFn:  () => apiFetch("/outreach/analytics"),
+    staleTime: 30_000,
+  });
+}

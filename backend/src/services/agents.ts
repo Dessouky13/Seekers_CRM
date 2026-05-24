@@ -77,10 +77,11 @@ export const AGENTS: AgentDef[] = [
       const { lead, activities } = await getLead(leadId);
       const recent = activities.slice(0, 5).map((a) => `- ${a.date} [${a.type}] ${a.description}`).join("\n") || "(no activity yet)";
       const summary = `${lead.name} @ ${lead.company} (${lead.category ?? "no niche"}) — stage: ${lead.stage}`;
-      const userPrompt = `Draft outbound outreach for this lead.
+      const userPrompt = `Draft outbound outreach for this lead. The email will be SENT AUTOMATICALLY as-is, so produce final copy — no placeholders, no "[insert here]", no commentary.
 
 LEAD:
 - Name: ${lead.name}
+- First name: ${lead.name.split(/\s+/)[0]}
 - Company: ${lead.company}
 - Email: ${lead.email ?? "—"}
 - Niche/Category: ${lead.category ?? "unknown"}
@@ -92,10 +93,19 @@ LEAD:
 Recent activity:
 ${recent}
 
-Produce:
-1. **Cold Email** — 5 sentences max. Specific opener tied to their niche. One concrete value prop with a measurable outcome. Soft CTA (15-min call this week).
-2. **LinkedIn DM** — 3 sentences max. Less salesy than the email. Curiosity-driven.
-3. **Follow-up trigger** — one line: when to nudge if no reply.`;
+OUTPUT FORMAT (strict — first line MUST be the subject):
+Subject: <subject here>
+
+<email body here — 4 to 6 sentences total>
+
+Sign off: "— The Seekers team"
+
+RULES:
+- Specific opener that references their niche (${lead.category ?? "their industry"}). No "I hope this email finds you well."
+- One concrete value prop with a measurable outcome (e.g. "cut your onboarding time by 60%").
+- Soft CTA: ask for a 15-minute call this week.
+- No placeholders. Address them by first name only.
+- Plain text only, no markdown formatting.`;
 
       return {
         label:        summary,

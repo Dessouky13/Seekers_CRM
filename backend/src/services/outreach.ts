@@ -17,6 +17,24 @@ export function renderTemplate(tpl: string, vars: Record<string, string | null |
   });
 }
 
+// Parse an AI-agent output that may begin with "Subject: ..." on the first line.
+// Returns { subject, body }. If no Subject: prefix, subject is null and body is the full output.
+export function parseSubjectAndBody(output: string): { subject: string | null; body: string } {
+  const trimmed = output.replace(/^\s+/, "");
+  const m = trimmed.match(/^Subject:\s*([^\n\r]+)[\r\n]+([\s\S]*)$/i);
+  if (m) {
+    return {
+      subject: m[1].trim().slice(0, 200),
+      body:    m[2].trim(),
+    };
+  }
+  // Sometimes models wrap output in ```markdown blocks — strip them.
+  const stripped = trimmed.replace(/^```\w*\s*|\s*```$/g, "").trim();
+  const m2 = stripped.match(/^Subject:\s*([^\n\r]+)[\r\n]+([\s\S]*)$/i);
+  if (m2) return { subject: m2[1].trim().slice(0, 200), body: m2[2].trim() };
+  return { subject: null, body: trimmed };
+}
+
 // Build the variables available to templates for a given lead.
 function buildLeadVars(lead: typeof leads.$inferSelect): Record<string, string> {
   return {
@@ -155,21 +173,25 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
 
   const vars = buildLeadVars(lead);
 
-  // Resolve subject + body
-  const subject = renderTemplate(step.subjectTemplate ?? "Following up — {{company}}", vars);
+  // Resolve subject + body. If an agent is set, it produces both; otherwise we use templates.
+  const fallbackSubject = renderTemplate(step.subjectTemplate ?? "Following up — {{company}}", vars);
+  let subject: string;
+  let body:    string;
 
-  let body: string;
   if (step.agentId) {
-    // Use AI agent to generate body for this specific lead
     const agent = findAgent(step.agentId);
     if (!agent || agent.scope !== "lead") {
-      body = renderTemplate(step.bodyTemplate ?? "(no template configured)", vars);
+      subject = fallbackSubject;
+      body    = renderTemplate(step.bodyTemplate ?? "(no template configured)", vars);
     } else {
       const run = await runAgent({ agentId: step.agentId, contextId: lead.id, userId: null });
-      body = run.output || renderTemplate(step.bodyTemplate ?? "", vars);
+      const parsed = parseSubjectAndBody(run.output);
+      subject = parsed.subject ?? fallbackSubject;
+      body    = parsed.body   || renderTemplate(step.bodyTemplate ?? "", vars);
     }
   } else {
-    body = renderTemplate(step.bodyTemplate ?? "(no body template)", vars);
+    subject = fallbackSubject;
+    body    = renderTemplate(step.bodyTemplate ?? "(no body template)", vars);
   }
 
   // Send
@@ -226,6 +248,73 @@ async function advanceStep(
       })
       .where(eq(outreachEnrollments.id, enrollment.id));
   }
+}
+
+// ── Handle a detected reply from a lead ──────────────────
+// Triggered by webhook from n8n (IMAP/Gmail) or Brevo inbound parsing.
+// Looks up the lead by email and pauses all active enrollments for them.
+export async function handleReply(opts: {
+  fromEmail:    string;
+  subject?:     string | null;
+  bodyPreview?: string | null;
+}) {
+  const emailLower = opts.fromEmail.toLowerCase().trim();
+  if (!emailLower) throw new Error("from_email required");
+
+  // Find lead by email (case-insensitive)
+  const [lead] = await db
+    .select()
+    .from(leads)
+    .where(sql`LOWER(${leads.email}) = ${emailLower}`)
+    .limit(1);
+
+  if (!lead) {
+    return { matched: false, leadId: null, pausedCount: 0 };
+  }
+
+  // Pause all active or paused enrollments for this lead
+  const updated = await db
+    .update(outreachEnrollments)
+    .set({
+      status:       "replied",
+      pausedReason: "Reply received",
+      completedAt:  new Date(),
+      nextSendAt:   null,
+    })
+    .where(and(
+      eq(outreachEnrollments.leadId, lead.id),
+      or(
+        eq(outreachEnrollments.status, "active"),
+        eq(outreachEnrollments.status, "paused"),
+      )!,
+    ))
+    .returning({ id: outreachEnrollments.id });
+
+  // Add a reply activity to the lead timeline
+  const preview = (opts.bodyPreview ?? "").slice(0, 500).trim();
+  await db.insert(leadActivities).values({
+    leadId:      lead.id,
+    type:        "email",
+    description: `[Reply received]${opts.subject ? ` ${opts.subject}` : ""}${preview ? `\n\n${preview}` : ""}`.slice(0, 4000),
+  });
+
+  // Move stage forward if still in early stages
+  const earlyStages = ["new_lead", "contacted"];
+  if (earlyStages.includes(lead.stage)) {
+    await db.update(leads)
+      .set({
+        stage:        "contacted",
+        lastActivity: new Date().toISOString().slice(0, 10),
+        updatedAt:    new Date(),
+      })
+      .where(eq(leads.id, lead.id));
+  } else {
+    await db.update(leads)
+      .set({ lastActivity: new Date().toISOString().slice(0, 10), updatedAt: new Date() })
+      .where(eq(leads.id, lead.id));
+  }
+
+  return { matched: true, leadId: lead.id, pausedCount: updated.length };
 }
 
 // ── Auto-enroll a freshly created lead ────────────────────

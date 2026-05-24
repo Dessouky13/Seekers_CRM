@@ -21,8 +21,11 @@ import {
   useSequences, useSequence, useCreateSequence, useUpdateSequence, useDeleteSequence,
   useAddStep, useUpdateStep, useDeleteStep,
   useEnrollments, usePauseEnrollment, useResumeEnrollment, useCancelEnrollment,
+  useOutreachAnalytics,
   type SequenceStep, type Channel, type EnrollmentStatus,
 } from "@/hooks/useOutreach";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { TrendingUp, MessageCircle, Mail as MailIcon, BarChart3 } from "lucide-react";
 import { useAgents } from "@/hooks/useAgents";
 import { cn } from "@/lib/utils";
 
@@ -58,7 +61,8 @@ export default function Outreach() {
         <TabsList className="mb-4">
           <TabsTrigger value="sequences">Sequences</TabsTrigger>
           <TabsTrigger value="enrollments">Live Enrollments</TabsTrigger>
-          <TabsTrigger value="ingest">Lead Ingestion</TabsTrigger>
+          <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          <TabsTrigger value="ingest">Setup & Ingestion</TabsTrigger>
         </TabsList>
 
         <TabsContent value="sequences">
@@ -69,6 +73,10 @@ export default function Outreach() {
 
         <TabsContent value="enrollments">
           <EnrollmentsList />
+        </TabsContent>
+
+        <TabsContent value="analytics">
+          <AnalyticsTab />
         </TabsContent>
 
         <TabsContent value="ingest">
@@ -482,6 +490,97 @@ function EnrollmentsList() {
   );
 }
 
+// ── Analytics tab ─────────────────────────────────────────
+function AnalyticsTab() {
+  const { data, isLoading } = useOutreachAnalytics();
+
+  if (isLoading) return <p className="text-sm text-muted-foreground text-center py-12">Loading analytics…</p>;
+  if (!data)     return <p className="text-sm text-muted-foreground text-center py-12">No analytics available yet.</p>;
+
+  return (
+    <div className="space-y-4">
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard icon={MessageCircle} label="Enrollments"     value={data.totals.enrollments_total} />
+        <KpiCard icon={TrendingUp}    label="Replied"         value={data.totals.replied} />
+        <KpiCard icon={BarChart3}     label="Reply Rate"      value={`${data.totals.reply_rate}%`} />
+        <KpiCard icon={MailIcon}      label="Sent (30d)"      value={data.totals.sends_last_30_days} />
+      </div>
+
+      {/* Sends-by-day chart */}
+      <div className="rounded-xl border border-border bg-card p-5">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Sends — Last 30 Days</p>
+        {data.sends_by_day.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-12 italic">No sends yet. Once a sequence sends its first email, the chart populates here.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={data.sends_by_day}>
+              <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(226,12%,55%)" }} axisLine={false} tickLine={false} tickFormatter={(d) => d.slice(5)} />
+              <YAxis tick={{ fontSize: 10, fill: "hsl(226,12%,55%)" }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <Tooltip
+                contentStyle={{ background: "hsl(230,22%,12%)", border: "1px solid hsl(230,16%,18%)", borderRadius: 8, fontSize: 12 }}
+                labelStyle={{ color: "hsl(226,20%,88%)" }}
+              />
+              <Bar dataKey="count" fill="hsl(246,90%,60%)" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* Per-sequence table */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="px-5 py-3 border-b border-border">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Per-Sequence Performance</p>
+        </div>
+        {data.per_sequence.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-12 italic">No sequences yet.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/30">
+                {["Sequence", "Niche", "Enrolled", "Active", "Replied", "Completed", "Sends", "Reply Rate"].map((h) => (
+                  <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.per_sequence.map((s) => (
+                <tr key={s.sequence_id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                  <td className="px-4 py-2.5">
+                    <span className="text-foreground font-medium">{s.sequence_name}</span>
+                    {!s.is_active && <Badge variant="outline" className="ml-2 text-[9px]">INACTIVE</Badge>}
+                  </td>
+                  <td className="px-4 py-2.5 text-muted-foreground text-xs">{s.category ?? "—"}</td>
+                  <td className="px-4 py-2.5 tabular-nums">{s.enrolled}</td>
+                  <td className="px-4 py-2.5 tabular-nums text-success">{s.active}</td>
+                  <td className="px-4 py-2.5 tabular-nums text-primary">{s.replied}</td>
+                  <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{s.completed}</td>
+                  <td className="px-4 py-2.5 tabular-nums">{s.sends}</td>
+                  <td className="px-4 py-2.5 tabular-nums font-semibold">
+                    <span className={cn(s.reply_rate >= 10 ? "text-success" : "text-muted-foreground")}>{s.reply_rate}%</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function KpiCard({ icon: Icon, label, value }: { icon: typeof Mail; label: string; value: string | number }) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <Icon className="h-3.5 w-3.5 text-primary" />
+      </div>
+      <p className="text-2xl font-semibold text-foreground tabular-nums">{value}</p>
+    </div>
+  );
+}
+
 // ── Lead Ingestion docs ───────────────────────────────────
 function IngestDocs() {
   const apiBase = (import.meta.env.VITE_API_URL as string) ?? "https://agency.seekersai.org/api/v1";
@@ -528,22 +627,43 @@ Response:
       </div>
 
       <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">n8n example</p>
-        <pre className="bg-muted/40 rounded-lg p-3 text-xs overflow-x-auto"><code>HTTP Request node:
-  Method:       POST
-  URL:          {apiBase}/outreach/leads/ingest
-  Authentication: Header Auth
-  Header Name:    X-API-Key
-  Header Value:   {`{{$secrets.AUTOMATION_API_KEY}}`}
-  Body (JSON):
-  {`{
-    "name":    {{ $json.firstName }} {{ $json.lastName }},
-    "company": {{ $json.companyName }},
-    "email":   {{ $json.email }},
-    "source":  "apollo",
-    "category": {{ $json.industry }}
-  }`}
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Reply detection webhook</p>
+        <pre className="bg-muted/40 rounded-lg p-3 text-xs overflow-x-auto"><code>POST {apiBase}/outreach/webhooks/reply
+Headers:
+  Content-Type: application/json
+  X-API-Key: {`<your AUTOMATION_API_KEY>`}
+
+Body:
+{`{
+  "from_email": "jane@acme.com",
+  "subject":    "Re: Quick question",
+  "body_preview": "Sounds good — let's set up a call."
+}`}
+
+Response:
+{`{ "matched": true, "leadId": "uuid", "pausedCount": 1 }`}
 </code></pre>
+        <p className="text-xs text-muted-foreground">
+          When a lead replies, this pauses all their active enrollments (status → <code>replied</code>),
+          adds a reply activity to the timeline, and moves the lead from <code>new_lead</code> → <code>contacted</code>.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-5 space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ready-to-import n8n workflow</p>
+        <p className="text-xs text-muted-foreground">
+          Pre-built workflow with two pieces:
+          <strong className="text-foreground"> (1) a webhook for lead ingestion</strong> any tool can POST to,
+          and <strong className="text-foreground">(2) an IMAP email trigger</strong> that watches your inbox for replies and fires the reply webhook.
+        </p>
+        <div className="flex gap-2 flex-wrap">
+          <a href="/n8n/seekers-crm-automation.json" download className="inline-block">
+            <Button size="sm" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Download workflow JSON</Button>
+          </a>
+          <a href="/n8n/SETUP.md" target="_blank" rel="noopener noreferrer" className="inline-block">
+            <Button size="sm" variant="outline" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Setup guide</Button>
+          </a>
+        </div>
       </div>
     </div>
   );

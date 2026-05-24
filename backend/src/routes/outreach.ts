@@ -17,7 +17,7 @@ import {
 import { authMiddleware, adminOnly } from "../middleware/auth";
 import { createMiddleware } from "hono/factory";
 import {
-  enrollLead, processDueSends, autoEnrollIfMatchingCategory,
+  enrollLead, processDueSends, autoEnrollIfMatchingCategory, handleReply,
 } from "../services/outreach";
 import type { AppEnv } from "../types";
 
@@ -315,6 +315,95 @@ outreach.get("/enrollments/:id/sends", authMiddleware, async (c) => {
 outreach.post("/scheduler/tick", authMiddleware, adminOnly, async (c) => {
   const result = await processDueSends(50);
   return c.json(result);
+});
+
+// ── REPLY WEBHOOK (API-key auth) ──────────────────────────
+// Called by n8n IMAP/Gmail trigger or Brevo inbound webhook when a lead replies.
+const replySchema = z.object({
+  from_email:   z.string().email(),
+  subject:      z.string().max(500).optional().nullable(),
+  body_preview: z.string().max(2000).optional().nullable(),
+}).passthrough();
+
+outreach.post("/webhooks/reply", apiKeyAuth, async (c) => {
+  const body = replySchema.parse(await c.req.json());
+  try {
+    const result = await handleReply({
+      fromEmail:   body.from_email,
+      subject:     body.subject ?? null,
+      bodyPreview: body.body_preview ?? null,
+    });
+    return c.json(result);
+  } catch (err: any) {
+    return c.json({ error: err?.message ?? "Reply handling failed" }, 400);
+  }
+});
+
+// ── ANALYTICS ─────────────────────────────────────────────
+outreach.get("/analytics", authMiddleware, async (c) => {
+  // Overall enrollment counts by status
+  const byStatus = await db
+    .select({
+      status: outreachEnrollments.status,
+      count:  sql<number>`COUNT(*)::int`,
+    })
+    .from(outreachEnrollments)
+    .groupBy(outreachEnrollments.status);
+
+  // Sends over last 30 days (one row per day)
+  const sendsByDay = await db
+    .select({
+      day:   sql<string>`DATE(${outreachSends.sentAt})::text`,
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(outreachSends)
+    .where(sql`${outreachSends.sentAt} > NOW() - INTERVAL '30 days'`)
+    .groupBy(sql`DATE(${outreachSends.sentAt})`)
+    .orderBy(sql`DATE(${outreachSends.sentAt}) DESC`);
+
+  // Per-sequence stats: enrolled / replied / completed / sends
+  const perSequence = await db
+    .select({
+      sequenceId:   outreachSequences.id,
+      sequenceName: outreachSequences.name,
+      category:     outreachSequences.category,
+      isActive:     outreachSequences.isActive,
+      enrolled:     sql<number>`(SELECT COUNT(*)::int FROM ${outreachEnrollments} WHERE ${outreachEnrollments.sequenceId} = ${outreachSequences.id})`,
+      active:       sql<number>`(SELECT COUNT(*)::int FROM ${outreachEnrollments} WHERE ${outreachEnrollments.sequenceId} = ${outreachSequences.id} AND ${outreachEnrollments.status} = 'active')`,
+      replied:      sql<number>`(SELECT COUNT(*)::int FROM ${outreachEnrollments} WHERE ${outreachEnrollments.sequenceId} = ${outreachSequences.id} AND ${outreachEnrollments.status} = 'replied')`,
+      completed:    sql<number>`(SELECT COUNT(*)::int FROM ${outreachEnrollments} WHERE ${outreachEnrollments.sequenceId} = ${outreachSequences.id} AND ${outreachEnrollments.status} = 'completed')`,
+      sends:        sql<number>`(SELECT COUNT(*)::int FROM ${outreachSends} s JOIN ${outreachEnrollments} e ON s.enrollment_id = e.id WHERE e.sequence_id = ${outreachSequences.id})`,
+    })
+    .from(outreachSequences)
+    .orderBy(desc(outreachSequences.updatedAt));
+
+  // Totals
+  const total = byStatus.reduce((acc, s) => acc + Number(s.count), 0);
+  const replied = Number(byStatus.find((s) => s.status === "replied")?.count ?? 0);
+  const sent30d = sendsByDay.reduce((acc, d) => acc + Number(d.count), 0);
+
+  return c.json({
+    totals: {
+      enrollments_total:     total,
+      replied,
+      reply_rate:            total > 0 ? Math.round((replied / total) * 100) : 0,
+      sends_last_30_days:    sent30d,
+    },
+    by_status: byStatus.map((r) => ({ status: r.status, count: Number(r.count) })),
+    sends_by_day: sendsByDay.map((r) => ({ day: r.day, count: Number(r.count) })).reverse(),
+    per_sequence: perSequence.map((r) => ({
+      sequence_id:   r.sequenceId,
+      sequence_name: r.sequenceName,
+      category:      r.category,
+      is_active:     r.isActive,
+      enrolled:      Number(r.enrolled),
+      active:        Number(r.active),
+      replied:       Number(r.replied),
+      completed:     Number(r.completed),
+      sends:         Number(r.sends),
+      reply_rate:    Number(r.enrolled) > 0 ? Math.round((Number(r.replied) / Number(r.enrolled)) * 100) : 0,
+    })),
+  });
 });
 
 export default outreach;

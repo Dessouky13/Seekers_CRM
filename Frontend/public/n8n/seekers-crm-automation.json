@@ -1,0 +1,255 @@
+{
+  "name": "Seekers CRM — Lead Ingestion + Reply Detection",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "seekers-lead-ingest",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook: New Lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [260, 220],
+      "webhookId": "seekers-lead-ingest",
+      "notes": "Public webhook URL. Apollo / Instantly / your scraper / a Google Form — anything that can POST JSON — sends new leads here."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "name",
+              "value": "={{ $json.body.name || ($json.body.firstName + ' ' + $json.body.lastName) || $json.body.full_name }}"
+            },
+            {
+              "name": "company",
+              "value": "={{ $json.body.company || $json.body.companyName || $json.body.organization }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.body.email }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.body.phone || $json.body.phoneNumber || '' }}"
+            },
+            {
+              "name": "source",
+              "value": "={{ $json.body.source || 'n8n' }}"
+            },
+            {
+              "name": "category",
+              "value": "={{ $json.body.category || $json.body.niche || $json.body.industry || '' }}"
+            },
+            {
+              "name": "notes",
+              "value": "={{ $json.body.notes || $json.body.note || '' }}"
+            }
+          ],
+          "number": [
+            {
+              "name": "deal_value",
+              "value": "={{ Number($json.body.deal_value || $json.body.dealValue || 0) }}"
+            }
+          ]
+        },
+        "options": {
+          "dotNotation": false
+        }
+      },
+      "name": "Map Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [480, 220],
+      "notes": "Normalises common field names from different sources. Add more mappings here as you connect new tools."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SEEKERS_API_BASE }}/outreach/leads/ingest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "name": "Ingest into CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [700, 220],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "seekers-crm-api-key",
+          "name": "Seekers CRM API Key"
+        }
+      },
+      "notes": "POST → /outreach/leads/ingest with X-API-Key header. Returns { id, created, deduped }."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, lead: $json } }}",
+        "options": {}
+      },
+      "name": "Respond to Source",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [920, 220]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute",
+              "value": 5
+            }
+          ]
+        },
+        "downloadAttachments": false,
+        "format": "simple",
+        "options": {
+          "customEmailConfig": "[\"UNSEEN\"]"
+        }
+      },
+      "name": "IMAP: Check for Replies",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [260, 540],
+      "credentials": {
+        "imap": {
+          "id": "seekers-outreach-imap",
+          "name": "Outreach Email IMAP"
+        }
+      },
+      "notes": "Polls inbox every 5 min for unread emails. Only marks them read after we process them."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "is-reply",
+              "leftValue": "={{ $json.subject }}",
+              "rightValue": "(?i)^(re|fwd|fw):",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Is Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 540],
+      "notes": "Only process emails whose subject starts with Re:/Fwd: — skip unrelated incoming mail."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "from_email",
+              "value": "={{ ($json.from && ($json.from.value ? $json.from.value[0].address : $json.from)) || $json.fromAddress || '' }}"
+            },
+            {
+              "name": "subject",
+              "value": "={{ $json.subject || '' }}"
+            },
+            {
+              "name": "body_preview",
+              "value": "={{ ($json.text || $json.textPlain || '').substring(0, 500) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Extract Reply Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [700, 480]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SEEKERS_API_BASE }}/outreach/webhooks/reply",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ from_email: $json.from_email, subject: $json.subject, body_preview: $json.body_preview }) }}",
+        "options": {}
+      },
+      "name": "Notify CRM of Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [920, 480],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "seekers-crm-api-key",
+          "name": "Seekers CRM API Key"
+        }
+      },
+      "notes": "Pauses active enrollments for this lead and moves their stage forward."
+    }
+  ],
+  "connections": {
+    "Webhook: New Lead": {
+      "main": [[{ "node": "Map Fields", "type": "main", "index": 0 }]]
+    },
+    "Map Fields": {
+      "main": [[{ "node": "Ingest into CRM", "type": "main", "index": 0 }]]
+    },
+    "Ingest into CRM": {
+      "main": [[{ "node": "Respond to Source", "type": "main", "index": 0 }]]
+    },
+    "IMAP: Check for Replies": {
+      "main": [[{ "node": "Is Reply?", "type": "main", "index": 0 }]]
+    },
+    "Is Reply?": {
+      "main": [
+        [{ "node": "Extract Reply Data", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Extract Reply Data": {
+      "main": [[{ "node": "Notify CRM of Reply", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": false,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "seekers-crm-v1",
+  "id": "seekers-crm-automation",
+  "meta": {
+    "instanceId": "seekers-crm"
+  },
+  "tags": [
+    { "name": "Seekers" },
+    { "name": "CRM" },
+    { "name": "Outreach" }
+  ]
+}
