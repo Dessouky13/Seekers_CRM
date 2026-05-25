@@ -8,7 +8,7 @@ import {
   createLeadSchema, updateLeadSchema, createLeadActivitySchema,
   crmInsightsQuerySchema,
 } from "../utils/validators";
-import { getOpenAIClient } from "../services/openai";
+import { orChat } from "../services/openrouter";
 import type { AppEnv } from "../types";
 
 const crm = new Hono<AppEnv>();
@@ -320,7 +320,7 @@ crm.get("/insights", authMiddleware, async (c) => {
   let messageSummary: string | null = null;
   let suggestions: string[] = [];
 
-  if (parsed.include_ai === "true" && process.env.OPENAI_API_KEY) {
+  if (parsed.include_ai === "true" && process.env.OPENROUTER_API_KEY) {
     const sampleMessages = await db
       .select({ description: leadActivities.description })
       .from(leadActivities)
@@ -333,31 +333,33 @@ crm.get("/insights", authMiddleware, async (c) => {
       .limit(50);
 
     if (sampleMessages.length > 0) {
-      // Wrap OpenAI call — if the key is missing/invalid/rate-limited, degrade
-      // gracefully instead of bubbling a 401 to the client (which the frontend
-      // misinterprets as "user logged out" and triggers an auto-logout).
+      // OpenRouter — same key that powers the agents. Cheap + fast (gemini-2.0-flash).
+      // Wrapped in try/catch so any upstream failure (key revoked, rate limit) degrades
+      // gracefully to message_summary=null instead of breaking the whole response.
       try {
-        const openai = getOpenAIClient();
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
+        const result = await orChat({
           temperature: 0.3,
+          max_tokens:  500,
           messages: [
             {
               role: "system",
-              content: "You are a CRM outreach analyst. Return concise operational output only.",
+              content: "You are a CRM outreach analyst. Return concise operational output only. Output a 1-2 sentence summary, then a blank line, then exactly 3 short numbered suggestions for improving outreach messages. No preamble.",
             },
             {
               role: "user",
-              content: `Summarize outreach quality and provide 3 practical message-improvement suggestions.\n\nOutreach notes:\n${sampleMessages.map((m) => `- ${m.description}`).join("\n")}`,
+              content: `Summarize the team's recent outreach quality. Then give 3 practical message-improvement suggestions.\n\nOutreach notes:\n${sampleMessages.map((m) => `- ${m.description?.slice(0, 280) ?? ""}`).join("\n")}`,
             },
           ],
         });
 
-        const raw = completion.choices[0]?.message?.content?.trim() ?? "";
-        messageSummary = raw || null;
-        suggestions = raw
-          .split("\n")
-          .map((line) => line.replace(/^[-\d.)\s]+/, "").trim())
+        const raw = result.output ?? "";
+        // Split into summary (first paragraph) + suggestions (subsequent numbered lines)
+        const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+        const numbered = lines.filter((l) => /^[\-\*\d]/.test(l));
+        const summaryLines = lines.filter((l) => !/^[\-\*\d]/.test(l));
+        messageSummary = summaryLines.join(" ").trim() || null;
+        suggestions = numbered
+          .map((line) => line.replace(/^[\-\*\d.)\s]+/, "").trim())
           .filter(Boolean)
           .slice(0, 3);
       } catch (err: any) {
