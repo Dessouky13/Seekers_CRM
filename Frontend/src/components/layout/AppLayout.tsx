@@ -2,6 +2,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { Topbar } from "./Topbar";
 import { MotivationalBanner } from "@/components/MotivationalBanner";
+import { CommandPalette } from "@/components/modules/CommandPalette";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -16,6 +17,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       <MotivationalBanner />
+      <CommandPalette />
     </SidebarProvider>
   );
 }

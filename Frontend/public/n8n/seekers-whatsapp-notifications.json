@@ -1,0 +1,150 @@
+{
+  "name": "Seekers CRM — WhatsApp Notifications (via Twilio)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "seekers-events",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Receive CRM Event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "seekers-events",
+      "notes": "Subscribe this URL in the CRM: Settings → Outbound Webhooks → New webhook → event '*' (all). The CRM POSTs every event here."
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "outputKey": "lead.created",         "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" }, "conditions": [{ "leftValue": "={{ $json.body.event }}", "rightValue": "lead.created",         "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "lead.replied",         "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" }, "conditions": [{ "leftValue": "={{ $json.body.event }}", "rightValue": "lead.replied",         "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "lead.stage_changed",   "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" }, "conditions": [{ "leftValue": "={{ $json.body.event }}", "rightValue": "lead.stage_changed",   "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "enrollment.completed", "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" }, "conditions": [{ "leftValue": "={{ $json.body.event }}", "rightValue": "enrollment.completed", "operator": { "type": "string", "operation": "equals" } }] } }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "name": "Route by Event",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [480, 300],
+      "notes": "Splits incoming CRM events into one branch per event type. The 'extra' branch catches anything not explicitly handled."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "message", "value": "=🆕 *New Lead in CRM*\n\n*{{ $json.body.data.name }}* — {{ $json.body.data.company }}\nNiche: {{ $json.body.data.category || '—' }}\nSource: {{ $json.body.data.source || '—' }}\nEmail: {{ $json.body.data.email || '—' }}\n\nOpen: https://seekers-crm.vercel.app/crm" }
+          ]
+        }
+      },
+      "name": "Format: New Lead",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [720, 140]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "message", "value": "=💬 *Lead Replied!*\n\n*{{ $json.body.data.lead_name }}* — {{ $json.body.data.lead_company }}\n\n_{{ $json.body.data.subject || '(no subject)' }}_\n\nPreview: {{ ($json.body.data.body_preview || '').substring(0, 200) }}\n\nSequence auto-paused. Take it over: https://seekers-crm.vercel.app/crm" }
+          ]
+        }
+      },
+      "name": "Format: Reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [720, 240]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "message", "value": "=📊 *Stage Changed*\n\n*{{ $json.body.data.lead_name }}* — {{ $json.body.data.lead_company }}\n\n{{ ($json.body.data.from_stage || '').replace(/_/g, ' ') }} → *{{ ($json.body.data.to_stage || '').replace(/_/g, ' ') }}*\n\nDeal value: ${{ $json.body.data.deal_value || 0 }}" }
+          ]
+        }
+      },
+      "name": "Format: Stage Change",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [720, 340]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "message", "value": "=✅ *Sequence Completed*\n\nAll outreach steps sent for *{{ $json.body.data.lead_name || 'a lead' }}*. No reply received.\n\nDecide next move: https://seekers-crm.vercel.app/crm" }
+          ]
+        }
+      },
+      "name": "Format: Sequence Done",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [720, 440]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.twilio.com/2010-04-01/Accounts/{{ $env.TWILIO_ACCOUNT_SID }}/Messages.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "From", "value": "={{ $env.TWILIO_WHATSAPP_FROM }}" },
+            { "name": "To",   "value": "={{ $env.TEAM_WHATSAPP_TO }}" },
+            { "name": "Body", "value": "={{ $json.message }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Send to WhatsApp via Twilio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1000, 290],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "twilio-basic-auth",
+          "name": "Twilio Basic Auth"
+        }
+      },
+      "notes": "Twilio Basic Auth: username = ACCOUNT_SID, password = AUTH_TOKEN. Required env vars in n8n: TWILIO_ACCOUNT_SID, TWILIO_WHATSAPP_FROM (e.g. 'whatsapp:+14155238886' for sandbox), TEAM_WHATSAPP_TO (your team's WA number 'whatsapp:+201xxxxxxxxx')."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true } }}"
+      },
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1240, 290]
+    }
+  ],
+  "connections": {
+    "Receive CRM Event": { "main": [[{ "node": "Route by Event", "type": "main", "index": 0 }]] },
+    "Route by Event": {
+      "main": [
+        [{ "node": "Format: New Lead",       "type": "main", "index": 0 }],
+        [{ "node": "Format: Reply",          "type": "main", "index": 0 }],
+        [{ "node": "Format: Stage Change",   "type": "main", "index": 0 }],
+        [{ "node": "Format: Sequence Done",  "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Format: New Lead":      { "main": [[{ "node": "Send to WhatsApp via Twilio", "type": "main", "index": 0 }]] },
+    "Format: Reply":         { "main": [[{ "node": "Send to WhatsApp via Twilio", "type": "main", "index": 0 }]] },
+    "Format: Stage Change":  { "main": [[{ "node": "Send to WhatsApp via Twilio", "type": "main", "index": 0 }]] },
+    "Format: Sequence Done": { "main": [[{ "node": "Send to WhatsApp via Twilio", "type": "main", "index": 0 }]] },
+    "Send to WhatsApp via Twilio": { "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "seekers-whatsapp-v1",
+  "id": "seekers-whatsapp-notifications",
+  "tags": [{ "name": "Seekers" }, { "name": "WhatsApp" }, { "name": "Notifications" }]
+}

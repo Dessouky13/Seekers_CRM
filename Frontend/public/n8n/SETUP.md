@@ -187,7 +187,38 @@ Download [`seekers-rb2b-workflow.json`](./seekers-rb2b-workflow.json). RB2B iden
 
 For scraped CSVs, conference attendee lists, partner intros, etc.: go to **CRM → Outreach → Setup & Ingestion** → scroll down to the **Import Leads from CSV** panel. Drag a CSV in, the UI auto-detects columns, you confirm the mapping, hit Import. Idempotent — re-uploading the same list won't create duplicates.
 
-### F. Instantly / Lemlist / SalesQL / Hunter
+### F. WhatsApp Notifications via Twilio
+
+Download [`seekers-whatsapp-notifications.json`](./seekers-whatsapp-notifications.json). This workflow listens to **outbound webhooks** from the CRM (subscribed in Settings → Outbound Webhooks) and sends formatted WhatsApp messages to your team.
+
+**Twilio setup (free sandbox for testing):**
+1. Sign up at https://www.twilio.com — free trial includes WhatsApp sandbox + $15 credit
+2. Go to **Messaging → Try it out → Send a WhatsApp message** to grab your sandbox number (looks like `whatsapp:+14155238886`)
+3. From your phone, send the activation code (e.g. `join whatever-shadow`) to that number to opt in
+4. Copy your **Account SID** and **Auth Token** from Twilio Console
+
+**n8n setup:**
+1. Create credential `Twilio Basic Auth` — type **Basic Auth**, user = Account SID, password = Auth Token
+2. Set these env vars in n8n:
+   ```
+   TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+   TEAM_WHATSAPP_TO=whatsapp:+201xxxxxxxxx
+   ```
+3. Import `seekers-whatsapp-notifications.json` → activate it → copy the public webhook URL
+
+**CRM subscription:**
+1. CRM → **Settings → Outbound Webhooks → New Webhook**
+2. Name: `WhatsApp notifications`
+3. Event: `*` (all events)
+4. Target URL: the n8n webhook URL from step 3 above
+5. Save → click the **Test** button (paper-plane icon) to verify the path
+
+You'll get a WhatsApp ping every time a lead is created, replies, has its stage changed, or finishes a sequence. The workflow handles formatting — different events produce different message shapes (`🆕 New Lead`, `💬 Lead Replied`, `📊 Stage Changed`, `✅ Sequence Completed`).
+
+For production beyond Twilio sandbox: get Meta WhatsApp Business API approval for your number → swap the Twilio HTTP request for Meta's Cloud API node in n8n. Same flow shape.
+
+### G. Instantly / Lemlist / SalesQL / Hunter
 Same approach as the others — set your tool's webhook URL to the **Main workflow's** n8n endpoint. The `Map Fields` node has fallbacks for the common field names.
 
 ### C. Google Sheet (cold lists)

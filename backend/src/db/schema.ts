@@ -373,6 +373,39 @@ export const outreachSends = pgTable("outreach_sends", {
   enrollmentIdx: index("idx_sends_enrollment").on(t.enrollmentId, t.sentAt),
 }));
 
+// ── Webhook Subscriptions ─────────────────────────────────
+// Lets the user wire CRM events to any external system (n8n, Slack, WhatsApp via
+// Twilio, custom servers). Each subscription listens for one event type and
+// POSTs to a target URL with the event payload.
+export const webhookSubscriptions = pgTable("webhook_subscriptions", {
+  id:           uuid("id").primaryKey().defaultRandom(),
+  name:         text("name").notNull(),
+  event:        text("event").notNull(),                 // e.g. "lead.created", "lead.replied"
+  url:          text("url").notNull(),
+  secret:       text("secret"),                          // optional — sent as X-Webhook-Secret header
+  isActive:     boolean("is_active").notNull().default(true),
+  createdBy:    uuid("created_by").references(() => profiles.id, { onDelete: "set null" }),
+  createdAt:    timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:    timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  eventActiveIdx: index("idx_webhook_subs_event_active").on(t.event, t.isActive),
+}));
+
+// ── Webhook Delivery Log (for debugging) ─────────────────
+export const webhookDeliveries = pgTable("webhook_deliveries", {
+  id:             uuid("id").primaryKey().defaultRandom(),
+  subscriptionId: uuid("subscription_id").references(() => webhookSubscriptions.id, { onDelete: "cascade" }),
+  event:          text("event").notNull(),
+  url:            text("url").notNull(),
+  payload:        text("payload").notNull(),
+  statusCode:     integer("status_code"),
+  responseBody:   text("response_body"),
+  error:          text("error"),
+  deliveredAt:    timestamp("delivered_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  subIdx: index("idx_webhook_deliveries_sub").on(t.subscriptionId, t.deliveredAt),
+}));
+
 // ── Vault Categories (dynamic, team-managed) ─────────────
 export const vaultCategories = pgTable("vault_categories", {
   id:        uuid("id").primaryKey().defaultRandom(),

@@ -9,6 +9,7 @@ import {
   crmInsightsQuerySchema,
 } from "../utils/validators";
 import { orChat } from "../services/openrouter";
+import { fireEventAsync } from "../services/webhooks";
 import type { AppEnv } from "../types";
 
 const crm = new Hono<AppEnv>();
@@ -160,6 +161,17 @@ crm.patch("/leads/:id", authMiddleware, async (c) => {
       type:        "note",
       description: `Stage moved to ${body.stage!.replace(/_/g, " ")}`,
       createdBy:   user.id,
+    });
+
+    // Fire webhook for stage change (and lead.assigned if it was an assignment change too)
+    fireEventAsync("lead.stage_changed", {
+      lead_id:     updated.id,
+      lead_name:   updated.name,
+      lead_company: updated.company,
+      from_stage:  existing.stage,
+      to_stage:    updated.stage,
+      assignee_id: updated.assigneeId,
+      deal_value:  Number(updated.dealValue ?? 0),
     });
   }
 

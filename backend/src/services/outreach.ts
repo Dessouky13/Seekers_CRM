@@ -7,6 +7,7 @@ import {
 } from "../db/schema";
 import { sendOutreachEmail, buildDefaultSignature } from "./email";
 import { findAgent, runAgent } from "./agents";
+import { fireEventAsync } from "./webhooks";
 
 // Mustache-lite template renderer. Supports {{name}}, {{company}}, etc.
 // Missing keys render as empty string. Whitespace inside braces is ignored.
@@ -220,6 +221,18 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
   // Send
   const result = await sendOutreachEmail({ to: lead.email, subject, body, fromName, signatureHtml });
 
+  // Fire webhook for outreach.sent
+  fireEventAsync("outreach.sent", {
+    lead_id:      lead.id,
+    lead_name:    lead.name,
+    lead_company: lead.company,
+    lead_email:   lead.email,
+    sequence_id:  enrollment.sequenceId,
+    step_index:   enrollment.currentStep,
+    subject,
+    sent_at:      new Date().toISOString(),
+  });
+
   // Persist send
   await db.insert(outreachSends).values({
     enrollmentId: enrollment.id,
@@ -336,6 +349,17 @@ export async function handleReply(opts: {
       .set({ lastActivity: new Date().toISOString().slice(0, 10), updatedAt: new Date() })
       .where(eq(leads.id, lead.id));
   }
+
+  // Fire lead.replied event for any subscribed webhook (Slack, WhatsApp, etc.)
+  fireEventAsync("lead.replied", {
+    lead_id:      lead.id,
+    lead_name:    lead.name,
+    lead_company: lead.company,
+    lead_email:   lead.email,
+    subject:      opts.subject,
+    body_preview: opts.bodyPreview,
+    paused_count: updated.length,
+  });
 
   return { matched: true, leadId: lead.id, pausedCount: updated.length };
 }

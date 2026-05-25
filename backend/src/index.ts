@@ -18,6 +18,7 @@ import notesRouter         from "./routes/notes";
 import vaultRouter         from "./routes/vault";
 import agentsRouter        from "./routes/agents";
 import outreachRouter      from "./routes/outreach";
+import webhooksRouter      from "./routes/webhooks";
 import { db } from "./db/client";
 import { tasks } from "./db/schema";
 import { runStaleLeadNotificationSweep } from "./services/notifications";
@@ -52,6 +53,7 @@ api.route("/notes",         notesRouter);
 api.route("/vault",         vaultRouter);
 api.route("/agents",        agentsRouter);
 api.route("/outreach",      outreachRouter);
+api.route("/webhooks",      webhooksRouter);
 
 app.route("/api/v1", api);
 

@@ -19,6 +19,7 @@ import { createMiddleware } from "hono/factory";
 import {
   enrollLead, processDueSends, autoEnrollIfMatchingCategory, handleReply,
 } from "../services/outreach";
+import { fireEventAsync } from "../services/webhooks";
 import type { AppEnv } from "../types";
 
 const outreach = new Hono<AppEnv>();
@@ -189,6 +190,16 @@ outreach.post("/leads/ingest", apiKeyAuth, async (c) => {
 
   // Auto-enroll if matching active sequence exists
   await autoEnrollIfMatchingCategory(lead.id, lead.category);
+
+  // Fire lead.created event for webhooks (Slack ping, WhatsApp alert, etc.)
+  fireEventAsync("lead.created", {
+    lead_id:  lead.id,
+    name:     lead.name,
+    company:  lead.company,
+    email:    lead.email,
+    source:   lead.source,
+    category: lead.category,
+  });
 
   return c.json({ id: lead.id, created: true, deduped: false }, 201);
 });
