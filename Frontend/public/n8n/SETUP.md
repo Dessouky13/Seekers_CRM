@@ -151,8 +151,44 @@ Open your CRM → **CRM** page → you'll see "Test Lead — Acme SaaS" with sou
 - `notes` = title + seniority + employee count + location + LinkedIn URL (gold for sales context)
 - contacts without an email are auto-skipped (returns 422 to Apollo)
 
-### B. Instantly / Lemlist / SalesQL / Hunter
-Same approach — set your tool's webhook URL to the n8n endpoint. The `Map Fields` node has fallbacks for the common field names.
+### B. Snov.io — recommended free supplement (50 credits/mo)
+
+Download [`seekers-snov-workflow.json`](./seekers-snov-workflow.json). Same import flow as Apollo. Snov.io has webhook support on the free tier.
+
+1. Snov.io → **Account Settings → Webhooks** → New webhook
+2. URL: your n8n Snov webhook URL (visible after import)
+3. Trigger: "New contact added to list" or "New contact in drip campaign"
+4. Save → start adding contacts → they flow into Seekers CRM
+
+### C. Apify — Google Maps scraper (best for MENA local businesses)
+
+Download [`seekers-apify-google-maps.json`](./seekers-apify-google-maps.json). This one is **scheduled** rather than webhook-triggered — runs every Monday 9am by default.
+
+1. Sign up at https://apify.com (free $5 starter credit)
+2. Generate an API token: Settings → Integrations → Personal API tokens
+3. In n8n, create a credential called `Apify API Token` (Header Auth, header `Authorization`, value `Bearer YOUR_TOKEN`)
+4. Import the workflow → edit the **Run Apify Actor** node → change `searchStringsArray` to your niche+location, e.g.:
+   - `"marketing agencies Cairo Egypt"`
+   - `"dental clinics Dubai UAE"`
+   - `"SaaS startups Berlin Germany"`
+5. Set `maxCrawledPlacesPerSearch` to control cost (~$0.001 per result)
+6. Activate → results auto-flow into your CRM weekly
+
+### D. RB2B — anonymous website visitor identification (truly free)
+
+Download [`seekers-rb2b-workflow.json`](./seekers-rb2b-workflow.json). RB2B identifies anonymous visitors on your site and pushes them to a webhook.
+
+1. Sign up at https://rb2b.com (free plan, no credit card)
+2. Install their snippet on `seekersai.org` (one `<script>` tag in `<head>`)
+3. In RB2B → **Settings → Integrations → Webhook** → paste your n8n RB2B webhook URL
+4. Visitors who match B2B databases get sent through. They're tagged `source: rb2b-inbound` in the CRM so you can prioritize warm traffic over cold outbound.
+
+### E. Manual CSV bulk import — for one-shot lists
+
+For scraped CSVs, conference attendee lists, partner intros, etc.: go to **CRM → Outreach → Setup & Ingestion** → scroll down to the **Import Leads from CSV** panel. Drag a CSV in, the UI auto-detects columns, you confirm the mapping, hit Import. Idempotent — re-uploading the same list won't create duplicates.
+
+### F. Instantly / Lemlist / SalesQL / Hunter
+Same approach as the others — set your tool's webhook URL to the **Main workflow's** n8n endpoint. The `Map Fields` node has fallbacks for the common field names.
 
 ### C. Google Sheet (cold lists)
 - Build a separate n8n workflow: **Google Sheets trigger → Map Fields → HTTP Request to /outreach/leads/ingest** (you can copy nodes from our workflow).

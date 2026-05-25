@@ -1,0 +1,139 @@
+{
+  "name": "Seekers CRM — Snov.io Lead Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "seekers-snov",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Snov.io Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "seekers-snov",
+      "notes": "Set this URL in Snov.io: Drip Campaigns → Webhook trigger, OR Lists → Export → Webhook. Fires per lead."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "name",
+              "value": "={{ (($json.body.firstName || $json.body.first_name || '') + ' ' + ($json.body.lastName || $json.body.last_name || '')).trim() || $json.body.full_name || $json.body.email }}"
+            },
+            {
+              "name": "company",
+              "value": "={{ $json.body.companyName || $json.body.company_name || $json.body.company || ($json.body.email ? $json.body.email.split('@')[1] : '') }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.body.email }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.body.phone || $json.body.phoneNumber || '' }}"
+            },
+            {
+              "name": "source",
+              "value": "snov.io"
+            },
+            {
+              "name": "category",
+              "value": "={{ $json.body.industry || $json.body.companyIndustry || '' }}"
+            },
+            {
+              "name": "notes",
+              "value": "=Snov.io enrichment:\\n• Position: {{ $json.body.position || $json.body.title || '—' }}\\n• Company website: {{ $json.body.companyWebsite || $json.body.companySite || '—' }}\\n• LinkedIn: {{ $json.body.linkedInUrl || $json.body.linkedin || '—' }}\\n• Country: {{ $json.body.country || '—' }}"
+            }
+          ]
+        },
+        "options": {
+          "dotNotation": false
+        }
+      },
+      "name": "Map Snov.io Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "has-email",
+              "leftValue": "={{ $json.email }}",
+              "rightValue": "@",
+              "operator": { "type": "string", "operation": "contains" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Has Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SEEKERS_API_BASE }}/outreach/leads/ingest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "name": "Ingest into Seekers CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [920, 240],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "seekers-crm-api-key",
+          "name": "Seekers CRM API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, lead: $json } }}"
+      },
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1140, 240]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, reason: 'no email' } }}",
+        "options": { "responseCode": 422 }
+      },
+      "name": "Skip — No Email",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [920, 380]
+    }
+  ],
+  "connections": {
+    "Snov.io Webhook":   { "main": [[{ "node": "Map Snov.io Fields", "type": "main", "index": 0 }]] },
+    "Map Snov.io Fields": { "main": [[{ "node": "Has Email?", "type": "main", "index": 0 }]] },
+    "Has Email?":         { "main": [
+      [{ "node": "Ingest into Seekers CRM", "type": "main", "index": 0 }],
+      [{ "node": "Skip — No Email", "type": "main", "index": 0 }]
+    ]},
+    "Ingest into Seekers CRM": { "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "callerPolicy": "workflowsFromSameOwner" },
+  "versionId": "seekers-snov-v1",
+  "id": "seekers-snov",
+  "tags": [{ "name": "Seekers" }, { "name": "Snov.io" }, { "name": "Outreach" }]
+}

@@ -212,6 +212,43 @@ export interface OutreachAnalytics {
   }[];
 }
 
+export interface BulkIngestPayload {
+  leads: Array<{
+    name:        string;
+    company:     string;
+    email?:      string | null;
+    phone?:      string | null;
+    source?:     string | null;
+    category?:   string | null;
+    deal_value?: number;
+    notes?:      string | null;
+  }>;
+}
+
+export interface BulkIngestResult {
+  total:       number;
+  created:     number;
+  deduped:     number;
+  errors:      number;
+  created_ids: string[];
+  error_rows:  { index: number; error: string }[];
+}
+
+export function useBulkIngest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: BulkIngestPayload) =>
+      apiFetch<BulkIngestResult>("/outreach/leads/ingest-bulk", {
+        method: "POST",
+        body:   JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["dashboard-summary"] });
+    },
+  });
+}
+
 export function useOutreachAnalytics() {
   return useQuery<OutreachAnalytics>({
     queryKey: ["outreach", "analytics"],

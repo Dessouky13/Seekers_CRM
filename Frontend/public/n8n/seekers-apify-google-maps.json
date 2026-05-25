@@ -1,0 +1,154 @@
+{
+  "name": "Seekers CRM — Apify Google Maps Scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 9 * * 1" }
+          ]
+        }
+      },
+      "name": "Weekly: Monday 9am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "notes": "Runs every Monday at 9am. Change the cron to fit your cadence. Or replace this trigger with a Manual trigger if you want to fire on-demand."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/compass~crawler-google-places/run-sync-get-dataset-items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"searchStringsArray\": [\"marketing agencies Cairo Egypt\"],\n  \"maxCrawledPlacesPerSearch\": 100,\n  \"language\": \"en\",\n  \"scrapeContacts\": true\n}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "name": "Run Apify Actor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [480, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "apify-api-token",
+          "name": "Apify API Token"
+        }
+      },
+      "notes": "Change 'searchStringsArray' to whatever niche/location you want. Examples: 'restaurants Dubai', 'SaaS startups Berlin', 'dental clinics Riyadh'. maxCrawledPlacesPerSearch controls cost (1 result ≈ $0.001)."
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "name": "Split Each Place",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 3,
+      "position": [700, 300],
+      "notes": "Apify returns an array — split it so each place becomes its own n8n item."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "name",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "company",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ ($json.emails && $json.emails.length > 0) ? $json.emails[0] : '' }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.phone || $json.phoneUnformatted || '' }}"
+            },
+            {
+              "name": "source",
+              "value": "google-maps"
+            },
+            {
+              "name": "category",
+              "value": "={{ $json.categoryName || '' }}"
+            },
+            {
+              "name": "notes",
+              "value": "=Google Maps:\\n• Address: {{ $json.address || '—' }}\\n• Website: {{ $json.website || '—' }}\\n• Rating: {{ $json.totalScore || '—' }} ({{ $json.reviewsCount || 0 }} reviews)\\n• Category: {{ $json.categoryName || '—' }}\\n• Maps URL: {{ $json.url || '—' }}"
+            }
+          ]
+        },
+        "options": { "dotNotation": false }
+      },
+      "name": "Map Place Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "has-contact",
+              "leftValue": "={{ ($json.email && $json.email.includes('@')) || $json.phone }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Has Email or Phone?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SEEKERS_API_BASE }}/outreach/leads/ingest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "name": "Ingest into Seekers CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1360, 240],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "seekers-crm-api-key",
+          "name": "Seekers CRM API Key"
+        }
+      },
+      "notes": "Hits the same /outreach/leads/ingest endpoint. Idempotent by email — re-runs of this workflow won't create duplicates."
+    }
+  ],
+  "connections": {
+    "Weekly: Monday 9am":      { "main": [[{ "node": "Run Apify Actor", "type": "main", "index": 0 }]] },
+    "Run Apify Actor":         { "main": [[{ "node": "Split Each Place", "type": "main", "index": 0 }]] },
+    "Split Each Place":        { "main": [[{ "node": "Map Place Fields", "type": "main", "index": 0 }]] },
+    "Map Place Fields":        { "main": [[{ "node": "Has Email or Phone?", "type": "main", "index": 0 }]] },
+    "Has Email or Phone?":     { "main": [
+      [{ "node": "Ingest into Seekers CRM", "type": "main", "index": 0 }],
+      []
+    ]}
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "seekers-apify-v1",
+  "id": "seekers-apify",
+  "tags": [{ "name": "Seekers" }, { "name": "Apify" }, { "name": "GoogleMaps" }]
+}

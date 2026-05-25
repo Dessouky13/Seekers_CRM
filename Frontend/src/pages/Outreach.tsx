@@ -26,6 +26,7 @@ import {
 } from "@/hooks/useOutreach";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { TrendingUp, MessageCircle, Mail as MailIcon, BarChart3 } from "lucide-react";
+import { CsvImportPanel } from "@/components/modules/CsvImportPanel";
 import { useAgents } from "@/hooks/useAgents";
 import { cn } from "@/lib/utils";
 
@@ -652,21 +653,68 @@ Response:
       <div className="rounded-xl border border-border bg-card p-5 space-y-3">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ready-to-import n8n workflows</p>
         <p className="text-xs text-muted-foreground">
-          <strong className="text-foreground">Main workflow:</strong> generic ingestion webhook (any tool) + IMAP reply detection.<br/>
-          <strong className="text-foreground">Apollo workflow:</strong> tailored field mapping for Apollo's exact data shape — drop your Apollo webhook URL straight in.
+          Pre-built workflows per lead source — each maps the source's exact field shape to our /leads/ingest endpoint. Import any combination you want; they share the same Seekers CRM API Key credential.
         </p>
-        <div className="flex gap-2 flex-wrap">
-          <a href="/n8n/seekers-crm-automation.json" download className="inline-block">
-            <Button size="sm" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Main workflow</Button>
-          </a>
-          <a href="/n8n/seekers-apollo-workflow.json" download className="inline-block">
-            <Button size="sm" variant="outline" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Apollo workflow</Button>
-          </a>
-          <a href="/n8n/SETUP.md" target="_blank" rel="noopener noreferrer" className="inline-block">
-            <Button size="sm" variant="ghost" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Setup guide</Button>
-          </a>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <WorkflowCard
+            file="seekers-crm-automation.json"
+            title="Main workflow"
+            description="Generic ingestion webhook + IMAP reply detection. Universal."
+            tag="Core"
+          />
+          <WorkflowCard
+            file="seekers-apollo-workflow.json"
+            title="Apollo"
+            description="Native webhook from Apollo sequences. Auto-skips contacts without email."
+            tag="Apollo"
+          />
+          <WorkflowCard
+            file="seekers-snov-workflow.json"
+            title="Snov.io"
+            description="Webhook from Snov.io drip campaigns or list exports. 50 free credits/mo."
+            tag="Snov"
+          />
+          <WorkflowCard
+            file="seekers-apify-google-maps.json"
+            title="Apify — Google Maps"
+            description="Scheduled scraper for local businesses by niche+location. Great for MENA. $5 buys ~5000 leads."
+            tag="Apify"
+          />
+          <WorkflowCard
+            file="seekers-rb2b-workflow.json"
+            title="RB2B"
+            description="Identifies anonymous website visitors as leads. Tagged 'rb2b-inbound' for warm prioritization."
+            tag="Inbound"
+          />
+        </div>
+        <a href="/n8n/SETUP.md" target="_blank" rel="noopener noreferrer" className="inline-block pt-1">
+          <Button size="sm" variant="ghost" className="gap-1.5 text-xs"><FileText className="h-3 w-3" /> Full setup guide</Button>
+        </a>
+      </div>
+
+      <CsvImportPanel />
+    </div>
+  );
+}
+
+function WorkflowCard({ file, title, description, tag }: {
+  file:        string;
+  title:       string;
+  description: string;
+  tag:         string;
+}) {
+  return (
+    <a href={`/n8n/${file}`} download className="block">
+      <div className="rounded-lg border border-border bg-muted/20 p-3 hover:border-primary/40 hover:bg-muted/40 transition-colors h-full">
+        <div className="flex items-start justify-between gap-2 mb-1.5">
+          <p className="text-sm font-medium text-foreground">{title}</p>
+          <Badge variant="secondary" className="text-[9px] uppercase">{tag}</Badge>
+        </div>
+        <p className="text-xs text-muted-foreground leading-snug">{description}</p>
+        <div className="mt-2 flex items-center gap-1 text-[10px] text-primary">
+          <FileText className="h-3 w-3" /> Download .json
         </div>
       </div>
-    </div>
+    </a>
   );
 }

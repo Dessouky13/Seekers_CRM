@@ -48,6 +48,94 @@ const ingestSchema = z.object({
   // n8n flexibility: any extra fields will be ignored
 }).passthrough();
 
+// ── BULK INGEST (authMiddleware — for in-app CSV import) ──────────
+const bulkIngestSchema = z.object({
+  leads: z.array(ingestSchemaInline()).min(1).max(500),
+});
+
+function ingestSchemaInline() {
+  return z.object({
+    name:        z.string().min(1).max(200),
+    company:     z.string().min(1).max(200),
+    email:       z.string().email().optional().nullable(),
+    phone:       z.string().max(50).optional().nullable(),
+    source:      z.string().max(100).optional().nullable(),
+    category:    z.string().max(100).optional().nullable(),
+    deal_value:  z.number().nonnegative().optional(),
+    notes:       z.string().max(4000).optional().nullable(),
+  }).passthrough();
+}
+
+outreach.post("/leads/ingest-bulk", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const body = bulkIngestSchema.parse(await c.req.json());
+
+  let created = 0, deduped = 0, errors = 0;
+  const created_ids: string[] = [];
+  const errorRows: { index: number; error: string }[] = [];
+
+  for (let i = 0; i < body.leads.length; i++) {
+    const lead = body.leads[i];
+    try {
+      const emailLower = lead.email?.toLowerCase().trim() || null;
+      let existing: { id: string } | undefined;
+      if (emailLower) {
+        [existing] = await db.select({ id: leads.id }).from(leads)
+          .where(sql`LOWER(${leads.email}) = ${emailLower}`).limit(1);
+      } else {
+        [existing] = await db.select({ id: leads.id }).from(leads)
+          .where(and(eq(leads.name, lead.name), eq(leads.company, lead.company))).limit(1);
+      }
+
+      if (existing) {
+        await db.update(leads).set({
+          source:    sql`COALESCE(${leads.source},   ${lead.source   ?? null})`,
+          category:  sql`COALESCE(${leads.category}, ${lead.category ?? null})`,
+          phone:     sql`COALESCE(${leads.phone},    ${lead.phone    ?? null})`,
+          updatedAt: new Date(),
+        }).where(eq(leads.id, existing.id));
+        deduped++;
+        continue;
+      }
+
+      const [newLead] = await db.insert(leads).values({
+        name:      lead.name,
+        company:   lead.company,
+        email:     emailLower,
+        phone:     lead.phone    ?? null,
+        source:    lead.source   ?? "csv-import",
+        category:  lead.category ?? null,
+        dealValue: lead.deal_value != null ? String(lead.deal_value) : "0",
+        notes:     lead.notes    ?? null,
+        assigneeId: user.id,
+      }).returning({ id: leads.id });
+
+      await db.insert(leadActivities).values({
+        leadId:      newLead.id,
+        type:        "form",
+        description: `CSV import by ${user.name}`,
+      });
+
+      await autoEnrollIfMatchingCategory(newLead.id, lead.category ?? null);
+
+      created_ids.push(newLead.id);
+      created++;
+    } catch (err: any) {
+      errors++;
+      errorRows.push({ index: i, error: String(err?.message ?? err).slice(0, 200) });
+    }
+  }
+
+  return c.json({
+    total:        body.leads.length,
+    created,
+    deduped,
+    errors,
+    created_ids,
+    error_rows:   errorRows,
+  });
+});
+
 outreach.post("/leads/ingest", apiKeyAuth, async (c) => {
   const body = ingestSchema.parse(await c.req.json());
   const emailLower = body.email?.toLowerCase().trim() || null;

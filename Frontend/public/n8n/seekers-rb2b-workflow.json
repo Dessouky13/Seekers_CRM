@@ -1,0 +1,99 @@
+{
+  "name": "Seekers CRM — RB2B Website Visitor Identification",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "seekers-rb2b",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "RB2B Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "seekers-rb2b",
+      "notes": "Set this URL in RB2B: Settings → Integrations → Webhook. Fires when an anonymous seekersai.org visitor is identified."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "name",
+              "value": "={{ (($json.body.firstName || $json.body.first_name || '') + ' ' + ($json.body.lastName || $json.body.last_name || '')).trim() }}"
+            },
+            {
+              "name": "company",
+              "value": "={{ $json.body.company || $json.body.companyName || $json.body.company_name }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.body.email || $json.body.workEmail || '' }}"
+            },
+            {
+              "name": "source",
+              "value": "rb2b-inbound"
+            },
+            {
+              "name": "category",
+              "value": "={{ $json.body.industry || $json.body.company_industry || '' }}"
+            },
+            {
+              "name": "notes",
+              "value": "=RB2B — identified anonymous visitor:\\n• Title: {{ $json.body.title || $json.body.jobTitle || '—' }}\\n• Page visited: {{ $json.body.pageUrl || $json.body.url || '—' }}\\n• LinkedIn: {{ $json.body.linkedinUrl || $json.body.linkedin_url || '—' }}\\n• Company size: {{ $json.body.companySize || $json.body.company_size || '—' }}\\n• Identified at: {{ $json.body.timestamp || $now }}"
+            }
+          ]
+        },
+        "options": { "dotNotation": false }
+      },
+      "name": "Map RB2B Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SEEKERS_API_BASE }}/outreach/leads/ingest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "name": "Ingest into Seekers CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [700, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "seekers-crm-api-key",
+          "name": "Seekers CRM API Key"
+        }
+      },
+      "notes": "Tag as 'rb2b-inbound' so you can spot warm inbound traffic vs cold outbound in the CRM."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, lead: $json } }}"
+      },
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [920, 300]
+    }
+  ],
+  "connections": {
+    "RB2B Webhook":          { "main": [[{ "node": "Map RB2B Fields", "type": "main", "index": 0 }]] },
+    "Map RB2B Fields":       { "main": [[{ "node": "Ingest into Seekers CRM", "type": "main", "index": 0 }]] },
+    "Ingest into Seekers CRM": { "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "seekers-rb2b-v1",
+  "id": "seekers-rb2b",
+  "tags": [{ "name": "Seekers" }, { "name": "RB2B" }, { "name": "Inbound" }]
+}
