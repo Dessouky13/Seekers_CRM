@@ -117,16 +117,24 @@ const sequenceSchema = z.object({
 outreach.get("/sequences", authMiddleware, async (c) => {
   const rows = await db
     .select({
-      sequence: outreachSequences,
-      stepCount: sql<number>`(SELECT COUNT(*)::int FROM ${outreachSteps} WHERE ${outreachSteps.sequenceId} = ${outreachSequences.id})`,
-      activeEnrollments: sql<number>`(SELECT COUNT(*)::int FROM ${outreachEnrollments} WHERE ${outreachEnrollments.sequenceId} = ${outreachSequences.id} AND ${outreachEnrollments.status} = 'active')`,
+      id:                   outreachSequences.id,
+      name:                 outreachSequences.name,
+      description:          outreachSequences.description,
+      category:             outreachSequences.category,
+      isActive:             outreachSequences.isActive,
+      autoEnrollOnCategory: outreachSequences.autoEnrollOnCategory,
+      createdBy:            outreachSequences.createdBy,
+      createdAt:            outreachSequences.createdAt,
+      updatedAt:            outreachSequences.updatedAt,
+      step_count:           sql<number>`(SELECT COUNT(*)::int FROM ${outreachSteps} WHERE ${outreachSteps.sequenceId} = ${outreachSequences.id})`,
+      active_enrollments:   sql<number>`(SELECT COUNT(*)::int FROM ${outreachEnrollments} WHERE ${outreachEnrollments.sequenceId} = ${outreachSequences.id} AND ${outreachEnrollments.status} = 'active')`,
     })
     .from(outreachSequences)
     .orderBy(desc(outreachSequences.updatedAt));
-  return c.json(rows.map(({ sequence, stepCount, activeEnrollments }) => ({
-    ...sequence,
-    step_count:         Number(stepCount),
-    active_enrollments: Number(activeEnrollments),
+  return c.json(rows.map((r) => ({
+    ...r,
+    step_count:         Number(r.step_count),
+    active_enrollments: Number(r.active_enrollments),
   })));
 });
 
@@ -249,28 +257,34 @@ outreach.get("/enrollments", authMiddleware, async (c) => {
   if (q.status)   conditions.push(eq(outreachEnrollments.status, q.status as any));
   if (q.lead_id)  conditions.push(eq(outreachEnrollments.leadId, q.lead_id));
 
+  // Explicit column selection — avoids drizzle's whole-table expansion which
+  // can emit unqualified column refs and cause "id is ambiguous" with joins.
   const rows = await db
     .select({
-      enrollment: outreachEnrollments,
-      leadName:   leads.name,
-      leadCompany: leads.company,
-      leadEmail:   leads.email,
-      sequenceName: outreachSequences.name,
+      id:                  outreachEnrollments.id,
+      leadId:              outreachEnrollments.leadId,
+      sequenceId:          outreachEnrollments.sequenceId,
+      currentStep:         outreachEnrollments.currentStep,
+      status:              outreachEnrollments.status,
+      enrolledAt:          outreachEnrollments.enrolledAt,
+      nextSendAt:          outreachEnrollments.nextSendAt,
+      lastStepCompletedAt: outreachEnrollments.lastStepCompletedAt,
+      completedAt:         outreachEnrollments.completedAt,
+      pausedReason:        outreachEnrollments.pausedReason,
+      enrolledBy:          outreachEnrollments.enrolledBy,
+      lead_name:           leads.name,
+      lead_company:        leads.company,
+      lead_email:          leads.email,
+      sequence_name:       outreachSequences.name,
     })
     .from(outreachEnrollments)
-    .leftJoin(leads, eq(outreachEnrollments.leadId, leads.id))
+    .leftJoin(leads,             eq(outreachEnrollments.leadId,     leads.id))
     .leftJoin(outreachSequences, eq(outreachEnrollments.sequenceId, outreachSequences.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(outreachEnrollments.enrolledAt))
     .limit(100);
 
-  return c.json(rows.map(({ enrollment, leadName, leadCompany, leadEmail, sequenceName }) => ({
-    ...enrollment,
-    lead_name:     leadName,
-    lead_company:  leadCompany,
-    lead_email:    leadEmail,
-    sequence_name: sequenceName,
-  })));
+  return c.json(rows);
 });
 
 outreach.post("/enrollments/:id/pause", authMiddleware, async (c) => {
