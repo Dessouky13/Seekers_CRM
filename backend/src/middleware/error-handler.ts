@@ -19,8 +19,21 @@ export function errorHandler(err: Error, c: Context) {
 
   // Known HTTP-like errors with a status property
   if ("status" in err && typeof (err as any).status === "number") {
-    const status = (err as any).status as ContentfulStatusCode;
-    return c.json({ error: err.message }, status);
+    const upstream = (err as any).status as number;
+
+    // Only proxy client-side error statuses (4xx) that are safe to surface.
+    // Upstream 401/403 (from OpenAI, OpenRouter, Brevo, etc.) must NOT be passed
+    // through — the frontend treats 401 as "user logged out" and would auto-logout.
+    if (upstream >= 400 && upstream < 500 && upstream !== 401 && upstream !== 403) {
+      return c.json({ error: err.message }, upstream as ContentfulStatusCode);
+    }
+
+    // Auth / forbidden / server-side errors from upstream APIs → 502 Bad Gateway
+    console.error(`[upstream-${upstream}]`, err.message);
+    return c.json(
+      { error: "Upstream service error", upstream_status: upstream },
+      502 as ContentfulStatusCode,
+    );
   }
 
   // Generic server error — never expose internal details to clients

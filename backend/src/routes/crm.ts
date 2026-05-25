@@ -333,29 +333,38 @@ crm.get("/insights", authMiddleware, async (c) => {
       .limit(50);
 
     if (sampleMessages.length > 0) {
-      const openai = getOpenAIClient();
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        temperature: 0.3,
-        messages: [
-          {
-            role: "system",
-            content: "You are a CRM outreach analyst. Return concise operational output only.",
-          },
-          {
-            role: "user",
-            content: `Summarize outreach quality and provide 3 practical message-improvement suggestions.\n\nOutreach notes:\n${sampleMessages.map((m) => `- ${m.description}`).join("\n")}`,
-          },
-        ],
-      });
+      // Wrap OpenAI call — if the key is missing/invalid/rate-limited, degrade
+      // gracefully instead of bubbling a 401 to the client (which the frontend
+      // misinterprets as "user logged out" and triggers an auto-logout).
+      try {
+        const openai = getOpenAIClient();
+        const completion = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          temperature: 0.3,
+          messages: [
+            {
+              role: "system",
+              content: "You are a CRM outreach analyst. Return concise operational output only.",
+            },
+            {
+              role: "user",
+              content: `Summarize outreach quality and provide 3 practical message-improvement suggestions.\n\nOutreach notes:\n${sampleMessages.map((m) => `- ${m.description}`).join("\n")}`,
+            },
+          ],
+        });
 
-      const raw = completion.choices[0]?.message?.content?.trim() ?? "";
-      messageSummary = raw || null;
-      suggestions = raw
-        .split("\n")
-        .map((line) => line.replace(/^[-\d.)\s]+/, "").trim())
-        .filter(Boolean)
-        .slice(0, 3);
+        const raw = completion.choices[0]?.message?.content?.trim() ?? "";
+        messageSummary = raw || null;
+        suggestions = raw
+          .split("\n")
+          .map((line) => line.replace(/^[-\d.)\s]+/, "").trim())
+          .filter(Boolean)
+          .slice(0, 3);
+      } catch (err: any) {
+        console.warn("[crm/insights] AI summary skipped:", err?.message ?? err);
+        messageSummary = null;
+        suggestions = [];
+      }
     }
   }
 
