@@ -71,17 +71,36 @@ export const AGENTS: AgentDef[] = [
     name:        "Outreach Drafter",
     description: "Drafts a first-touch cold email + LinkedIn DM for a lead.",
     scope:       "lead",
-    temperature: 0.7,
+    temperature: 0.85,
     async buildPrompt(leadId) {
       if (!leadId) throw new Error("leadId required");
       const { lead, activities } = await getLead(leadId);
       const recent = activities.slice(0, 5).map((a) => `- ${a.date} [${a.type}] ${a.description}`).join("\n") || "(no activity yet)";
       const summary = `${lead.name} @ ${lead.company} (${lead.category ?? "no niche"}) — stage: ${lead.stage}`;
-      const userPrompt = `Draft outbound outreach for this lead. The email will be SENT AUTOMATICALLY as-is, so produce final copy — no placeholders, no "[insert here]", no commentary.
+
+      // Detect when "name" is really a business name (scraped lead) — used for
+      // greeting style. If name and company overlap significantly, this is a
+      // business inbox like info@ or contact@, not a real person.
+      const nLower = (lead.name    ?? "").toLowerCase();
+      const cLower = (lead.company ?? "").toLowerCase();
+      const isBusinessContact =
+        !!cLower && (nLower === cLower || nLower.includes(cLower) || cLower.includes(nLower));
+      const firstName = lead.name.split(/\s+/)[0];
+
+      // Count prior outreach activities to pick first-touch vs follow-up tone
+      const priorOutreachCount = activities.filter((a) =>
+        ["email", "call", "meeting"].includes(a.type) ||
+        (a.description ?? "").toLowerCase().startsWith("[sequence]"),
+      ).length;
+      const touchNumber = priorOutreachCount + 1;
+      const touchLabel  = touchNumber === 1 ? "first touch" :
+                          touchNumber === 2 ? "follow-up (touch #2 — they didn't reply to #1)" :
+                          `last touch (touch #${touchNumber} — pivot tone, break-up vibe but graceful)`;
+
+      const userPrompt = `Draft a cold-outreach email for this lead. The email will be SENT AUTOMATICALLY as-is to the address below, so produce final copy — no placeholders, no "[insert here]", no commentary.
 
 LEAD:
-- Name: ${lead.name}
-- First name: ${lead.name.split(/\s+/)[0]}
+- Recipient name (may be a business name, not a person): ${lead.name}
 - Company: ${lead.company}
 - Email: ${lead.email ?? "—"}
 - Niche/Category: ${lead.category ?? "unknown"}
@@ -93,19 +112,37 @@ LEAD:
 Recent activity:
 ${recent}
 
+OUTREACH CONTEXT: this is the ${touchLabel}.
+
 OUTPUT FORMAT (strict — first line MUST be the subject):
-Subject: <subject here>
+Subject: <subject here — should differ noticeably from any prior touch subject>
 
 <email body here — 4 to 6 sentences total>
 
-Sign off: "— The Seekers team"
+— The Seekers team
 
-RULES:
-- Specific opener that references their niche (${lead.category ?? "their industry"}). No "I hope this email finds you well."
-- One concrete value prop with a measurable outcome (e.g. "cut your onboarding time by 60%").
-- Soft CTA: ask for a 15-minute call this week.
-- No placeholders. Address them by first name only.
-- Plain text only, no markdown formatting.`;
+GREETING RULES:
+${isBusinessContact
+  ? `- This is a business inbox (the contact name matches the company name). Open with "Hi there," or "Hi team," — do NOT use a fake first name like "${firstName}".`
+  : `- Address the recipient by their first name: "Hi ${firstName},"`}
+
+CONTENT RULES (touch-specific):
+${touchNumber === 1
+  ? `- Specific opener that references their niche (${lead.category ?? "their industry"}). Do NOT use "I hope this email finds you well."
+- One concrete value prop with a measurable outcome (e.g. "cut your reporting time by 70%").
+- Soft CTA: ask for a 15-minute call this week.`
+  : touchNumber === 2
+  ? `- Acknowledge you reached out a few days ago without referencing the prior email's specifics — keep it light.
+- Re-frame the value with a DIFFERENT concrete proof point or angle than touch #1.
+- Soft CTA: shorter, more direct (e.g. "worth a 15-min call?").`
+  : `- This is the final touch. Acknowledge you've reached out twice with no response — graceful break-up tone.
+- Mention one last concrete thing they'd lose by ignoring this (FOMO, not pushy).
+- Offer to close the loop: "if now's not the right time, just reply 'no thanks' and I'll stop reaching out."`}
+
+FORMATTING RULES:
+- Plain text only, no markdown, no bullet points, no headers.
+- 4 to 6 sentences. Tight.
+- Subject must be specific, not generic. Use sentence case.`;
 
       return {
         label:        summary,
