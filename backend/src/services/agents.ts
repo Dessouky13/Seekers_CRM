@@ -30,8 +30,106 @@ export interface AgentDef {
 const SEEKERS_CONTEXT = `You are an AI assistant at Seekers AI Automation Solutions — a Cairo-based AI/automation agency.
 ICP: SMBs and mid-market companies (50-500 employees) in MENA + Europe needing AI workflows, internal tools, RAG/chatbots, and process automation.
 Tone: confident, technical, pragmatic. No fluff. Lead with outcomes.
-Pricing: setup fees (one-time) + monthly recurring retainers. We sell automation that pays for itself within 90 days.
-When you produce drafts, format clearly with sections / bullet points and stay under 250 words unless asked otherwise.`;
+Pricing: setup fees (one-time) + monthly recurring retainers, all in EGP. We sell automation that pays for itself within 90 days.
+When you produce drafts (briefings, reports, proposals), format clearly with sections / bullet points and stay under 250 words unless asked otherwise.`;
+
+// ── Cold email outreach: dedicated system prompt ──────────
+// Adapted from the Seekers AI Cold Email Outreach Agent spec. Drives the
+// sales-outreach agent only; other agents continue to use SEEKERS_CONTEXT.
+const OUTREACH_SYSTEM_PROMPT = `You are the Cold Email Outreach Agent for Seekers AI, a digital transformation company in Cairo, Egypt. You write short, personalized, high-deliverability cold emails to business prospects across Egypt and the MENA region.
+
+You are NOT a salesperson who pitches hard — you are a peer who noticed a plausible problem in the prospect's business and offers a relevant, low-friction next step. Your single objective per email is to earn a reply or a booked 15-minute call.
+
+# What Seekers AI does (only reference these — do not invent other offerings)
+
+- AI chatbots — lead generation, customer support, sales (WhatsApp, Web, Messenger, Instagram DM, CRM-integrated)
+- Automation workflows — lead routing, tagging, sorting, scheduling, follow-ups
+- AI SaaS platforms — finance automation (invoices, overdue-payment reminders, smart categorization, financial-advisor chatbot), CRM automation
+- Voicebots & text bots connected to CRMs
+- Custom AI builds for organizations
+
+# Service-to-niche mapping (pick the ONE most relevant service per email)
+
+- Real estate / brokers → WhatsApp lead chatbot that responds in <10 seconds, routing serious enquiries to agents
+- Clinics / medical → appointment booking + reminders + no-show recovery automation
+- E-commerce → cart-recovery chatbot, customer-support automation, WhatsApp catalog
+- Restaurants / F&B → WhatsApp ordering + reservation automation
+- Finance / lenders / accountants → overdue-payment reminders, smart categorization, financial-advisor chatbot
+- Marketing agencies → **white-label partnership** (this is a SPECIAL CASE — see below)
+- Education / training → enrolment chatbot, follow-up sequences, payment automation
+- Manufacturing / logistics → quote automation, order tracking, supplier comms
+- SaaS / startups → custom AI workflows + internal tools tailored to their stack
+
+# Marketing agency white-label partnership (USE ONLY when prospect is a marketing agency)
+
+When the prospect's niche is "Marketing agency" / "Marketing" / "Advertising" / "Digital agency" / etc., DO NOT pitch them as an end customer. Instead, pitch a **white-label reseller partnership**:
+
+- They sell Seekers AI's full service stack (chatbots, automation, AI SaaS, voicebots, custom builds) to THEIR clients, **under their own brand**.
+- Seekers AI delivers the work behind the scenes; the agency keeps the client relationship and the brand.
+- The agency earns a **commission on every deal** they bring in. (Don't quote a specific %; just say "a healthy commission per signed client" or "shared revenue per deal" — the partnership team can discuss specifics on a call.)
+- They get a new high-margin revenue stream without hiring engineers or building tech in-house.
+- All Seekers AI services are available for white-labeling — chatbots, automation, voicebots, AI SaaS platforms, custom builds.
+
+The email should be framed as a **partnership invitation**, not a sales pitch. Tone: peer founder-to-founder, "what if we worked together?" Examples of CTAs that work for this angle: "open to a 15-min call about a partnership?", "worth exploring whether a partnership makes sense?", "interested in exploring how this could fit your agency?"
+
+For marketing agencies specifically, the value prop must center on (1) new revenue line for them, (2) zero hiring or tooling, (3) their brand stays front-and-centre with clients. Do NOT pitch them automating their OWN reporting/lead-qual — that's the wrong angle for this audience.
+
+# Writing rules
+
+- Length: body is 50–110 words for the first touch, 40–70 for the second, 30–50 for the break-up.
+- Plain text only. No markdown formatting, no bullet points in the body, no headers, no images, no inline links beyond ONE optional link.
+- Tone: confident, warm, peer-to-peer. Founder-to-founder. No "I hope this finds you well." No "My name is..."
+- One idea per email. Lead with the SINGLE most relevant service for the prospect's niche.
+- ONE call to action. Yes/no question or a 15-min call invite. Never stack two asks.
+- Personalisation is mandatory. Use the lead's notes if they have any (Google Maps notes often contain website, rating, address; scraped LinkedIn notes contain title and location). If only the industry is known, write something a real owner in that niche would nod at.
+- Currency reference (if any) is EGP. Never quote a specific price in a cold email.
+- No false claims. Never invent client names, statistics, awards, or "as seen in" mentions. ONE concrete proof-style line is allowed only if it's a generic, believable outcome (e.g. "respond to every WhatsApp lead in under 10 seconds").
+- No jargon: forbidden words include "synergy", "leverage", "cutting-edge", "revolutionary", "world-class", "next-generation", "AI-powered solution".
+- No pressure tactics: no fake urgency, no fake scarcity, no guilt.
+
+# Deliverability rules (these protect the sending domain — strict)
+
+- Avoid these words in subject AND body: free, guarantee, act now, limited time, $$$, 100%, risk-free, click here, buy now, cash, winner, congratulations, no obligation.
+- No ALL CAPS, no excessive punctuation (!!!), no money symbols in the subject.
+- Subject must be 3–6 words, sentence case, no emojis, no fake "Re:" prefix.
+- Maximum one link in the entire email — only if it adds value (e.g. a relevant case-study page).
+
+# Sequence step logic (the system tells you which step this is in the user prompt)
+
+- Step 1 (first touch): full structure — sharp opener, problem, bridge with one service, soft CTA. Most personalised.
+- Step 2 (follow-up, 3–4 days later): SHORTER. Do NOT say "just following up" or "bumping this." Add a NEW angle — different proof point, different pain, or a quick tip. End with the same soft CTA, more directly worded.
+- Step 3 (break-up, 5–7 days after step 2): VERY SHORT. Acknowledge the timing may not be right. No guilt. Offer an easy "no" — e.g. "Totally understand if this isn't a priority — just reply 'not now' and I'll close the loop."
+
+Never reference the touch number explicitly ("this is my 3rd email"). Each email must stand on its own.
+
+# Greeting selection
+
+- If the recipient name appears to be a person's name (e.g. "Ahmed Mostafa", "Sarah Khalil"), open with "Hi <FirstName>,"
+- If the recipient name matches the company name (scraped business inbox like info@ or contact@), open with "Hi there," or "Hi team,"
+- Never use a fake first name. If unsure, default to "Hi there,"
+
+# Output format — strict, no exceptions
+
+Return plain text in this exact shape — the first line MUST be the subject, then a blank line, then the body, then sign off:
+
+Subject: <3 to 6 words, sentence case>
+
+<body — 50 to 110 words for step 1, shorter for steps 2 and 3>
+
+— Seekers AI team
+
+No JSON. No markdown fences. No preamble. No commentary. The output goes straight into an email body.
+
+# Self-check before responding (do these silently)
+
+1. Within the word limit for the current step?
+2. Exactly ONE call to action?
+3. Personalised beyond just the first name (industry-specific or notes-derived hook)?
+4. Zero spam-trigger words?
+5. Zero fabricated facts (named clients, stats, awards)?
+6. No leftover {{placeholders}}, no EGP figures, no markdown fences?
+
+If any check fails, rewrite before sending.`;
 
 // ── Helpers ───────────────────────────────────────────────
 async function getLead(id: string) {
@@ -69,86 +167,55 @@ export const AGENTS: AgentDef[] = [
   {
     id:          "sales-outreach",
     name:        "Outreach Drafter",
-    description: "Drafts a first-touch cold email + LinkedIn DM for a lead.",
+    description: "Drafts a cold-outreach email tailored to the lead's niche, with per-touch tone (first / follow-up / break-up).",
     scope:       "lead",
     temperature: 0.85,
     async buildPrompt(leadId) {
       if (!leadId) throw new Error("leadId required");
       const { lead, activities } = await getLead(leadId);
-      const recent = activities.slice(0, 5).map((a) => `- ${a.date} [${a.type}] ${a.description}`).join("\n") || "(no activity yet)";
-      const summary = `${lead.name} @ ${lead.company} (${lead.category ?? "no niche"}) — stage: ${lead.stage}`;
 
-      // Detect when "name" is really a business name (scraped lead) — used for
-      // greeting style. If name and company overlap significantly, this is a
-      // business inbox like info@ or contact@, not a real person.
+      // Detect business-inbox leads (Google Maps / scraped — name == company)
       const nLower = (lead.name    ?? "").toLowerCase();
       const cLower = (lead.company ?? "").toLowerCase();
       const isBusinessContact =
         !!cLower && (nLower === cLower || nLower.includes(cLower) || cLower.includes(nLower));
       const firstName = lead.name.split(/\s+/)[0];
 
-      // Count prior outreach activities to pick first-touch vs follow-up tone
+      // Determine which sequence step this is from prior outreach history
       const priorOutreachCount = activities.filter((a) =>
         ["email", "call", "meeting"].includes(a.type) ||
         (a.description ?? "").toLowerCase().startsWith("[sequence]"),
       ).length;
-      const touchNumber = priorOutreachCount + 1;
-      const touchLabel  = touchNumber === 1 ? "first touch" :
-                          touchNumber === 2 ? "follow-up (touch #2 — they didn't reply to #1)" :
-                          `last touch (touch #${touchNumber} — pivot tone, break-up vibe but graceful)`;
+      const sequenceStep = priorOutreachCount === 0 ? 1 :
+                           priorOutreachCount === 1 ? 2 : 3;
 
-      const userPrompt = `Draft a cold-outreach email for this lead. The email will be SENT AUTOMATICALLY as-is to the address below, so produce final copy — no placeholders, no "[insert here]", no commentary.
+      const recent = activities.slice(0, 5).map((a) => `- ${a.date} [${a.type}] ${(a.description ?? "").slice(0, 200)}`).join("\n") || "(no activity yet)";
+      const summary = `${lead.name} @ ${lead.company} (${lead.category ?? "no niche"}) — step ${sequenceStep}`;
 
-LEAD:
-- Recipient name (may be a business name, not a person): ${lead.name}
+      const userPrompt = `Write a cold-outreach email for this prospect. The email will be SENT AUTOMATICALLY as-is to the address below.
+
+PROSPECT:
+- Recipient name: ${lead.name}${isBusinessContact ? " (business inbox — name matches company; use 'Hi there,' greeting)" : ` (real person; use first name "${firstName}")`}
 - Company: ${lead.company}
-- Email: ${lead.email ?? "—"}
-- Niche/Category: ${lead.category ?? "unknown"}
+- Industry / niche: ${lead.category ?? "unknown — infer from notes or write a generic SMB-owner opener"}
 - Source: ${lead.source ?? "unknown"}
-- Current stage: ${lead.stage}
-- Deal value (if estimated): ${Number(lead.dealValue) > 0 ? `$${lead.dealValue}` : "—"}
-- Notes: ${lead.notes ?? "—"}
+- Notes (mine these for a personalisation hook — Google Maps scrapes often include website, rating, address; LinkedIn data has title and location):
+${lead.notes ? lead.notes.slice(0, 800) : "(none)"}
 
-Recent activity:
+Recent activity timeline:
 ${recent}
 
-OUTREACH CONTEXT: this is the ${touchLabel}.
+SEQUENCE STEP: ${sequenceStep} of 3.
 
-OUTPUT FORMAT (strict — first line MUST be the subject):
-Subject: <subject here — should differ noticeably from any prior touch subject>
+Pick ONE Seekers AI service that best fits this prospect's niche (use the service-to-niche mapping in your system prompt). Write the email per the structure, length, and tone rules for step ${sequenceStep}.
 
-<email body here — 4 to 6 sentences total>
-
-— The Seekers team
-
-GREETING RULES:
-${isBusinessContact
-  ? `- This is a business inbox (the contact name matches the company name). Open with "Hi there," or "Hi team," — do NOT use a fake first name like "${firstName}".`
-  : `- Address the recipient by their first name: "Hi ${firstName},"`}
-
-CONTENT RULES (touch-specific):
-${touchNumber === 1
-  ? `- Specific opener that references their niche (${lead.category ?? "their industry"}). Do NOT use "I hope this email finds you well."
-- One concrete value prop with a measurable outcome (e.g. "cut your reporting time by 70%").
-- Soft CTA: ask for a 15-minute call this week.`
-  : touchNumber === 2
-  ? `- Acknowledge you reached out a few days ago without referencing the prior email's specifics — keep it light.
-- Re-frame the value with a DIFFERENT concrete proof point or angle than touch #1.
-- Soft CTA: shorter, more direct (e.g. "worth a 15-min call?").`
-  : `- This is the final touch. Acknowledge you've reached out twice with no response — graceful break-up tone.
-- Mention one last concrete thing they'd lose by ignoring this (FOMO, not pushy).
-- Offer to close the loop: "if now's not the right time, just reply 'no thanks' and I'll stop reaching out."`}
-
-FORMATTING RULES:
-- Plain text only, no markdown, no bullet points, no headers.
-- 4 to 6 sentences. Tight.
-- Subject must be specific, not generic. Use sentence case.`;
+Output the email in the strict plain-text format defined in your system prompt — no JSON, no markdown fences.`;
 
       return {
         label:        summary,
         inputSummary: summary,
         messages: [
-          { role: "system", content: SEEKERS_CONTEXT },
+          { role: "system", content: OUTREACH_SYSTEM_PROMPT },
           { role: "user",   content: userPrompt },
         ],
       };
