@@ -48,32 +48,27 @@ export interface SendOutreachEmailResult {
 const LOGO_URL = process.env.LOGO_URL ?? "https://seekers-crm.vercel.app/logo-symbol.png";
 const SITE_URL = process.env.SITE_URL ?? "https://seekersai.org";
 
-// Build a default signature when a rep hasn't set their own.
-// Uses brand colors + the hosted logo so it renders consistently in any client.
+// Brand-only signature: logo + contact row (website · email · phone).
+// name + title are accepted for backward-compat but no longer rendered —
+// the agency wants a single brand presence, not per-rep names.
+// Phone falls back to SIGNATURE_PHONE env var so unassigned leads still
+// get it in the signature.
 export function buildDefaultSignature(opts: {
-  name?:  string | null;
-  title?: string | null;
+  name?:  string | null;  // accepted but not rendered
+  title?: string | null;  // accepted but not rendered
   email?: string | null;
   phone?: string | null;
 }): string {
-  const name  = opts.name  ?? "The Seekers team";
-  const title = opts.title ?? "Seekers AI Automation Solutions";
-  const email = opts.email ?? process.env.EMAIL_FROM ?? "team@seekersai.org";
-  const phone = opts.phone ?? null;
+  const email = opts.email ?? process.env.EMAIL_FROM      ?? "team@seekersai.org";
+  const phone = opts.phone ?? process.env.SIGNATURE_PHONE ?? null;
 
-  // Build a WhatsApp-friendly tel link if phone provided (strip spaces, keep +)
+  // WhatsApp link from phone (strip spaces, drop leading + for wa.me)
   const phoneCompact = phone ? phone.replace(/\s+/g, "") : null;
   const whatsappLink = phoneCompact ? `https://wa.me/${phoneCompact.replace(/[^\d+]/g, "").replace(/^\+/, "")}` : null;
 
   return `
     <div style="margin-top:32px;padding-top:16px;border-top:1px solid #e5e5e5;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;color:#555;line-height:1.5">
-      <div style="display:flex;align-items:center;gap:12px">
-        <img src="${LOGO_URL}" alt="Seekers AI" width="42" height="42" style="display:block;border-radius:6px"/>
-        <div>
-          <div style="color:#111;font-weight:600;font-size:14px">${escapeHtml(name)}</div>
-          <div style="color:#666;font-size:12px">${escapeHtml(title)}</div>
-        </div>
-      </div>
+      <img src="${LOGO_URL}" alt="Seekers AI" width="42" height="42" style="display:block;border-radius:6px"/>
       <div style="margin-top:10px;color:#666;font-size:12px">
         <a href="${SITE_URL}" style="color:#7c3aed;text-decoration:none">${SITE_URL.replace(/^https?:\/\//, "")}</a>
         &nbsp;·&nbsp;
