@@ -234,7 +234,7 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
   let fromName: string | undefined;
   if (lead.assigneeId) {
     const [assignee] = await db
-      .select({ name: profiles.name, title: profiles.title, email: profiles.email, signature: profiles.signature })
+      .select({ name: profiles.name, title: profiles.title, email: profiles.email, phone: profiles.phone, signature: profiles.signature })
       .from(profiles)
       .where(eq(profiles.id, lead.assigneeId))
       .limit(1);
@@ -244,6 +244,7 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
         name:  assignee.name,
         title: assignee.title,
         email: assignee.email,
+        phone: assignee.phone,
       });
     } else {
       signatureHtml = buildDefaultSignature({});

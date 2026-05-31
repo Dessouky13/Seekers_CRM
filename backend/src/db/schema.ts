@@ -32,6 +32,8 @@ export const profiles = pgTable("profiles", {
   role:      text("role", { enum: ["admin", "member"] }).notNull().default("member"),
   // Optional role label shown in the email signature (e.g. "Founder", "Sales Lead")
   title:     text("title"),
+  // Phone (used in email signature + optional WhatsApp link). Plain text format, e.g. "+20 12 1110 0767"
+  phone:     text("phone"),
   // Custom email signature HTML or plain text. If null, a default is built from name/title.
   signature: text("signature"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

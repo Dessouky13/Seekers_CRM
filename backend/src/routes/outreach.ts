@@ -8,7 +8,7 @@
 //  - POST /outreach/scheduler/tick      (admin: trigger sweep manually)
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import {
   outreachSequences, outreachSteps, outreachEnrollments, outreachSends,
@@ -460,6 +460,60 @@ outreach.post("/enrollments/:id/cancel", authMiddleware, async (c) => {
     .returning();
   if (!updated) return c.json({ error: "Not found" }, 404);
   return c.json(updated);
+});
+
+// DELETE /outreach/enrollments/:id — hard-delete enrollment + cascade its sends
+// Use for cleanup of test/erroneous enrollments (cancel is for production runs).
+outreach.delete("/enrollments/:id", authMiddleware, adminOnly, async (c) => {
+  const [deleted] = await db
+    .delete(outreachEnrollments)
+    .where(eq(outreachEnrollments.id, c.req.param("id")))
+    .returning({ id: outreachEnrollments.id });
+  if (!deleted) return c.json({ error: "Not found" }, 404);
+  return new Response(null, { status: 204 });
+});
+
+// POST /outreach/sends/purge — admin cleanup: delete sends matching filters
+// Useful for nuking test send records that clutter analytics.
+// Body: { enrollment_ids?: string[], lead_ids?: string[], before_date?: "YYYY-MM-DD", confirm: "DELETE_SENDS" }
+const purgeSendsSchema = z.object({
+  enrollment_ids: z.array(z.string().uuid()).optional(),
+  lead_ids:       z.array(z.string().uuid()).optional(),
+  before_date:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  confirm:        z.literal("DELETE_SENDS"),
+});
+
+outreach.post("/sends/purge", authMiddleware, adminOnly, async (c) => {
+  const body = purgeSendsSchema.parse(await c.req.json());
+
+  if (!body.enrollment_ids && !body.lead_ids && !body.before_date) {
+    return c.json({ error: "Provide at least one filter (enrollment_ids, lead_ids, or before_date)" }, 400);
+  }
+
+  // Resolve lead_ids → enrollment_ids (one query)
+  let enrollmentIds: string[] = body.enrollment_ids ?? [];
+  if (body.lead_ids && body.lead_ids.length > 0) {
+    const rows = await db
+      .select({ id: outreachEnrollments.id })
+      .from(outreachEnrollments)
+      .where(inArray(outreachEnrollments.leadId, body.lead_ids));
+    enrollmentIds = [...enrollmentIds, ...rows.map((r) => r.id)];
+  }
+
+  const conditions = [];
+  if (enrollmentIds.length > 0) conditions.push(inArray(outreachSends.enrollmentId, enrollmentIds));
+  if (body.before_date)         conditions.push(sql`${outreachSends.sentAt} < ${body.before_date}::date`);
+
+  if (conditions.length === 0) {
+    return c.json({ deleted: 0, note: "No matching filter rows" });
+  }
+
+  const deleted = await db
+    .delete(outreachSends)
+    .where(conditions.length > 1 ? and(...conditions) : conditions[0])
+    .returning({ id: outreachSends.id });
+
+  return c.json({ deleted: deleted.length });
 });
 
 // ── SENDS history (per enrollment) ────────────────────────

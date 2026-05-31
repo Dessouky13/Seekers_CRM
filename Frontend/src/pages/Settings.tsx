@@ -251,15 +251,17 @@ function SignatureEditor({ user }: { user: ApiUser }) {
   const qc = useQueryClient();
   const [editing,  setEditing]  = useState(false);
   const [title,    setTitle]    = useState(user.title ?? "");
+  const [phone,    setPhone]    = useState(user.phone ?? "");
   const [sig,      setSig]      = useState(user.signature ?? "");
 
   // Keep local state in sync when user updates (e.g. after save)
   useEffect(() => {
     if (!editing) {
       setTitle(user.title ?? "");
+      setPhone(user.phone ?? "");
       setSig(user.signature ?? "");
     }
-  }, [user.title, user.signature, editing]);
+  }, [user.title, user.phone, user.signature, editing]);
 
   const save = useMutation({
     mutationFn: () =>
@@ -267,6 +269,7 @@ function SignatureEditor({ user }: { user: ApiUser }) {
         method: "PATCH",
         body: JSON.stringify({
           title:     title.trim() || null,
+          phone:     phone.trim() || null,
           signature: sig.trim()   || null,
         }),
       }),
@@ -284,6 +287,7 @@ function SignatureEditor({ user }: { user: ApiUser }) {
   const previewName  = user.name;
   const previewTitle = title.trim() || "Seekers AI Automation Solutions";
   const previewEmail = user.email;
+  const previewPhone = phone.trim();
 
   return (
     <div className="rounded-xl border border-border bg-card p-6 space-y-4">
@@ -303,17 +307,31 @@ function SignatureEditor({ user }: { user: ApiUser }) {
 
       {editing ? (
         <>
-          <div>
-            <Label>Title / Role</Label>
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Founder, Sales Lead"
-              maxLength={120}
-              className="mt-1"
-            />
-            <p className="text-[10px] text-muted-foreground mt-1">Shown below your name in the default signature.</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Title / Role</Label>
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. Founder, Sales Lead"
+                maxLength={120}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Phone / WhatsApp</Label>
+              <Input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+20 12 1110 0767"
+                maxLength={40}
+                className="mt-1"
+              />
+            </div>
           </div>
+          <p className="text-[10px] text-muted-foreground -mt-2">
+            Title + Phone appear in the default signature. Phone becomes a clickable WhatsApp link.
+          </p>
 
           <div>
             <Label>Custom signature (HTML or plain text)</Label>
@@ -363,6 +381,7 @@ function SignatureEditor({ user }: { user: ApiUser }) {
                 </div>
                 <div className="mt-2 text-muted-foreground text-[11px]">
                   <span className="text-primary">seekersai.org</span> · <span className="text-primary">{previewEmail}</span>
+                  {previewPhone && <> · <span className="text-primary">{previewPhone}</span></>}
                 </div>
               </div>
               <p className="text-[10px] text-muted-foreground mt-3 italic">

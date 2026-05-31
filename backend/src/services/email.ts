@@ -54,10 +54,16 @@ export function buildDefaultSignature(opts: {
   name?:  string | null;
   title?: string | null;
   email?: string | null;
+  phone?: string | null;
 }): string {
   const name  = opts.name  ?? "The Seekers team";
   const title = opts.title ?? "Seekers AI Automation Solutions";
   const email = opts.email ?? process.env.EMAIL_FROM ?? "team@seekersai.org";
+  const phone = opts.phone ?? null;
+
+  // Build a WhatsApp-friendly tel link if phone provided (strip spaces, keep +)
+  const phoneCompact = phone ? phone.replace(/\s+/g, "") : null;
+  const whatsappLink = phoneCompact ? `https://wa.me/${phoneCompact.replace(/[^\d+]/g, "").replace(/^\+/, "")}` : null;
 
   return `
     <div style="margin-top:32px;padding-top:16px;border-top:1px solid #e5e5e5;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;color:#555;line-height:1.5">
@@ -72,6 +78,7 @@ export function buildDefaultSignature(opts: {
         <a href="${SITE_URL}" style="color:#7c3aed;text-decoration:none">${SITE_URL.replace(/^https?:\/\//, "")}</a>
         &nbsp;·&nbsp;
         <a href="mailto:${escapeHtml(email)}" style="color:#7c3aed;text-decoration:none">${escapeHtml(email)}</a>
+        ${phone ? `&nbsp;·&nbsp;<a href="${whatsappLink}" style="color:#7c3aed;text-decoration:none">${escapeHtml(phone)}</a>` : ""}
       </div>
     </div>
   `.trim();
