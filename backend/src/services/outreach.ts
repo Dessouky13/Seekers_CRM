@@ -50,10 +50,39 @@ function buildLeadVars(lead: typeof leads.$inferSelect): Record<string, string> 
 }
 
 // Find a step's actual due date for an enrollment based on its day_offset.
+// Snaps every send to 12:00 PM Cairo (Africa/Cairo) and skips Egyptian
+// weekend (Friday + Saturday) by pushing forward to Sunday.
+const CAIRO_TZ = "Africa/Cairo";
+
 function computeNextSendAt(enrolledAt: Date, dayOffset: number): Date {
-  const d = new Date(enrolledAt.getTime());
-  d.setDate(d.getDate() + dayOffset);
-  return d;
+  // Step 1 — add the requested day offset
+  const base = new Date(enrolledAt.getTime() + dayOffset * 86_400_000);
+
+  // Step 2 — extract the Cairo-local date components (handles DST automatically)
+  const cairoDateStr = base.toLocaleDateString("en-CA", { timeZone: CAIRO_TZ }); // "YYYY-MM-DD"
+  const [y, m, d] = cairoDateStr.split("-").map(Number);
+
+  // Step 3 — find the UTC instant that corresponds to 12:00 Cairo on that date.
+  // Use noon UTC as an anchor, observe what Cairo says, then shift to land at 12.
+  const noonUtc   = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  const cairoHour = Number(noonUtc.toLocaleString("en-US", { timeZone: CAIRO_TZ, hour: "2-digit", hour12: false }));
+  let sendAt      = new Date(noonUtc.getTime() + (12 - cairoHour) * 3_600_000);
+
+  // Step 4 — if for any reason this lands in the past (dayOffset=0 enrolled
+  // after noon Cairo), push to next-day noon Cairo.
+  if (sendAt.getTime() <= enrolledAt.getTime()) {
+    sendAt = new Date(sendAt.getTime() + 86_400_000);
+  }
+
+  // Step 5 — skip the Egyptian weekend (Friday + Saturday).
+  // Push Fri → Sun (+2 days), Sat → Sun (+1 day).
+  let weekday = sendAt.toLocaleString("en-US", { timeZone: CAIRO_TZ, weekday: "short" });
+  while (weekday === "Fri" || weekday === "Sat") {
+    sendAt  = new Date(sendAt.getTime() + 86_400_000);
+    weekday = sendAt.toLocaleString("en-US", { timeZone: CAIRO_TZ, weekday: "short" });
+  }
+
+  return sendAt;
 }
 
 // ── Enrollment ────────────────────────────────────────────
@@ -370,15 +399,22 @@ export async function handleReply(opts: {
 }
 
 // ── Auto-enroll a freshly created lead ────────────────────
+// Combines two auto-enroll behaviours:
+//   1. Sequences marked autoEnrollAll → enroll EVERY new lead regardless of category.
+//   2. Sequences marked autoEnrollOnCategory with matching category → enroll only matches.
+// enrollLead() is dedup-safe so a lead can never be double-enrolled in the same sequence.
 export async function autoEnrollIfMatchingCategory(leadId: string, category: string | null) {
-  if (!category) return;
   const matches = await db
     .select()
     .from(outreachSequences)
     .where(and(
       eq(outreachSequences.isActive, true),
-      eq(outreachSequences.autoEnrollOnCategory, true),
-      eq(outreachSequences.category, category),
+      or(
+        eq(outreachSequences.autoEnrollAll, true),
+        category
+          ? and(eq(outreachSequences.autoEnrollOnCategory, true), eq(outreachSequences.category, category))
+          : sql`false`,
+      )!,
     ));
 
   for (const seq of matches) {

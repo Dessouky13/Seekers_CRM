@@ -315,6 +315,8 @@ export const outreachSequences = pgTable("outreach_sequences", {
   isActive:     boolean("is_active").notNull().default(true),
   // If set, auto-enroll new leads with matching category. NULL = manual only.
   autoEnrollOnCategory: boolean("auto_enroll_on_category").notNull().default(false),
+  // If set, auto-enroll EVERY new lead regardless of category (use carefully).
+  autoEnrollAll:        boolean("auto_enroll_all").notNull().default(false),
   createdBy:    uuid("created_by").references(() => profiles.id, { onDelete: "set null" }),
   createdAt:    timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt:    timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

@@ -267,6 +267,15 @@ function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onBack: ()
             />
             <span className="text-muted-foreground">Auto-enroll category</span>
           </div>
+          <div className="flex items-center gap-2 text-xs">
+            <Switch
+              checked={seq.autoEnrollAll}
+              onCheckedChange={(v) => updateSeq.mutate({ id: sequenceId, auto_enroll_all: v })}
+            />
+            <span className="text-muted-foreground" title="Every new lead created — regardless of category — auto-enrolls in this sequence. Use carefully.">
+              Auto-enroll ALL
+            </span>
+          </div>
           <Button
             variant="ghost"
             size="sm"

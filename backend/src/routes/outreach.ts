@@ -211,6 +211,7 @@ const sequenceSchema = z.object({
   category:                z.string().max(100).optional().nullable(),
   is_active:               z.boolean().optional(),
   auto_enroll_on_category: z.boolean().optional(),
+  auto_enroll_all:         z.boolean().optional(),
 });
 
 outreach.get("/sequences", authMiddleware, async (c) => {
@@ -262,6 +263,7 @@ outreach.post("/sequences", authMiddleware, async (c) => {
     category:              body.category    ?? null,
     isActive:              body.is_active ?? true,
     autoEnrollOnCategory:  body.auto_enroll_on_category ?? false,
+    autoEnrollAll:         body.auto_enroll_all ?? false,
     createdBy:             user.id,
   }).returning();
   return c.json(created, 201);
@@ -276,6 +278,7 @@ outreach.patch("/sequences/:id", authMiddleware, async (c) => {
   if (body.category !== undefined)                patch.category = body.category;
   if (body.is_active !== undefined)               patch.isActive = body.is_active;
   if (body.auto_enroll_on_category !== undefined) patch.autoEnrollOnCategory = body.auto_enroll_on_category;
+  if (body.auto_enroll_all !== undefined)          patch.autoEnrollAll = body.auto_enroll_all;
   const [updated] = await db.update(outreachSequences).set(patch).where(eq(outreachSequences.id, id)).returning();
   if (!updated) return c.json({ error: "Not found" }, 404);
   return c.json(updated);
@@ -519,21 +522,67 @@ outreach.get("/analytics", authMiddleware, async (c) => {
     .groupBy(sql`DATE(${outreachSends.sentAt})`)
     .orderBy(sql`DATE(${outreachSends.sentAt}) DESC`);
 
-  // Per-sequence stats: enrolled / replied / completed / sends
-  const perSequence = await db
-    .select({
-      sequenceId:   outreachSequences.id,
-      sequenceName: outreachSequences.name,
-      category:     outreachSequences.category,
-      isActive:     outreachSequences.isActive,
-      enrolled:     sql<number>`(SELECT COUNT(*)::int FROM ${outreachEnrollments} WHERE ${outreachEnrollments.sequenceId} = ${outreachSequences.id})`,
-      active:       sql<number>`(SELECT COUNT(*)::int FROM ${outreachEnrollments} WHERE ${outreachEnrollments.sequenceId} = ${outreachSequences.id} AND ${outreachEnrollments.status} = 'active')`,
-      replied:      sql<number>`(SELECT COUNT(*)::int FROM ${outreachEnrollments} WHERE ${outreachEnrollments.sequenceId} = ${outreachSequences.id} AND ${outreachEnrollments.status} = 'replied')`,
-      completed:    sql<number>`(SELECT COUNT(*)::int FROM ${outreachEnrollments} WHERE ${outreachEnrollments.sequenceId} = ${outreachSequences.id} AND ${outreachEnrollments.status} = 'completed')`,
-      sends:        sql<number>`(SELECT COUNT(*)::int FROM ${outreachSends} s JOIN ${outreachEnrollments} e ON s.enrollment_id = e.id WHERE e.sequence_id = ${outreachSequences.id})`,
+  // Per-sequence stats — separate aggregate queries merged in JS.
+  // (Correlated subqueries were emitting "column reference id is ambiguous"
+  // errors in production, same root cause as the /sequences endpoint.)
+  const [sequences, enrollByStatusPerSeq, sendsPerSeq] = await Promise.all([
+    db.select({
+      id:       outreachSequences.id,
+      name:     outreachSequences.name,
+      category: outreachSequences.category,
+      isActive: outreachSequences.isActive,
+      updatedAt: outreachSequences.updatedAt,
+    }).from(outreachSequences).orderBy(desc(outreachSequences.updatedAt)),
+    db.select({
+      sequenceId: outreachEnrollments.sequenceId,
+      status:     outreachEnrollments.status,
+      count:      sql<number>`COUNT(*)::int`,
+    }).from(outreachEnrollments).groupBy(outreachEnrollments.sequenceId, outreachEnrollments.status),
+    // Sends per sequence: join sends → enrollments to bridge sequence_id
+    db.select({
+      sequenceId: outreachEnrollments.sequenceId,
+      count:      sql<number>`COUNT(${outreachSends.id})::int`,
     })
-    .from(outreachSequences)
-    .orderBy(desc(outreachSequences.updatedAt));
+    .from(outreachSends)
+    .innerJoin(outreachEnrollments, eq(outreachSends.enrollmentId, outreachEnrollments.id))
+    .groupBy(outreachEnrollments.sequenceId),
+  ]);
+
+  // Build a status → count map per sequence
+  const statsBySeq = new Map<string, { enrolled: number; active: number; replied: number; completed: number; failed: number; sends: number }>();
+  for (const seq of sequences) {
+    statsBySeq.set(seq.id, { enrolled: 0, active: 0, replied: 0, completed: 0, failed: 0, sends: 0 });
+  }
+  for (const row of enrollByStatusPerSeq) {
+    const entry = statsBySeq.get(row.sequenceId);
+    if (!entry) continue;
+    const n = Number(row.count);
+    entry.enrolled += n;
+    if (row.status === "active")    entry.active    += n;
+    if (row.status === "replied")   entry.replied   += n;
+    if (row.status === "completed") entry.completed += n;
+    if (row.status === "failed")    entry.failed    += n;
+  }
+  for (const row of sendsPerSeq) {
+    const entry = statsBySeq.get(row.sequenceId);
+    if (entry) entry.sends = Number(row.count);
+  }
+
+  const perSequence = sequences.map((seq) => {
+    const s = statsBySeq.get(seq.id)!;
+    return {
+      sequence_id:   seq.id,
+      sequence_name: seq.name,
+      category:      seq.category,
+      is_active:     seq.isActive,
+      enrolled:      s.enrolled,
+      active:        s.active,
+      replied:       s.replied,
+      completed:     s.completed,
+      sends:         s.sends,
+      reply_rate:    s.enrolled > 0 ? Math.round((s.replied / s.enrolled) * 100) : 0,
+    };
+  });
 
   // Totals
   const total = byStatus.reduce((acc, s) => acc + Number(s.count), 0);
@@ -542,25 +591,14 @@ outreach.get("/analytics", authMiddleware, async (c) => {
 
   return c.json({
     totals: {
-      enrollments_total:     total,
+      enrollments_total:  total,
       replied,
-      reply_rate:            total > 0 ? Math.round((replied / total) * 100) : 0,
-      sends_last_30_days:    sent30d,
+      reply_rate:         total > 0 ? Math.round((replied / total) * 100) : 0,
+      sends_last_30_days: sent30d,
     },
-    by_status: byStatus.map((r) => ({ status: r.status, count: Number(r.count) })),
+    by_status:    byStatus.map((r) => ({ status: r.status, count: Number(r.count) })),
     sends_by_day: sendsByDay.map((r) => ({ day: r.day, count: Number(r.count) })).reverse(),
-    per_sequence: perSequence.map((r) => ({
-      sequence_id:   r.sequenceId,
-      sequence_name: r.sequenceName,
-      category:      r.category,
-      is_active:     r.isActive,
-      enrolled:      Number(r.enrolled),
-      active:        Number(r.active),
-      replied:       Number(r.replied),
-      completed:     Number(r.completed),
-      sends:         Number(r.sends),
-      reply_rate:    Number(r.enrolled) > 0 ? Math.round((Number(r.replied) / Number(r.enrolled)) * 100) : 0,
-    })),
+    per_sequence: perSequence,
   });
 });
 

@@ -11,6 +11,7 @@ export interface Sequence {
   category:                 string | null;
   isActive:                 boolean;
   autoEnrollOnCategory:     boolean;
+  autoEnrollAll:            boolean;
   createdAt:                string;
   updatedAt:                string;
   step_count:               number;
@@ -83,7 +84,7 @@ export function useSequence(id: string | null) {
 export function useCreateSequence() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name: string; description?: string; category?: string; is_active?: boolean; auto_enroll_on_category?: boolean }) =>
+    mutationFn: (body: { name: string; description?: string; category?: string; is_active?: boolean; auto_enroll_on_category?: boolean; auto_enroll_all?: boolean }) =>
       apiFetch<Sequence>("/outreach/sequences", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["outreach", "sequences"] }),
   });
@@ -92,7 +93,7 @@ export function useCreateSequence() {
 export function useUpdateSequence() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string } & Partial<{ name: string; description: string | null; category: string | null; is_active: boolean; auto_enroll_on_category: boolean }>) =>
+    mutationFn: ({ id, ...body }: { id: string } & Partial<{ name: string; description: string | null; category: string | null; is_active: boolean; auto_enroll_on_category: boolean; auto_enroll_all: boolean }>) =>
       apiFetch<Sequence>(`/outreach/sequences/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["outreach"] }),
   });
