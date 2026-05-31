@@ -208,23 +208,42 @@ crm.post("/leads/bulk-delete", authMiddleware, adminOnly, async (c) => {
   }
   const where = conditions.length > 1 ? sql`(${conditions[0]}) AND (${conditions[1]})` : conditions[0];
 
-  // Preview first — pull the matching rows (up to 50 for the response)
+  // True total count (uncapped) + 50-row preview + per-source breakdown
+  const [{ total }] = await db
+    .select({ total: sql<number>`COUNT(*)::int` })
+    .from(leads)
+    .where(where);
+
   const preview = await db
     .select({ id: leads.id, name: leads.name, company: leads.company, source: leads.source })
     .from(leads)
     .where(where)
     .limit(50);
 
+  const breakdown = await db
+    .select({
+      source: leads.source,
+      count:  sql<number>`COUNT(*)::int`,
+    })
+    .from(leads)
+    .where(where)
+    .groupBy(leads.source);
+
   if (body.dry_run) {
-    return c.json({ deleted: 0, would_delete: preview.length, preview });
+    return c.json({
+      deleted:      0,
+      would_delete: Number(total),
+      by_source:    breakdown.map((r) => ({ source: r.source ?? "(null)", count: Number(r.count) })),
+      preview,
+    });
   }
 
   // Execute
   const deleted = await db.delete(leads).where(where).returning({ id: leads.id });
 
   return c.json({
-    deleted: deleted.length,
-    preview, // first 50 rows for verification
+    deleted:   deleted.length,
+    by_source: breakdown.map((r) => ({ source: r.source ?? "(null)", count: Number(r.count) })),
   });
 });
 
