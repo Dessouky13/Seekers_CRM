@@ -217,6 +217,19 @@ crm.post("/leads/:id/activities", authMiddleware, async (c) => {
   return c.json(activity, 201);
 });
 
+// DELETE /crm/leads/:leadId/activities/:activityId — remove an activity from the timeline
+crm.delete("/leads/:leadId/activities/:activityId", authMiddleware, async (c) => {
+  const [deleted] = await db
+    .delete(leadActivities)
+    .where(and(
+      eq(leadActivities.id,     c.req.param("activityId")),
+      eq(leadActivities.leadId, c.req.param("leadId")),
+    ))
+    .returning({ id: leadActivities.id });
+  if (!deleted) return c.json({ error: "Activity not found" }, 404);
+  return new Response(null, { status: 204 });
+});
+
 // GET /crm/categories — distinct categories in use
 crm.get("/categories", authMiddleware, async (c) => {
   const rows = await db
