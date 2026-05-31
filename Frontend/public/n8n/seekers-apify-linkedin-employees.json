@@ -1,0 +1,158 @@
+{
+  "name": "Seekers CRM — Apify LinkedIn Company Employees Scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 9 * * 1" }
+          ]
+        }
+      },
+      "name": "Weekly: Monday 9am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "notes": "Replace with Manual Trigger if you prefer firing on-demand. Cron format: minute hour day-of-month month day-of-week. Default fires every Monday at 9am UTC."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/harvestapi~linkedin-company-employees/run-sync-get-dataset-items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"companies\": [\n    \"https://www.linkedin.com/company/microsoft/\",\n    \"https://www.linkedin.com/company/salesforce/\"\n  ],\n  \"maxItems\": 50,\n  \"profileScraperMode\": \"Short ($4 per 1k)\"\n}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "name": "Run Apify Actor — LinkedIn Employees",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [480, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "apify-api-token",
+          "name": "Apify API Token"
+        }
+      },
+      "notes": "Edit 'companies' to your target LinkedIn company URLs (the /company/<slug>/ format). 'maxItems' controls cost (~$0.004 per employee at Short mode). For more depth use 'Full ($8 per 1k)' which includes experience and education arrays. Timeout set to 10 min — LinkedIn scrapes can take a while."
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "name": "Split Each Employee",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 3,
+      "position": [700, 300],
+      "notes": "Apify returns an array — split it so each employee becomes its own n8n item. If your actor returns the data at the root instead of under 'data', change fieldToSplitOut to '' (empty)."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "name",
+              "value": "={{ $json.fullName || (($json.firstName || '') + ' ' + ($json.lastName || '')).trim() || $json.headline || 'Unknown' }}"
+            },
+            {
+              "name": "company",
+              "value": "={{ $json.companyName || $json.company || '' }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.email || ($json.contactInfo && $json.contactInfo.emails && $json.contactInfo.emails[0]) || '' }}"
+            },
+            {
+              "name": "source",
+              "value": "apify-linkedin"
+            },
+            {
+              "name": "category",
+              "value": "={{ $json.industry || $json.companyIndustry || '' }}"
+            },
+            {
+              "name": "notes",
+              "value": "=LinkedIn — scraped via Apify:\n• Title: {{ $json.headline || $json.jobTitle || '—' }}\n• Location: {{ $json.location || $json.geoLocation || '—' }}\n• LinkedIn: {{ $json.linkedinUrl || $json.publicIdentifier || '—' }}\n• Company URL: {{ $json.companyUrl || '—' }}\n• Connections: {{ $json.connectionsCount || '—' }}"
+            }
+          ]
+        },
+        "options": { "dotNotation": false }
+      },
+      "name": "Map Employee Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [920, 300],
+      "notes": "Maps Apify's actor output → /leads/ingest payload. Fallbacks handle different actor versions: fullName OR firstName+lastName, companyName OR company, etc."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "has-name-and-company",
+              "leftValue": "={{ $json.name && $json.company && $json.name !== 'Unknown' }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Has Name + Company?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1140, 300],
+      "notes": "Skip records that don't have both a name and a company — they're not actionable as leads."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SEEKERS_API_BASE }}/outreach/leads/ingest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "name": "Ingest into Seekers CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1360, 240],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "seekers-crm-api-key",
+          "name": "Seekers CRM API Key"
+        }
+      },
+      "notes": "Hits the same /outreach/leads/ingest endpoint. Idempotent by email (or name+company when email missing) — re-runs don't create duplicates. LinkedIn doesn't expose emails directly, so most will land emailless and you can enrich later with Hunter.io / a verifier actor."
+    }
+  ],
+  "connections": {
+    "Weekly: Monday 9am":               { "main": [[{ "node": "Run Apify Actor — LinkedIn Employees", "type": "main", "index": 0 }]] },
+    "Run Apify Actor — LinkedIn Employees": { "main": [[{ "node": "Split Each Employee", "type": "main", "index": 0 }]] },
+    "Split Each Employee":              { "main": [[{ "node": "Map Employee Fields", "type": "main", "index": 0 }]] },
+    "Map Employee Fields":              { "main": [[{ "node": "Has Name + Company?", "type": "main", "index": 0 }]] },
+    "Has Name + Company?":              { "main": [
+      [{ "node": "Ingest into Seekers CRM", "type": "main", "index": 0 }],
+      []
+    ]}
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "seekers-apify-linkedin-v1",
+  "id": "seekers-apify-linkedin",
+  "tags": [{ "name": "Seekers" }, { "name": "Apify" }, { "name": "LinkedIn" }]
+}

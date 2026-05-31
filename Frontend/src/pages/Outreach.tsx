@@ -691,6 +691,12 @@ Response:
             tag="Apify"
           />
           <WorkflowCard
+            file="seekers-apify-linkedin-employees.json"
+            title="Apify — LinkedIn Employees"
+            description="Pass target company LinkedIn URLs → scrape every employee with title + profile. ~$4 per 1000 employees."
+            tag="Apify"
+          />
+          <WorkflowCard
             file="seekers-rb2b-workflow.json"
             title="RB2B"
             description="Identifies anonymous website visitors as leads. Tagged 'rb2b-inbound' for warm prioritization."

@@ -160,6 +160,30 @@ Download [`seekers-snov-workflow.json`](./seekers-snov-workflow.json). Same impo
 3. Trigger: "New contact added to list" or "New contact in drip campaign"
 4. Save → start adding contacts → they flow into Seekers CRM
 
+### C-bis. Apify — LinkedIn Company Employees (target-companies approach)
+
+Reality check: Apollo / Snov.io / RB2B all gate their webhooks behind paid plans. **Apify is the only practically-free way** to get B2B leads at scale — pay-per-use credit instead of a monthly plan.
+
+Download [`seekers-apify-linkedin-employees.json`](./seekers-apify-linkedin-employees.json). This workflow uses the `harvestapi/linkedin-company-employees` actor: you give it target company LinkedIn URLs, it returns every employee.
+
+Best workflow for an agency:
+1. Pick 10-50 target companies (e.g. all SaaS startups in Egypt that closed Series A)
+2. Grab their LinkedIn `/company/<slug>/` URLs
+3. Paste them into the workflow's `companies` array
+4. Activate → every Monday morning you get ~50 fresh leads with title + LinkedIn URL
+
+**Setup:**
+1. Apify API token credential already covers this actor (same as Google Maps one)
+2. Import workflow → edit the `Run Apify Actor` node → change `companies` to your targets
+3. Adjust `profileScraperMode`: `"Short ($4 per 1k)"` for basic info or `"Full ($8 per 1k)"` for experience + education arrays
+
+**Cost example:** 50 companies × 30 employees avg = 1500 employees × $0.004 = $6/month. Way cheaper than Apollo Basic ($49/mo) and gets you actual decision-makers vs broad firmographic exports.
+
+**Note:** LinkedIn doesn't expose emails directly, so leads land with name + company + title + LinkedIn URL but no email. You can:
+- Enrich them later with Hunter.io / a website email-scraper actor
+- Use the LinkedIn URL for outreach via LinkedIn Sales Navigator (manual)
+- Run them through Snov.io's free Chrome extension for emails
+
 ### C. Apify — Google Maps scraper (best for MENA local businesses)
 
 Download [`seekers-apify-google-maps.json`](./seekers-apify-google-maps.json). This one is **scheduled** rather than webhook-triggered — runs every Monday 9am by default.
