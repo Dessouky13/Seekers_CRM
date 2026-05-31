@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import {
   Plus, Mail, Phone, Calendar, FileText, Globe, Trash2, Pencil,
-  Search, List, Columns3, UserCheck, Filter,
+  Search, List, Columns3, UserCheck, Filter, X, ArrowUpDown, Settings2,
+  TrendingUp, ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,7 +24,7 @@ import { LeadOutreachPanel } from "@/components/modules/LeadOutreachPanel";
 import { toast } from "sonner";
 import {
   useLeads, useLeadDetail, useCreateLead, useUpdateLead, useDeleteLead,
-  useAddLeadActivity, useLeadCategories,
+  useAddLeadActivity, useLeadCategories, usePipelineSummary,
 } from "@/hooks/useCRM";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useUsers } from "@/hooks/useTasks";
@@ -31,15 +32,18 @@ import { useCreateClient } from "@/hooks/useClients";
 import { cn } from "@/lib/utils";
 import type { ApiLead, LeadStage } from "@/lib/types";
 
-const LEAD_STAGES: { key: LeadStage; label: string; color: string }[] = [
-  { key: "new_lead",       label: "New Lead",        color: "text-muted-foreground" },
-  { key: "contacted",      label: "Contacted",       color: "text-blue-400" },
-  { key: "call_scheduled", label: "Call Scheduled",  color: "text-violet-400" },
-  { key: "proposal_sent",  label: "Proposal Sent",   color: "text-amber-400" },
-  { key: "negotiation",    label: "Negotiation",     color: "text-orange-400" },
-  { key: "closed_won",     label: "Closed Won",      color: "text-green-400" },
-  { key: "closed_lost",    label: "Closed Lost",     color: "text-red-400" },
+const LEAD_STAGES: { key: LeadStage; label: string; color: string; chip: string }[] = [
+  { key: "new_lead",       label: "New Lead",        color: "text-zinc-300",   chip: "bg-zinc-500/15 text-zinc-300 ring-1 ring-inset ring-zinc-500/20" },
+  { key: "contacted",      label: "Contacted",       color: "text-blue-300",   chip: "bg-blue-500/15 text-blue-300 ring-1 ring-inset ring-blue-500/20" },
+  { key: "call_scheduled", label: "Call Scheduled",  color: "text-violet-300", chip: "bg-violet-500/15 text-violet-300 ring-1 ring-inset ring-violet-500/20" },
+  { key: "proposal_sent",  label: "Proposal Sent",   color: "text-amber-300",  chip: "bg-amber-500/15 text-amber-300 ring-1 ring-inset ring-amber-500/20" },
+  { key: "negotiation",    label: "Negotiation",     color: "text-orange-300", chip: "bg-orange-500/15 text-orange-300 ring-1 ring-inset ring-orange-500/20" },
+  { key: "closed_won",     label: "Closed Won",      color: "text-emerald-300", chip: "bg-emerald-500/15 text-emerald-300 ring-1 ring-inset ring-emerald-500/20" },
+  { key: "closed_lost",    label: "Closed Lost",     color: "text-rose-300",   chip: "bg-rose-500/15 text-rose-300 ring-1 ring-inset ring-rose-500/20" },
 ];
+
+const CATEGORY_CHIP = "bg-fuchsia-500/12 text-fuchsia-300 ring-1 ring-inset ring-fuchsia-500/20";
+const SOURCE_CHIP   = "bg-sky-500/10 text-sky-300 ring-1 ring-inset ring-sky-500/15";
 
 const LEAD_SOURCES = [
   "Instagram", "Facebook", "TikTok", "LinkedIn",
@@ -370,9 +374,11 @@ export default function CRM() {
     search:   debouncedSearch || undefined,
     category: catFilter || undefined,
     stage:    stageFilter || undefined,
-    limit:    100,
+    limit:    200,
   });
 
+  // Pipeline-summary: accurate totals across ALL leads regardless of current filter
+  const { data: pipeline = [] } = usePipelineSummary();
   const { data: users    = [] } = useUsers();
   const { data: categories = [] } = useLeadCategories();
   const createLead = useCreateLead();
@@ -419,16 +425,17 @@ export default function CRM() {
     );
   };
 
-  const totalPipeline = leads
-    .filter((l) => !["closed_won", "closed_lost"].includes(l.stage))
-    .reduce((s, l) => s + Number(l.dealValue), 0);
+  // Global totals — from pipeline-summary, not filtered leads.
+  // This is THE bug fix: previously stats used the filtered+limited array.
+  const totalActive    = pipeline.filter((r) => !["closed_won", "closed_lost"].includes(r.stage)).reduce((s, r) => s + Number(r.count), 0);
+  const totalPipeline  = pipeline.filter((r) => !["closed_won", "closed_lost"].includes(r.stage)).reduce((s, r) => s + Number(r.total_value), 0);
+  const wonCount       = Number(pipeline.find((r) => r.stage === "closed_won")?.count ?? 0);
+  const wonValue       = Number(pipeline.find((r) => r.stage === "closed_won")?.total_value ?? 0);
+  const lostCount      = Number(pipeline.find((r) => r.stage === "closed_lost")?.count ?? 0);
+  const totalClosed    = wonCount + lostCount;
+  const convRate       = totalClosed > 0 ? Math.round((wonCount / totalClosed) * 100) : 0;
 
-  const won      = leads.filter((l) => l.stage === "closed_won");
-  const lost     = leads.filter((l) => l.stage === "closed_lost");
-  const active   = leads.filter((l) => !["closed_won", "closed_lost"].includes(l.stage));
-  const wonValue = won.reduce((s, l) => s + Number(l.dealValue), 0);
-  const total    = won.length + lost.length;
-  const convRate = total > 0 ? Math.round((won.length / total) * 100) : 0;
+  const activeFilterCount = (catFilter ? 1 : 0) + (stageFilter ? 1 : 0);
 
   const LeadCard = ({ lead }: { lead: ApiLead }) => {
     const isStale  = lead.lastActivity
@@ -440,28 +447,31 @@ export default function CRM() {
       <div
         onClick={() => setSelectedId(lead.id)}
         className={cn(
-          "rounded-lg border bg-card p-3 space-y-2 hover:border-primary/30 transition-colors cursor-pointer",
-          isStale && isActive ? "border-destructive/40" : "border-border",
+          "group rounded-md border bg-card px-3 py-2.5 space-y-2 transition-all cursor-pointer",
+          "hover:shadow-sm hover:border-border/80 hover:bg-card/80",
+          isStale && isActive ? "border-destructive/30" : "border-border/60",
         )}
       >
-        <div>
-          <p className="text-sm font-medium text-foreground">{lead.name}</p>
-          <p className="text-xs text-muted-foreground">{lead.company}</p>
+        <div className="space-y-0.5">
+          <p className="text-sm font-medium text-foreground leading-snug">{lead.name}</p>
+          <p className="text-xs text-muted-foreground leading-tight">{lead.company}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-1">
-          {lead.category && (
-            <span className="text-[10px] text-primary border border-primary/30 px-1.5 py-0.5 rounded-full">
-              {lead.category}
-            </span>
-          )}
-          {lead.source && (
-            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-              {lead.source}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-primary tabular-nums">{fmt(lead.dealValue)}</span>
+        {(lead.category || lead.source) && (
+          <div className="flex flex-wrap items-center gap-1">
+            {lead.category && (
+              <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", CATEGORY_CHIP)}>
+                {lead.category}
+              </span>
+            )}
+            {lead.source && (
+              <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", SOURCE_CHIP)}>
+                {lead.source}
+              </span>
+            )}
+          </div>
+        )}
+        <div className="flex items-center justify-between pt-1 border-t border-border/40">
+          <span className="text-xs font-semibold text-foreground tabular-nums">{fmt(lead.dealValue)}</span>
           <div className="flex items-center gap-1.5">
             {isStale && isActive && (
               <span className="text-[10px] text-destructive font-semibold" title="No activity in 2+ days">⚠</span>
@@ -478,20 +488,31 @@ export default function CRM() {
   }
 
   return (
-    <div className="space-y-6 w-full overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">CRM</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Pipeline: <span className="text-primary font-semibold">{fmt(totalPipeline)}</span>
-            <span className="mx-2 text-border">·</span>
-            <span className="text-foreground font-medium">{active.length}</span> active leads
-          </p>
+    <div className="space-y-4 w-full overflow-hidden -mt-2">
+      {/* ── Notion-style header ──────────────────────────────── */}
+      <div className="flex items-end justify-between flex-wrap gap-3 pb-1">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">📋</span>
+            <h1 className="text-2xl font-bold text-foreground tracking-tight">Leads</h1>
+          </div>
+          <div className="flex items-center gap-4 text-[12px] text-muted-foreground">
+            <span><span className="text-foreground font-semibold tabular-nums">{totalActive}</span> active</span>
+            <span className="text-border">·</span>
+            <span>Pipeline <span className="text-foreground font-semibold tabular-nums">{fmt(totalPipeline)}</span></span>
+            <span className="text-border">·</span>
+            <span><span className="text-emerald-400 font-semibold tabular-nums">{wonCount}</span> won</span>
+            <span className="text-border">·</span>
+            <span><span className="text-rose-400 font-semibold tabular-nums">{lostCount}</span> lost</span>
+            <span className="text-border">·</span>
+            <span><span className="text-primary font-semibold tabular-nums">{convRate}%</span> conv</span>
+          </div>
         </div>
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
           <DialogTrigger asChild>
-            <Button size="sm" className="gap-1.5"><Plus className="h-3.5 w-3.5" /> Add Lead</Button>
+            <Button size="sm" className="gap-1.5 h-8">
+              <Plus className="h-3.5 w-3.5" /> New
+            </Button>
           </DialogTrigger>
           <DialogContent className="max-w-lg">
             <DialogHeader><DialogTitle>Add Lead</DialogTitle></DialogHeader>
@@ -509,7 +530,7 @@ export default function CRM() {
                   </select>
                 </div>
                 <div>
-                  <Label>Category / Niche</Label>
+                  <Label>Niche</Label>
                   <select name="category" className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
                     <option value="">None</option>
                     {LEAD_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -536,148 +557,245 @@ export default function CRM() {
         </Dialog>
       </div>
 
-      {/* Pipeline Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-lg border border-border bg-card p-3">
-          <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Active Leads</p>
-          <p className="text-lg font-bold text-foreground">{active.length}</p>
-          <p className="text-[11px] text-muted-foreground">{fmt(totalPipeline)} in pipeline</p>
-        </div>
-        <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-3">
-          <p className="text-[11px] text-green-400 uppercase tracking-wide">Won</p>
-          <p className="text-lg font-bold text-green-400">{won.length}</p>
-          <p className="text-[11px] text-green-400/70">{fmt(wonValue)} closed</p>
-        </div>
-        <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-3">
-          <p className="text-[11px] text-red-400 uppercase tracking-wide">Lost</p>
-          <p className="text-lg font-bold text-red-400">{lost.length}</p>
-        </div>
-        <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
-          <p className="text-[11px] text-primary uppercase tracking-wide">Conversion</p>
-          <p className="text-lg font-bold text-primary">{convRate}%</p>
-          <p className="text-[11px] text-muted-foreground">{total} total closed</p>
-        </div>
+      {/* ── View tabs (Notion-style underline indicator) ────── */}
+      <div className="flex items-center gap-1 border-b border-border/60">
+        <button
+          onClick={() => setView("list")}
+          className={cn(
+            "px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5",
+            view === "list"
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <List className="h-3.5 w-3.5" /> Table
+        </button>
+        <button
+          onClick={() => setView("kanban")}
+          className={cn(
+            "px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5",
+            view === "kanban"
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Columns3 className="h-3.5 w-3.5" /> Board
+        </button>
       </div>
 
-      {/* Filters + View Toggle */}
-      <div className="flex flex-wrap gap-2 items-center">
-        <div className="relative flex-1 min-w-[180px] max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+      {/* ── Filter bar — Notion-style: search + filter pills + sort ── */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
-            placeholder="Search leads…"
+            placeholder="Search by name or company…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 h-8 text-sm"
+            className="pl-8 h-8 text-sm border-border/60 bg-transparent focus-visible:bg-background"
           />
         </div>
-        <select
-          value={catFilter}
-          onChange={(e) => setCatFilter(e.target.value)}
-          className="h-8 rounded-md border border-input bg-background px-3 text-sm"
-        >
-          <option value="">All Categories</option>
-          {LEAD_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          {categories.filter((c) => !LEAD_CATEGORIES.includes(c as any)).map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-        <select
-          value={stageFilter}
-          onChange={(e) => setStageFilter(e.target.value)}
-          className="h-8 rounded-md border border-input bg-background px-3 text-sm"
-        >
-          <option value="">All Stages</option>
-          {LEAD_STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-        </select>
-        {(search || catFilter || stageFilter) && (
-          <Button
-            variant="ghost" size="sm"
-            className="h-8 text-xs text-muted-foreground"
-            onClick={() => { setSearch(""); setCatFilter(""); setStageFilter(""); }}
-          >
-            Clear filters
-          </Button>
+
+        {/* Filter button with popover-like select */}
+        <div className="flex items-center gap-1">
+          <div className="relative">
+            <select
+              value={stageFilter}
+              onChange={(e) => setStageFilter(e.target.value)}
+              className={cn(
+                "h-8 appearance-none rounded-md pl-7 pr-7 text-xs cursor-pointer transition-colors",
+                "border bg-transparent",
+                stageFilter
+                  ? "border-foreground/30 text-foreground bg-muted/40"
+                  : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border",
+              )}
+            >
+              <option value="">Stage</option>
+              {LEAD_STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+            <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 pointer-events-none text-muted-foreground" />
+          </div>
+          <div className="relative">
+            <select
+              value={catFilter}
+              onChange={(e) => setCatFilter(e.target.value)}
+              className={cn(
+                "h-8 appearance-none rounded-md pl-7 pr-7 text-xs cursor-pointer transition-colors",
+                "border bg-transparent",
+                catFilter
+                  ? "border-foreground/30 text-foreground bg-muted/40"
+                  : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border",
+              )}
+            >
+              <option value="">Niche</option>
+              {LEAD_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              {categories.filter((c) => !LEAD_CATEGORIES.includes(c as any)).map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 pointer-events-none text-muted-foreground" />
+          </div>
+        </div>
+
+        {/* Active filter pills */}
+        {stageFilter && (
+          <FilterPill
+            label={`Stage: ${LEAD_STAGES.find((s) => s.key === stageFilter)?.label}`}
+            onRemove={() => setStageFilter("")}
+          />
         )}
-        <div className="ml-auto flex border border-border rounded-md">
+        {catFilter && (
+          <FilterPill label={`Niche: ${catFilter}`} onRemove={() => setCatFilter("")} />
+        )}
+
+        {(search || activeFilterCount > 0) && (
           <button
-            onClick={() => setView("kanban")}
-            className={cn("p-1.5", view === "kanban" ? "bg-muted text-foreground" : "text-muted-foreground")}
+            onClick={() => { setSearch(""); setCatFilter(""); setStageFilter(""); }}
+            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors ml-1"
           >
-            <Columns3 className="h-4 w-4" />
+            Reset
           </button>
-          <button
-            onClick={() => setView("list")}
-            className={cn("p-1.5", view === "list" ? "bg-muted text-foreground" : "text-muted-foreground")}
-          >
-            <List className="h-4 w-4" />
-          </button>
+        )}
+
+        <div className="ml-auto text-[11px] text-muted-foreground tabular-nums">
+          {leads.length} {leads.length === 1 ? "row" : "rows"}
         </div>
       </div>
 
-      {/* Kanban or List */}
+      {/* ── Content ──────────────────────────────────────── */}
       {view === "kanban" ? (
         <KanbanBoard
-          columns={columns}
+          columns={LEAD_STAGES.map((s) => ({
+            key:   s.key,
+            label: s.label,
+            items: leads.filter((l) => l.stage === s.key),
+          }))}
           renderCard={(lead) => <LeadCard lead={lead} />}
           onMoveItem={handleMove}
           getItemId={(l) => l.id}
         />
-      ) : (
-        <div className="rounded-xl border border-border overflow-hidden animate-fade-in">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/30">
-                {["Name", "Company", "Category", "Stage", "Deal Value", "Source", "Last Activity", "Assigned"].map((h) => (
-                  <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {leads.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground text-sm">No leads found.</td></tr>
-              )}
-              {leads.map((l) => {
-                const stageInfo = LEAD_STAGES.find((s) => s.key === l.stage);
-                const isStale  = l.lastActivity
-                  ? (Date.now() - new Date(l.lastActivity).getTime()) > 2 * 24 * 60 * 60 * 1000
-                  : true;
-                const isActive = !["closed_won", "closed_lost"].includes(l.stage);
-                return (
-                  <tr
-                    key={l.id}
-                    onClick={() => setSelectedId(l.id)}
-                    className="border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer"
-                  >
-                    <td className="px-4 py-3 font-medium">
-                      {l.name}
-                      {isStale && isActive && <span className="ml-1 text-destructive text-xs">⚠</span>}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">{l.company}</td>
-                    <td className="px-4 py-3">
-                      {l.category
-                        ? <span className="text-[10px] border border-primary/30 text-primary px-1.5 py-0.5 rounded-full">{l.category}</span>
-                        : <span className="text-muted-foreground">—</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={cn("text-xs font-medium capitalize", stageInfo?.color)}>
-                        {l.stage.replace(/_/g, " ")}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-primary font-semibold">{fmt(l.dealValue)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{l.source ?? "—"}</td>
-                    <td className="px-4 py-3 text-muted-foreground tabular-nums">{l.lastActivity ?? "—"}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{l.assignee_name ?? "—"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      ) : leads.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border/60 bg-muted/10 p-12 text-center">
+          <p className="text-sm font-medium text-foreground">No leads match these filters</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {search || activeFilterCount > 0
+              ? "Try clearing filters or "
+              : "Get started by "}
+            <button onClick={() => setIsOpen(true)} className="text-primary hover:underline">
+              add a new lead
+            </button>.
+          </p>
         </div>
+      ) : (
+        <NotionTable
+          leads={leads}
+          stages={LEAD_STAGES}
+          onSelect={setSelectedId}
+          fmt={fmt}
+        />
       )}
 
       <LeadDetailSheet leadId={selectedId} onClose={() => setSelectedId(null)} />
+    </div>
+  );
+}
+
+// ─── Notion-style filter pill ────────────────────────────
+function FilterPill({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 h-7 px-2 rounded-md bg-muted/60 border border-border/60 text-[11px] text-foreground font-medium">
+      {label}
+      <button onClick={onRemove} className="rounded hover:bg-muted ml-0.5">
+        <X className="h-3 w-3 text-muted-foreground" />
+      </button>
+    </span>
+  );
+}
+
+// ─── Notion-style table ──────────────────────────────────
+function NotionTable({
+  leads, stages, onSelect, fmt,
+}: {
+  leads:    ApiLead[];
+  stages:   typeof LEAD_STAGES;
+  onSelect: (id: string) => void;
+  fmt:      (n: number | string) => string;
+}) {
+  return (
+    <div className="border border-border/60 rounded-lg overflow-hidden bg-card/30">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border/60 bg-muted/20">
+              {[
+                { label: "Name",        cls: "w-[22%]" },
+                { label: "Company",     cls: "w-[18%]" },
+                { label: "Stage",       cls: "w-[14%]" },
+                { label: "Niche",       cls: "w-[12%]" },
+                { label: "Deal Value",  cls: "w-[10%] text-right" },
+                { label: "Source",      cls: "w-[8%]" },
+                { label: "Last Activity", cls: "w-[10%]" },
+                { label: "Assigned",    cls: "w-[6%]" },
+              ].map((h) => (
+                <th
+                  key={h.label}
+                  className={cn(
+                    "px-3 py-2 text-[11px] font-medium text-muted-foreground uppercase tracking-wider",
+                    h.cls,
+                    h.cls.includes("text-right") ? "text-right" : "text-left",
+                  )}
+                >
+                  {h.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {leads.map((l) => {
+              const stageInfo = stages.find((s) => s.key === l.stage);
+              const isStale   = l.lastActivity
+                ? (Date.now() - new Date(l.lastActivity).getTime()) > 2 * 24 * 60 * 60 * 1000
+                : true;
+              const isActive  = !["closed_won", "closed_lost"].includes(l.stage);
+              return (
+                <tr
+                  key={l.id}
+                  onClick={() => onSelect(l.id)}
+                  className="group border-b border-border/30 last:border-b-0 hover:bg-muted/30 transition-colors cursor-pointer"
+                >
+                  <td className="px-3 py-2.5 align-middle">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-foreground">{l.name}</span>
+                      {isStale && isActive && (
+                        <span className="text-[10px] text-destructive" title="No activity in 2+ days">⚠</span>
+                      )}
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ml-auto" />
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-muted-foreground truncate">{l.company}</td>
+                  <td className="px-3 py-2.5">
+                    <span className={cn("inline-block text-[11px] font-medium px-2 py-0.5 rounded", stageInfo?.chip)}>
+                      {stageInfo?.label}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {l.category
+                      ? <span className={cn("inline-block text-[10px] font-medium px-1.5 py-0.5 rounded", CATEGORY_CHIP)}>{l.category}</span>
+                      : <span className="text-muted-foreground/50">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 tabular-nums text-foreground font-medium text-right">{fmt(l.dealValue)}</td>
+                  <td className="px-3 py-2.5">
+                    {l.source
+                      ? <span className={cn("inline-block text-[10px] font-medium px-1.5 py-0.5 rounded", SOURCE_CHIP)}>{l.source}</span>
+                      : <span className="text-muted-foreground/50">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-muted-foreground tabular-nums text-[12px]">{l.lastActivity ?? "—"}</td>
+                  <td className="px-3 py-2.5 text-muted-foreground text-[12px] truncate">{l.assignee_name ?? "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

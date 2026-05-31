@@ -112,6 +112,21 @@ export function useStaleLeads() {
   });
 }
 
+export interface PipelineStageRow {
+  stage:       string;
+  stage_label: string;
+  count:       number;
+  total_value: number;
+}
+
+export function usePipelineSummary() {
+  return useQuery<PipelineStageRow[]>({
+    queryKey: ["pipeline-summary"],
+    queryFn:  () => apiFetch("/crm/pipeline-summary"),
+    staleTime: 30_000,
+  });
+}
+
 export function useCrmInsights(params: {
   period?: "daily" | "weekly" | "monthly";
   from?: string;
