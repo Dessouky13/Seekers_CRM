@@ -72,13 +72,18 @@ export async function enrollLead(opts: EnrollOptions) {
   const steps = await db.select().from(outreachSteps).where(eq(outreachSteps.sequenceId, opts.sequenceId)).orderBy(asc(outreachSteps.position));
   if (steps.length === 0) throw new Error("Sequence has no steps");
 
-  // Dedupe: skip if already enrolled
+  // Dedupe: only block re-enrollment if there's an ACTIVE or PAUSED enrollment.
+  // Completed/failed/replied enrollments are historical — we allow re-enrolling.
   const [existing] = await db
     .select({ id: outreachEnrollments.id, status: outreachEnrollments.status })
     .from(outreachEnrollments)
     .where(and(
       eq(outreachEnrollments.leadId, opts.leadId),
       eq(outreachEnrollments.sequenceId, opts.sequenceId),
+      or(
+        eq(outreachEnrollments.status, "active"),
+        eq(outreachEnrollments.status, "paused"),
+      )!,
     ))
     .limit(1);
 
