@@ -1,5 +1,6 @@
 // Sprint 3 — CRM / Leads endpoints
 import { Hono } from "hono";
+import { z } from "zod";
 import { eq, and, not, inArray, ilike, or, sql, gte } from "drizzle-orm";
 import { db } from "../db/client";
 import { leads, leadActivities, profiles } from "../db/schema";
@@ -176,6 +177,55 @@ crm.patch("/leads/:id", authMiddleware, async (c) => {
   }
 
   return c.json(updated);
+});
+
+// POST /crm/leads/bulk-delete — admin only, requires explicit confirmation phrase
+// Body: { keep_sources?: string[], delete_sources?: string[], confirm: "DELETE_LEADS" }
+// Returns: { deleted: number, preview: { id, name, company, source }[] (first 20) }
+// Cascades to lead_activities + outreach_enrollments + outreach_sends via FK ON DELETE CASCADE.
+const bulkDeleteSchema = z.object({
+  keep_sources:   z.array(z.string()).optional(),
+  delete_sources: z.array(z.string()).optional(),
+  dry_run:        z.boolean().optional(),
+  confirm:        z.literal("DELETE_LEADS"),
+});
+
+crm.post("/leads/bulk-delete", authMiddleware, adminOnly, async (c) => {
+  const body = bulkDeleteSchema.parse(await c.req.json());
+
+  // Build the predicate. At least one of keep_sources / delete_sources is required.
+  if (!body.keep_sources && !body.delete_sources) {
+    return c.json({ error: "Provide keep_sources OR delete_sources" }, 400);
+  }
+
+  const conditions = [];
+  if (body.keep_sources && body.keep_sources.length > 0) {
+    // Delete leads whose source is NOT in the keep list (NULL also gets deleted)
+    conditions.push(sql`(${leads.source} IS NULL OR ${leads.source} NOT IN (${sql.join(body.keep_sources.map((s) => sql`${s}`), sql`, `)}))`);
+  }
+  if (body.delete_sources && body.delete_sources.length > 0) {
+    conditions.push(sql`${leads.source} IN (${sql.join(body.delete_sources.map((s) => sql`${s}`), sql`, `)})`);
+  }
+  const where = conditions.length > 1 ? sql`(${conditions[0]}) AND (${conditions[1]})` : conditions[0];
+
+  // Preview first — pull the matching rows (up to 50 for the response)
+  const preview = await db
+    .select({ id: leads.id, name: leads.name, company: leads.company, source: leads.source })
+    .from(leads)
+    .where(where)
+    .limit(50);
+
+  if (body.dry_run) {
+    return c.json({ deleted: 0, would_delete: preview.length, preview });
+  }
+
+  // Execute
+  const deleted = await db.delete(leads).where(where).returning({ id: leads.id });
+
+  return c.json({
+    deleted: deleted.length,
+    preview, // first 50 rows for verification
+  });
 });
 
 // DELETE /crm/leads/:id — admin only
