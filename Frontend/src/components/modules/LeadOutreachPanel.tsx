@@ -70,7 +70,7 @@ export function LeadOutreachPanel({ leadId, category }: Props) {
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" disabled={enroll.isPending || sortedSequences.length === 0}>
+            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" disabled={enroll.isPending}>
               <Plus className="h-3 w-3" /> Enroll <ChevronDown className="h-3 w-3" />
             </Button>
           </DropdownMenuTrigger>

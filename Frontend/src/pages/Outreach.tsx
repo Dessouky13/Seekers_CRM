@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Plus, Send, Pause, Play, X, Mail, Linkedin, FileText, Pencil, Trash2,
   ChevronLeft, Activity, Sparkles, Settings,
@@ -195,7 +195,18 @@ function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onBack: ()
 
   const [stepDialogOpen, setStepDialogOpen] = useState(false);
   const [editingStep, setEditingStep]       = useState<SequenceStep | null>(null);
+  // Controlled state for the two Selects (FormData can't read Radix Select reliably)
+  const [stepChannel,  setStepChannel]      = useState<Channel>("email");
+  const [stepAgentId,  setStepAgentId]      = useState<string>("");
   const updateStep = useUpdateStep();
+
+  // Reset/load Select state whenever the dialog opens or we switch between add/edit
+  useEffect(() => {
+    if (stepDialogOpen) {
+      setStepChannel(editingStep?.channel ?? "email");
+      setStepAgentId(editingStep?.agentId ?? "");
+    }
+  }, [stepDialogOpen, editingStep]);
 
   if (isLoading || !seq) {
     return <div className="text-sm text-muted-foreground text-center py-12">Loading…</div>;
@@ -204,14 +215,13 @@ function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onBack: ()
   const handleAddStep = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
-    const agentId = fd.get("agent_id") as string;
     const payload = {
       sequenceId,
       day_offset:       Number(fd.get("day_offset")),
-      channel:          fd.get("channel") as Channel,
+      channel:          stepChannel,                              // from controlled state
       subject_template: (fd.get("subject_template") as string) || undefined,
       body_template:    (fd.get("body_template") as string) || undefined,
-      agent_id:         agentId || undefined,
+      agent_id:         stepAgentId || undefined,                 // from controlled state
     };
     const mutation = editingStep
       ? updateStep.mutateAsync({ sequenceId, stepId: editingStep.id, ...payload })
@@ -223,7 +233,7 @@ function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onBack: ()
         setStepDialogOpen(false);
         setEditingStep(null);
       })
-      .catch((err) => toast.error(err.message));
+      .catch((err) => toast.error(err?.message ?? "Failed to save step"));
   };
 
   return (
@@ -355,7 +365,7 @@ function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onBack: ()
               </div>
               <div>
                 <Label>Channel</Label>
-                <Select name="channel" defaultValue={editingStep?.channel ?? "email"}>
+                <Select value={stepChannel} onValueChange={(v) => setStepChannel(v as Channel)}>
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="email">Email</SelectItem>
@@ -363,8 +373,6 @@ function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onBack: ()
                     <SelectItem value="note">Internal note</SelectItem>
                   </SelectContent>
                 </Select>
-                {/* Need a hidden input because Select doesn't auto-include name */}
-                <input type="hidden" name="channel" defaultValue={editingStep?.channel ?? "email"} />
               </div>
             </div>
             <div>
@@ -378,16 +386,18 @@ function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onBack: ()
             </div>
             <div>
               <Label>OR use AI agent to generate body per-lead</Label>
-              <Select name="agent_id" defaultValue={editingStep?.agentId ?? ""}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="None — use body template" /></SelectTrigger>
+              <Select
+                value={stepAgentId || "__none__"}
+                onValueChange={(v) => setStepAgentId(v === "__none__" ? "" : v)}
+              >
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">(none — use template above)</SelectItem>
+                  <SelectItem value="__none__">(none — use template above)</SelectItem>
                   {leadAgents.map((a) => (
                     <SelectItem key={a.id} value={a.id}>{a.name} — {a.id}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <input type="hidden" name="agent_id" defaultValue={editingStep?.agentId ?? ""} />
               <p className="text-[10px] text-muted-foreground mt-1">If an agent is selected, body template is ignored and the agent generates the email per-lead.</p>
             </div>
             <DialogFooter>
