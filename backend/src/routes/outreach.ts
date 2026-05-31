@@ -214,26 +214,34 @@ const sequenceSchema = z.object({
 });
 
 outreach.get("/sequences", authMiddleware, async (c) => {
-  const rows = await db
-    .select({
-      id:                   outreachSequences.id,
-      name:                 outreachSequences.name,
-      description:          outreachSequences.description,
-      category:             outreachSequences.category,
-      isActive:             outreachSequences.isActive,
-      autoEnrollOnCategory: outreachSequences.autoEnrollOnCategory,
-      createdBy:            outreachSequences.createdBy,
-      createdAt:            outreachSequences.createdAt,
-      updatedAt:            outreachSequences.updatedAt,
-      step_count:           sql<number>`(SELECT COUNT(*)::int FROM ${outreachSteps} WHERE ${outreachSteps.sequenceId} = ${outreachSequences.id})`,
-      active_enrollments:   sql<number>`(SELECT COUNT(*)::int FROM ${outreachEnrollments} WHERE ${outreachEnrollments.sequenceId} = ${outreachSequences.id} AND ${outreachEnrollments.status} = 'active')`,
-    })
-    .from(outreachSequences)
-    .orderBy(desc(outreachSequences.updatedAt));
-  return c.json(rows.map((r) => ({
-    ...r,
-    step_count:         Number(r.step_count),
-    active_enrollments: Number(r.active_enrollments),
+  // Fetch sequences + step counts + active enrollment counts in parallel.
+  // (Previously did this with correlated subqueries in one query, but those were
+  // returning 0 incorrectly — separate aggregates merged in JS is simpler and
+  // more reliable.)
+  const [sequences, stepRows, enrollRows] = await Promise.all([
+    db.select().from(outreachSequences).orderBy(desc(outreachSequences.updatedAt)),
+    db.select({
+        sequenceId: outreachSteps.sequenceId,
+        count:      sql<number>`COUNT(*)::int`,
+      })
+      .from(outreachSteps)
+      .groupBy(outreachSteps.sequenceId),
+    db.select({
+        sequenceId: outreachEnrollments.sequenceId,
+        count:      sql<number>`COUNT(*)::int`,
+      })
+      .from(outreachEnrollments)
+      .where(eq(outreachEnrollments.status, "active"))
+      .groupBy(outreachEnrollments.sequenceId),
+  ]);
+
+  const stepMap   = new Map(stepRows.map((r)   => [r.sequenceId, Number(r.count)]));
+  const enrollMap = new Map(enrollRows.map((r) => [r.sequenceId, Number(r.count)]));
+
+  return c.json(sequences.map((seq) => ({
+    ...seq,
+    step_count:         stepMap.get(seq.id)   ?? 0,
+    active_enrollments: enrollMap.get(seq.id) ?? 0,
   })));
 });
 
