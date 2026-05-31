@@ -156,6 +156,29 @@ export function useEnrollLead() {
   });
 }
 
+export interface BulkEnrollResult {
+  total:            number;
+  enrolled:         number;
+  already_enrolled: number;
+  errors:           number;
+  error_rows:       { lead_id: string; error: string }[];
+}
+
+export function useBulkEnroll() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { lead_ids: string[]; sequence_id: string }) =>
+      apiFetch<BulkEnrollResult>("/outreach/enroll-bulk", {
+        method: "POST",
+        body:   JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["outreach", "enrollments"] });
+      qc.invalidateQueries({ queryKey: ["outreach", "sequences"] });
+    },
+  });
+}
+
 export function usePauseEnrollment() {
   const qc = useQueryClient();
   return useMutation({

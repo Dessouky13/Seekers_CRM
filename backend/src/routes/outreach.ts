@@ -358,6 +358,43 @@ outreach.post("/enroll", authMiddleware, async (c) => {
   }
 });
 
+// POST /outreach/enroll-bulk — enroll many leads in one sequence
+const enrollBulkSchema = z.object({
+  lead_ids:    z.array(z.string().uuid()).min(1).max(500),
+  sequence_id: z.string().uuid(),
+});
+
+outreach.post("/enroll-bulk", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const body = enrollBulkSchema.parse(await c.req.json());
+
+  let enrolled = 0, alreadyEnrolled = 0, errors = 0;
+  const errorRows: { lead_id: string; error: string }[] = [];
+
+  for (const leadId of body.lead_ids) {
+    try {
+      const res = await enrollLead({
+        leadId,
+        sequenceId: body.sequence_id,
+        enrolledBy: user.id,
+      });
+      if (res.alreadyEnrolled) alreadyEnrolled++;
+      else enrolled++;
+    } catch (err: any) {
+      errors++;
+      errorRows.push({ lead_id: leadId, error: String(err?.message ?? err).slice(0, 200) });
+    }
+  }
+
+  return c.json({
+    total: body.lead_ids.length,
+    enrolled,
+    already_enrolled: alreadyEnrolled,
+    errors,
+    error_rows: errorRows,
+  });
+});
+
 outreach.get("/enrollments", authMiddleware, async (c) => {
   const q = c.req.query() as Record<string, string>;
   const conditions = [];

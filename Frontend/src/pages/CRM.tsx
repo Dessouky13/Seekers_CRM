@@ -29,6 +29,13 @@ import {
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useUsers } from "@/hooks/useTasks";
 import { useCreateClient } from "@/hooks/useClients";
+import { useSequences, useBulkEnroll } from "@/hooks/useOutreach";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenuLabel, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { Send, ChevronDown as ChevronDownIcon, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ApiLead, LeadStage } from "@/lib/types";
 
@@ -368,7 +375,12 @@ export default function CRM() {
   const [search,      setSearch]      = useState("");
   const [catFilter,   setCatFilter]   = useState("");
   const [stageFilter, setStageFilter] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const debouncedSearch = useDebouncedValue(search.trim(), 350);
+
+  const bulkEnroll = useBulkEnroll();
+  const { data: sequencesList = [] } = useSequences();
+  const enrollableSequences = sequencesList.filter((s) => s.isActive && s.step_count > 0);
 
   const { data: rawLeads = [], isLoading } = useLeads({
     search:   debouncedSearch || undefined,
@@ -389,6 +401,39 @@ export default function CRM() {
     () => rawLeads.filter((l, i, arr) => arr.findIndex((x) => x.id === l.id) === i),
     [rawLeads],
   );
+
+  const toggleOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    setSelectedIds((prev) => {
+      const allVisibleSelected = leads.length > 0 && leads.every((l) => prev.has(l.id));
+      return allVisibleSelected ? new Set() : new Set(leads.map((l) => l.id));
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkEnroll = (sequenceId: string) => {
+    if (selectedIds.size === 0) return;
+    bulkEnroll.mutate(
+      { lead_ids: Array.from(selectedIds), sequence_id: sequenceId },
+      {
+        onSuccess: (res) => {
+          toast.success(
+            `Enrolled ${res.enrolled} new` +
+            (res.already_enrolled > 0 ? ` · ${res.already_enrolled} already in sequence` : "") +
+            (res.errors > 0 ? ` · ${res.errors} failed` : ""),
+          );
+          clearSelection();
+        },
+        onError: (err) => toast.error(err.message),
+      },
+    );
+  };
 
   const columns = LEAD_STAGES.map((stage) => ({
     key:   stage.key,
@@ -691,10 +736,69 @@ export default function CRM() {
           stages={LEAD_STAGES}
           onSelect={setSelectedId}
           fmt={fmt}
+          selectedIds={selectedIds}
+          toggleOne={toggleOne}
+          toggleAll={toggleAll}
         />
       )}
 
       <LeadDetailSheet leadId={selectedId} onClose={() => setSelectedId(null)} />
+
+      {/* Bulk-action floating bar */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
+          <div className="flex items-center gap-3 bg-card border border-border shadow-2xl rounded-xl px-4 py-2.5 backdrop-blur-md">
+            <span className="text-sm text-foreground tabular-nums">
+              <span className="font-bold text-primary">{selectedIds.size}</span> selected
+            </span>
+            <span className="text-border">·</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" className="gap-1.5 h-8" disabled={bulkEnroll.isPending || enrollableSequences.length === 0}>
+                  {bulkEnroll.isPending ? (
+                    <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Enrolling…</>
+                  ) : (
+                    <><Send className="h-3.5 w-3.5" /> Enroll in Sequence <ChevronDownIcon className="h-3.5 w-3.5" /></>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72">
+                {enrollableSequences.length === 0 ? (
+                  <div className="px-2 py-3 text-xs text-muted-foreground">
+                    No active sequences. Create one in <strong>Outreach</strong>.
+                  </div>
+                ) : (
+                  <>
+                    <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Active sequences
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {enrollableSequences.map((s) => (
+                      <DropdownMenuItem
+                        key={s.id}
+                        onClick={() => handleBulkEnroll(s.id)}
+                        className="flex-col items-start py-2"
+                      >
+                        <span className="text-sm font-medium">{s.name}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {s.step_count} step{s.step_count !== 1 ? "s" : ""}
+                          {s.category && ` · ${s.category}`}
+                        </span>
+                      </DropdownMenuItem>
+                    ))}
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <button
+              onClick={clearSelection}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -713,28 +817,41 @@ function FilterPill({ label, onRemove }: { label: string; onRemove: () => void }
 
 // ─── Notion-style table ──────────────────────────────────
 function NotionTable({
-  leads, stages, onSelect, fmt,
+  leads, stages, onSelect, fmt, selectedIds, toggleOne, toggleAll,
 }: {
-  leads:    ApiLead[];
-  stages:   typeof LEAD_STAGES;
-  onSelect: (id: string) => void;
-  fmt:      (n: number | string) => string;
+  leads:       ApiLead[];
+  stages:      typeof LEAD_STAGES;
+  onSelect:    (id: string) => void;
+  fmt:         (n: number | string) => string;
+  selectedIds: Set<string>;
+  toggleOne:   (id: string) => void;
+  toggleAll:   () => void;
 }) {
+  const allSelected = leads.length > 0 && leads.every((l) => selectedIds.has(l.id));
+  const someSelected = selectedIds.size > 0 && !allSelected;
+
   return (
     <div className="border border-border/60 rounded-lg overflow-hidden bg-card/30">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border/60 bg-muted/20">
+              <th className="w-[36px] px-3 py-2">
+                <Checkbox
+                  checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                  onCheckedChange={toggleAll}
+                  aria-label="Select all visible rows"
+                />
+              </th>
               {[
-                { label: "Name",        cls: "w-[22%]" },
-                { label: "Company",     cls: "w-[18%]" },
-                { label: "Stage",       cls: "w-[14%]" },
-                { label: "Niche",       cls: "w-[12%]" },
+                { label: "Name",        cls: "w-[20%]" },
+                { label: "Company",     cls: "w-[16%]" },
+                { label: "Stage",       cls: "w-[13%]" },
+                { label: "Niche",       cls: "w-[11%]" },
                 { label: "Deal Value",  cls: "w-[10%] text-right" },
                 { label: "Source",      cls: "w-[8%]" },
                 { label: "Last Activity", cls: "w-[10%]" },
-                { label: "Assigned",    cls: "w-[6%]" },
+                { label: "Assigned",    cls: "w-[8%]" },
               ].map((h) => (
                 <th
                   key={h.label}
@@ -756,12 +873,22 @@ function NotionTable({
                 ? (Date.now() - new Date(l.lastActivity).getTime()) > 2 * 24 * 60 * 60 * 1000
                 : true;
               const isActive  = !["closed_won", "closed_lost"].includes(l.stage);
+              const checked = selectedIds.has(l.id);
               return (
                 <tr
                   key={l.id}
                   onClick={() => onSelect(l.id)}
-                  className="group border-b border-border/30 last:border-b-0 hover:bg-muted/30 transition-colors cursor-pointer"
+                  className={cn(
+                    "group border-b border-border/30 last:border-b-0 hover:bg-muted/30 transition-colors cursor-pointer",
+                    checked && "bg-primary/5",
+                  )}
                 >
+                  <td
+                    className="px-3 py-2.5 align-middle"
+                    onClick={(e) => { e.stopPropagation(); toggleOne(l.id); }}
+                  >
+                    <Checkbox checked={checked} onCheckedChange={() => toggleOne(l.id)} aria-label={`Select ${l.name}`} />
+                  </td>
                   <td className="px-3 py-2.5 align-middle">
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-foreground">{l.name}</span>
