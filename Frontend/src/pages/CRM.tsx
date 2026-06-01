@@ -21,6 +21,8 @@ import { Badge } from "@/components/ui/badge";
 import { KanbanBoard } from "@/components/modules/KanbanBoard";
 import { AgentPanel } from "@/components/modules/AgentPanel";
 import { LeadOutreachPanel } from "@/components/modules/LeadOutreachPanel";
+import { ScrapeLeadsDialog } from "@/components/modules/ScrapeLeadsDialog";
+import { useCurrentUser } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import {
   useLeads, useLeadDetail, useCreateLead, useUpdateLead, useDeleteLead,
@@ -553,12 +555,14 @@ export default function CRM() {
             <span><span className="text-primary font-semibold tabular-nums">{convRate}%</span> conv</span>
           </div>
         </div>
-        <Dialog open={isOpen} onOpenChange={setIsOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" className="gap-1.5 h-8">
-              <Plus className="h-3.5 w-3.5" /> New
-            </Button>
-          </DialogTrigger>
+        <div className="flex items-center gap-2">
+          {currentUser?.role === "admin" && <ScrapeLeadsDialog />}
+          <Dialog open={isOpen} onOpenChange={setIsOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" className="gap-1.5 h-8">
+                <Plus className="h-3.5 w-3.5" /> New
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-w-lg">
             <DialogHeader><DialogTitle>Add Lead</DialogTitle></DialogHeader>
             <form onSubmit={handleAdd} className="space-y-4">
@@ -599,7 +603,8 @@ export default function CRM() {
               </DialogFooter>
             </form>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
 
       {/* ── View tabs (Notion-style underline indicator) ────── */}

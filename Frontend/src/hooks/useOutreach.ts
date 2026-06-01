@@ -137,14 +137,28 @@ export function useDeleteStep() {
 }
 
 // ── Enrollments ───────────────────────────────────────────
-export function useEnrollments(params: { status?: EnrollmentStatus; lead_id?: string } = {}) {
+export function useEnrollments(params: { status?: EnrollmentStatus; lead_id?: string; sequence_id?: string } = {}) {
   const qs = new URLSearchParams();
-  if (params.status)  qs.set("status",  params.status);
-  if (params.lead_id) qs.set("lead_id", params.lead_id);
+  if (params.status)      qs.set("status",      params.status);
+  if (params.lead_id)     qs.set("lead_id",     params.lead_id);
+  if (params.sequence_id) qs.set("sequence_id", params.sequence_id);
   const q = qs.toString();
   return useQuery<Enrollment[]>({
     queryKey: ["outreach", "enrollments", params],
     queryFn:  () => apiFetch(`/outreach/enrollments${q ? `?${q}` : ""}`),
+  });
+}
+
+// Hard-delete an enrollment (vs cancel which keeps the row). Admin-only on backend.
+export function useDeleteEnrollment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch(`/outreach/enrollments/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["outreach", "enrollments"] });
+      qc.invalidateQueries({ queryKey: ["outreach", "sequences"] });
+    },
   });
 }
 

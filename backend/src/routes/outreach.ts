@@ -401,8 +401,9 @@ outreach.post("/enroll-bulk", authMiddleware, async (c) => {
 outreach.get("/enrollments", authMiddleware, async (c) => {
   const q = c.req.query() as Record<string, string>;
   const conditions = [];
-  if (q.status)   conditions.push(eq(outreachEnrollments.status, q.status as any));
-  if (q.lead_id)  conditions.push(eq(outreachEnrollments.leadId, q.lead_id));
+  if (q.status)       conditions.push(eq(outreachEnrollments.status, q.status as any));
+  if (q.lead_id)      conditions.push(eq(outreachEnrollments.leadId, q.lead_id));
+  if (q.sequence_id)  conditions.push(eq(outreachEnrollments.sequenceId, q.sequence_id));
 
   // Explicit column selection — avoids drizzle's whole-table expansion which
   // can emit unqualified column refs and cause "id is ambiguous" with joins.

@@ -27,6 +27,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { TrendingUp, MessageCircle, Mail as MailIcon, BarChart3 } from "lucide-react";
 import { CsvImportPanel } from "@/components/modules/CsvImportPanel";
+import { EnrolledLeadsPanel } from "@/components/modules/EnrolledLeadsPanel";
 import { useAgents } from "@/hooks/useAgents";
 import { cn } from "@/lib/utils";
 
@@ -361,6 +362,9 @@ function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onBack: ()
           </div>
         )}
       </div>
+
+      {/* Enrolled leads */}
+      <EnrolledLeadsPanel sequenceId={sequenceId} sequenceName={seq.name} />
 
       {/* Step dialog */}
       <Dialog open={stepDialogOpen} onOpenChange={(o) => { setStepDialogOpen(o); if (!o) setEditingStep(null); }}>
