@@ -521,15 +521,50 @@ function AnalyticsTab() {
   if (isLoading) return <p className="text-sm text-muted-foreground text-center py-12">Loading analytics…</p>;
   if (!data)     return <p className="text-sm text-muted-foreground text-center py-12">No analytics available yet.</p>;
 
+  const fmtEgp = (n: number) => `EGP ${n.toLocaleString()}`;
+
   return (
     <div className="space-y-4">
-      {/* KPI cards */}
+      {/* KPI cards — top row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard icon={MessageCircle} label="Enrollments"     value={data.totals.enrollments_total} />
         <KpiCard icon={TrendingUp}    label="Replied"         value={data.totals.replied} />
         <KpiCard icon={BarChart3}     label="Reply Rate"      value={`${data.totals.reply_rate}%`} />
         <KpiCard icon={MailIcon}      label="Sent (30d)"      value={data.totals.sends_last_30_days} />
       </div>
+
+      {/* KPI cards — secondary row */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        <KpiCard icon={MessageCircle} label="Active leads"    value={data.totals.active_leads} />
+        <KpiCard icon={TrendingUp}    label="Stale (7d+)"     value={data.totals.stale_leads} />
+        <KpiCard icon={BarChart3}     label="Pipeline value"  value={fmtEgp(data.totals.pipeline_value)} />
+      </div>
+
+      {/* Best-performing niche callout */}
+      {data.best_niche ? (
+        <div className="rounded-xl border border-success/30 bg-success/5 p-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-success/20 text-success font-bold text-lg">🏆</div>
+          <div className="flex-1">
+            <p className="text-xs font-semibold uppercase tracking-wider text-success">Best-performing niche</p>
+            <p className="text-sm text-foreground mt-0.5">
+              <span className="font-semibold">{data.best_niche.category}</span>
+              {" — "}
+              <span className="tabular-nums font-semibold text-success">{data.best_niche.reply_rate}%</span> reply rate
+              {" "}({data.best_niche.replied} replies from {data.best_niche.enrolled} enrolled)
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border bg-muted/10 p-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground font-bold text-lg">🎯</div>
+          <div className="flex-1">
+            <p className="text-xs text-muted-foreground">
+              Not enough reply data yet to identify the best niche.
+              Once you have at least one reply across a niche with 3+ enrolled leads, the winner shows here.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Sends-by-day chart */}
       <div className="rounded-xl border border-border bg-card p-5">
@@ -588,6 +623,115 @@ function AnalyticsTab() {
             </tbody>
           </table>
         )}
+      </div>
+
+      {/* By niche */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="px-5 py-3 border-b border-border">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">By Niche — which categories perform</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Sorted by reply rate then enrolled count. Use this to double-down on what works.</p>
+        </div>
+        {data.by_niche.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-12 italic">No leads with niche tagged yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  {["Niche", "Leads", "Enrolled", "Replied", "Sends", "Pipeline", "Reply Rate"].map((h) => (
+                    <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.by_niche.map((n, i) => (
+                  <tr key={n.category} className={cn("border-b border-border/50 hover:bg-muted/20 transition-colors", i === 0 && n.replied > 0 && "bg-success/5")}>
+                    <td className="px-4 py-2.5">
+                      <span className="text-foreground font-medium">{n.category}</span>
+                      {i === 0 && n.replied > 0 && <Badge variant="outline" className="ml-2 text-[9px] border-success/40 text-success">TOP</Badge>}
+                    </td>
+                    <td className="px-4 py-2.5 tabular-nums">{n.leads_total}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{n.enrolled}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-primary font-semibold">{n.replied}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{n.sends}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs">{fmtEgp(n.pipeline_value)}</td>
+                    <td className="px-4 py-2.5 tabular-nums font-semibold">
+                      <span className={cn(n.reply_rate >= 10 ? "text-success" : n.reply_rate > 0 ? "text-foreground" : "text-muted-foreground")}>
+                        {n.reply_rate}%
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* By source + By step — side by side on wide screens */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 rounded-xl border border-border bg-card overflow-hidden">
+          <div className="px-5 py-3 border-b border-border">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">By Source — which lead sources convert</p>
+          </div>
+          {data.by_source.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-12 italic">No source data yet.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  {["Source", "Leads", "Enrolled", "Replied", "Reply Rate"].map((h) => (
+                    <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.by_source.map((s) => (
+                  <tr key={s.source} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                    <td className="px-4 py-2.5 text-foreground font-medium">{s.source}</td>
+                    <td className="px-4 py-2.5 tabular-nums">{s.leads_total}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{s.enrolled}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-primary font-semibold">{s.replied}</td>
+                    <td className="px-4 py-2.5 tabular-nums font-semibold">
+                      <span className={cn(s.reply_rate >= 10 ? "text-success" : "text-muted-foreground")}>{s.reply_rate}%</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* By step — sends per step (drop-off view) */}
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="px-5 py-3 border-b border-border">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sends per Step</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Drop-off shows leads exiting the sequence.</p>
+          </div>
+          {data.by_step.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-12 italic">No steps yet.</p>
+          ) : (
+            <div className="px-5 py-4 space-y-2">
+              {(() => {
+                const maxSends = Math.max(...data.by_step.map((s) => s.sends), 1);
+                return data.by_step.map((s) => (
+                  <div key={s.position}>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="text-foreground">{s.label}</span>
+                      <span className="tabular-nums font-semibold text-foreground">{s.sends}</span>
+                    </div>
+                    <div className="h-2 bg-muted/40 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary transition-all"
+                        style={{ width: `${(s.sends / maxSends) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                ));
+              })()}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -639,21 +639,199 @@ outreach.get("/analytics", authMiddleware, async (c) => {
     };
   });
 
+  // ── EXTRA: by_niche, by_source, by_step, pipeline + stale leads ─────
+  // Built with parallel aggregate queries merged in JS (same pattern as above).
+  const STALE_THRESHOLD_DAYS = 7;
+  const staleCutoffStr = new Date(Date.now() - STALE_THRESHOLD_DAYS * 86400_000).toISOString().slice(0, 10);
+
+  const [
+    leadsByNiche,      // category → { leads_total, pipeline_value }
+    enrollByNiche,     // category → { enrolled, replied }
+    sendsByNiche,      // category → sends
+    leadsBySource,     // source → leads_total
+    enrollBySource,    // source → { enrolled, replied }
+    sendsBySource,     // source → sends
+    sendsByStep,       // step.position → sends
+    pipelineRow,       // total pipeline value of active leads
+    staleRow,          // count of stale active leads
+    activeLeadsRow,    // count of leads not in closed_won/closed_lost
+  ] = await Promise.all([
+    db.select({
+      category:        leads.category,
+      leads_total:     sql<number>`COUNT(*)::int`,
+      pipeline_value:  sql<number>`COALESCE(SUM(${leads.dealValue}::numeric), 0)`,
+    })
+    .from(leads)
+    .where(sql`${leads.category} IS NOT NULL`)
+    .groupBy(leads.category),
+
+    db.select({
+      category: leads.category,
+      enrolled: sql<number>`COUNT(*)::int`,
+      replied:  sql<number>`COUNT(CASE WHEN ${outreachEnrollments.status} = 'replied' THEN 1 END)::int`,
+    })
+    .from(outreachEnrollments)
+    .innerJoin(leads, eq(outreachEnrollments.leadId, leads.id))
+    .where(sql`${leads.category} IS NOT NULL`)
+    .groupBy(leads.category),
+
+    db.select({
+      category: leads.category,
+      sends:    sql<number>`COUNT(*)::int`,
+    })
+    .from(outreachSends)
+    .innerJoin(outreachEnrollments, eq(outreachSends.enrollmentId, outreachEnrollments.id))
+    .innerJoin(leads, eq(outreachEnrollments.leadId, leads.id))
+    .where(sql`${leads.category} IS NOT NULL`)
+    .groupBy(leads.category),
+
+    db.select({
+      source:      leads.source,
+      leads_total: sql<number>`COUNT(*)::int`,
+    })
+    .from(leads)
+    .groupBy(leads.source),
+
+    db.select({
+      source:   leads.source,
+      enrolled: sql<number>`COUNT(*)::int`,
+      replied:  sql<number>`COUNT(CASE WHEN ${outreachEnrollments.status} = 'replied' THEN 1 END)::int`,
+    })
+    .from(outreachEnrollments)
+    .innerJoin(leads, eq(outreachEnrollments.leadId, leads.id))
+    .groupBy(leads.source),
+
+    db.select({
+      source: leads.source,
+      sends:  sql<number>`COUNT(*)::int`,
+    })
+    .from(outreachSends)
+    .innerJoin(outreachEnrollments, eq(outreachSends.enrollmentId, outreachEnrollments.id))
+    .innerJoin(leads, eq(outreachEnrollments.leadId, leads.id))
+    .groupBy(leads.source),
+
+    db.select({
+      position: outreachSteps.position,
+      sends:    sql<number>`COUNT(${outreachSends.id})::int`,
+    })
+    .from(outreachSteps)
+    .leftJoin(outreachSends, eq(outreachSends.stepId, outreachSteps.id))
+    .groupBy(outreachSteps.position)
+    .orderBy(outreachSteps.position),
+
+    db.select({
+      pipeline_value: sql<number>`COALESCE(SUM(${leads.dealValue}::numeric), 0)`,
+      active_count:   sql<number>`COUNT(*)::int`,
+    })
+    .from(leads)
+    .where(sql`${leads.stage} NOT IN ('closed_won','closed_lost')`),
+
+    db.select({
+      stale_count: sql<number>`COUNT(*)::int`,
+    })
+    .from(leads)
+    .where(sql`${leads.stage} NOT IN ('closed_won','closed_lost') AND (${leads.lastActivity} IS NULL OR ${leads.lastActivity} < ${staleCutoffStr})`),
+
+    db.select({
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(leads)
+    .where(sql`${leads.stage} NOT IN ('closed_won','closed_lost')`),
+  ]);
+
+  // Build by_niche array
+  type NicheRow = { category: string; leads_total: number; pipeline_value: number; enrolled: number; replied: number; sends: number };
+  const nicheMap = new Map<string, NicheRow>();
+  for (const r of leadsByNiche) {
+    if (!r.category) continue;
+    nicheMap.set(r.category, {
+      category: r.category,
+      leads_total: Number(r.leads_total),
+      pipeline_value: Number(r.pipeline_value),
+      enrolled: 0, replied: 0, sends: 0,
+    });
+  }
+  for (const r of enrollByNiche) {
+    if (!r.category) continue;
+    const e = nicheMap.get(r.category) ?? {
+      category: r.category, leads_total: 0, pipeline_value: 0, enrolled: 0, replied: 0, sends: 0,
+    };
+    e.enrolled = Number(r.enrolled);
+    e.replied  = Number(r.replied);
+    nicheMap.set(r.category, e);
+  }
+  for (const r of sendsByNiche) {
+    if (!r.category) continue;
+    const e = nicheMap.get(r.category);
+    if (e) e.sends = Number(r.sends);
+  }
+  const by_niche = Array.from(nicheMap.values())
+    .map((r) => ({
+      ...r,
+      reply_rate: r.enrolled > 0 ? Math.round((r.replied / r.enrolled) * 100) : 0,
+    }))
+    .sort((a, b) => b.reply_rate - a.reply_rate || b.enrolled - a.enrolled);
+
+  // Best-performing niche (min 3 enrolled to be statistically meaningful)
+  const best_niche = by_niche.find((n) => n.enrolled >= 3 && n.replied > 0) ?? null;
+
+  // by_source — same shape, ignore null sources
+  type SourceRow = { source: string; leads_total: number; enrolled: number; replied: number; sends: number };
+  const sourceMap = new Map<string, SourceRow>();
+  for (const r of leadsBySource) {
+    const src = r.source ?? "(unknown)";
+    sourceMap.set(src, { source: src, leads_total: Number(r.leads_total), enrolled: 0, replied: 0, sends: 0 });
+  }
+  for (const r of enrollBySource) {
+    const src = r.source ?? "(unknown)";
+    const e = sourceMap.get(src) ?? { source: src, leads_total: 0, enrolled: 0, replied: 0, sends: 0 };
+    e.enrolled = Number(r.enrolled);
+    e.replied  = Number(r.replied);
+    sourceMap.set(src, e);
+  }
+  for (const r of sendsBySource) {
+    const src = r.source ?? "(unknown)";
+    const e = sourceMap.get(src);
+    if (e) e.sends = Number(r.sends);
+  }
+  const by_source = Array.from(sourceMap.values())
+    .map((r) => ({
+      ...r,
+      reply_rate: r.enrolled > 0 ? Math.round((r.replied / r.enrolled) * 100) : 0,
+    }))
+    .sort((a, b) => b.leads_total - a.leads_total);
+
+  const by_step = sendsByStep.map((r) => ({
+    position: Number(r.position),
+    label:    `Step ${Number(r.position) + 1}`,
+    sends:    Number(r.sends),
+  }));
+
   // Totals
   const total = byStatus.reduce((acc, s) => acc + Number(s.count), 0);
   const replied = Number(byStatus.find((s) => s.status === "replied")?.count ?? 0);
   const sent30d = sendsByDay.reduce((acc, d) => acc + Number(d.count), 0);
+  const activeLeads = Number(activeLeadsRow[0]?.count ?? 0);
+  const staleLeads  = Number(staleRow[0]?.stale_count ?? 0);
+  const pipelineValue = Number(pipelineRow[0]?.pipeline_value ?? 0);
 
   return c.json({
     totals: {
-      enrollments_total:  total,
+      enrollments_total:    total,
       replied,
-      reply_rate:         total > 0 ? Math.round((replied / total) * 100) : 0,
-      sends_last_30_days: sent30d,
+      reply_rate:           total > 0 ? Math.round((replied / total) * 100) : 0,
+      sends_last_30_days:   sent30d,
+      active_leads:         activeLeads,
+      stale_leads:          staleLeads,
+      pipeline_value:       pipelineValue,
     },
     by_status:    byStatus.map((r) => ({ status: r.status, count: Number(r.count) })),
     sends_by_day: sendsByDay.map((r) => ({ day: r.day, count: Number(r.count) })).reverse(),
     per_sequence: perSequence,
+    by_niche,
+    by_source,
+    by_step,
+    best_niche,
   });
 });
 

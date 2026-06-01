@@ -233,6 +233,9 @@ export interface OutreachAnalytics {
     replied:            number;
     reply_rate:         number;
     sends_last_30_days: number;
+    active_leads:       number;
+    stale_leads:        number;
+    pipeline_value:     number;
   };
   by_status:    { status: EnrollmentStatus; count: number }[];
   sends_by_day: { day: string; count: number }[];
@@ -248,6 +251,35 @@ export interface OutreachAnalytics {
     sends:         number;
     reply_rate:    number;
   }[];
+  by_niche: {
+    category:       string;
+    leads_total:    number;
+    pipeline_value: number;
+    enrolled:       number;
+    replied:        number;
+    sends:          number;
+    reply_rate:     number;
+  }[];
+  by_source: {
+    source:      string;
+    leads_total: number;
+    enrolled:    number;
+    replied:     number;
+    sends:       number;
+    reply_rate:  number;
+  }[];
+  by_step: {
+    position: number;
+    label:    string;
+    sends:    number;
+  }[];
+  best_niche: {
+    category:    string;
+    leads_total: number;
+    enrolled:    number;
+    replied:     number;
+    reply_rate:  number;
+  } | null;
 }
 
 export interface BulkIngestPayload {
