@@ -35,6 +35,20 @@ const apiKeyAuth = createMiddleware(async (c, next) => {
   await next();
 });
 
+// ── Dual auth: accept JWT (logged-in CRM users) OR API-key (n8n, scripts) ──
+// Tries the API key first (X-API-Key header). If present and matches → ok.
+// Otherwise falls back to the JWT middleware which expects Authorization: Bearer <jwt>.
+// Used on read endpoints we want exposed to external automation, like /analytics.
+const jwtOrApiKey = createMiddleware(async (c, next) => {
+  const apiKeyHeader = c.req.header("X-API-Key");
+  const expected = process.env.AUTOMATION_API_KEY;
+  if (apiKeyHeader && expected && !expected.startsWith("replace-") && apiKeyHeader === expected) {
+    return next();
+  }
+  // Fall through to JWT auth
+  return authMiddleware(c, next);
+});
+
 // ── INGEST: POST /outreach/leads/ingest ───────────────────
 // Designed for n8n, Apollo, Instantly, etc. Idempotent by email (case-insensitive).
 const ingestSchema = z.object({
@@ -556,7 +570,7 @@ outreach.post("/webhooks/reply", apiKeyAuth, async (c) => {
 });
 
 // ── ANALYTICS ─────────────────────────────────────────────
-outreach.get("/analytics", authMiddleware, async (c) => {
+outreach.get("/analytics", jwtOrApiKey, async (c) => {
   // Overall enrollment counts by status
   const byStatus = await db
     .select({
