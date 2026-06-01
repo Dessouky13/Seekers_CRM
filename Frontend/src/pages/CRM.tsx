@@ -371,6 +371,7 @@ function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; onClose: 
 // ── Main CRM Page ─────────────────────────────────────────
 
 export default function CRM() {
+  const currentUser = useCurrentUser();
   const [isOpen,      setIsOpen]      = useState(false);
   const [selectedId,  setSelectedId]  = useState<string | null>(null);
   const [view,        setView]        = useState<"kanban" | "list">("kanban");
