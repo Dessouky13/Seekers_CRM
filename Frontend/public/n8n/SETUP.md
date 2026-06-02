@@ -198,6 +198,36 @@ Download [`seekers-apify-google-maps.json`](./seekers-apify-google-maps.json). T
 5. Set `maxCrawledPlacesPerSearch` to control cost (~$0.001 per result)
 6. Activate → results auto-flow into your CRM weekly
 
+### D-bis. Firecrawl Search & Extract — long-tail web scraping with LLM extraction
+
+Download [`seekers-firecrawl-search.json`](./seekers-firecrawl-search.json). Best for **niche directories, blog roundups, industry-specific listings, and any open-web source** that isn't on Google Maps or LinkedIn.
+
+**What it does:** receives a search query from the CRM → calls Firecrawl `/search` for the top N results → for each URL, calls Firecrawl `/extract` with a JSON schema → maps to lead format → POSTs to `/outreach/leads/ingest`.
+
+**Setup:**
+1. Sign up at https://firecrawl.dev — free tier is 1,000 credits/month
+2. Grab your API key from the dashboard (it looks like `fc-xxxxxxxxxxxx`)
+3. In n8n: **Credentials → New → Header Auth**
+   - Name: `Firecrawl API Key`
+   - Header name: `Authorization`
+   - Header value: `Bearer fc-xxxxxxxxxxxx` (with the literal word Bearer + space)
+4. Import the workflow → activate → copy its webhook URL
+5. **Wire to the CRM's Scrape Leads dialog** — two options:
+   - (A) If you already have the main router workflow at `/webhook/3f8ea5dc-...`, add a Switch case `source == "firecrawl"` that forwards to the new workflow's webhook
+   - (B) Or change `SCRAPE_WEBHOOK_URL` in `Frontend/src/components/modules/ScrapeLeadsDialog.tsx` to a multi-route URL (harder)
+
+**Cost example:** 10-result search + 10 extracts ≈ 12 credits = **~$0.04 on the Hobby plan** ($16/mo for 5k credits). Free tier covers ~80 such searches per month.
+
+**When this beats Apify:**
+- Companies featured in a Forbes/TechCrunch article (paste the article URL — workflow can be modified to skip /search)
+- Niche directories like "Top 50 SaaS Egypt 2026"
+- Industry reports
+- One-off company research
+
+**When Apify still wins:**
+- Google Maps local businesses (Apify's actor is purpose-built)
+- LinkedIn employees (Firecrawl hits auth walls)
+
 ### D. RB2B — anonymous website visitor identification (truly free)
 
 Download [`seekers-rb2b-workflow.json`](./seekers-rb2b-workflow.json). RB2B identifies anonymous visitors on your site and pushes them to a webhook.

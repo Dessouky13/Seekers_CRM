@@ -865,6 +865,12 @@ Response:
             description="Subscribe to CRM events → WhatsApp messages via Twilio. New leads, replies, stage changes, sequence completions."
             tag="WhatsApp"
           />
+          <WorkflowCard
+            file="seekers-firecrawl-search.json"
+            title="Firecrawl Search & Extract"
+            description="Web search → LLM-powered structured extraction. Best for niche directories, blog roundups, anything not in Maps/LinkedIn. Free tier: 1k credits/mo."
+            tag="Firecrawl"
+          />
         </div>
         <a href="/n8n/SETUP.md" target="_blank" rel="noopener noreferrer" className="inline-block pt-1">
           <Button size="sm" variant="ghost" className="gap-1.5 text-xs"><FileText className="h-3 w-3" /> Full setup guide</Button>

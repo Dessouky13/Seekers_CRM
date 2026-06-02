@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Sparkles, ChevronLeft, Loader2, MapPin, Linkedin } from "lucide-react";
+import { Sparkles, ChevronLeft, Loader2, MapPin, Linkedin, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,7 @@ import { toast } from "sonner";
 
 const SCRAPE_WEBHOOK_URL = "https://n8n.srv1131703.hstgr.cloud/webhook/3f8ea5dc-2c42-4ec8-ada8-f1f1c6ec713e";
 
-type Source = "google_maps" | "linkedin";
+type Source = "google_maps" | "linkedin" | "firecrawl";
 
 interface Props {
   trigger?: React.ReactNode;
@@ -73,6 +73,7 @@ export function ScrapeLeadsDialog({ trigger }: Props) {
             {source === null && "Scrape Leads — pick a source"}
             {source === "google_maps" && "Scrape from Google Maps"}
             {source === "linkedin"    && "Scrape from LinkedIn"}
+            {source === "firecrawl"   && "Search the web with Firecrawl"}
           </DialogTitle>
           <p className="text-xs text-muted-foreground pt-1">
             {source === null
@@ -85,8 +86,10 @@ export function ScrapeLeadsDialog({ trigger }: Props) {
           <SourcePicker onPick={setSource} />
         ) : source === "google_maps" ? (
           <GoogleMapsForm submitting={submitting} onSubmit={handleSubmit} />
-        ) : (
+        ) : source === "linkedin" ? (
           <LinkedInForm submitting={submitting} onSubmit={handleSubmit} />
+        ) : (
+          <FirecrawlForm submitting={submitting} onSubmit={handleSubmit} />
         )}
       </DialogContent>
     </Dialog>
@@ -96,7 +99,7 @@ export function ScrapeLeadsDialog({ trigger }: Props) {
 // ─── Step 1: Source picker ──────────────────────────────
 function SourcePicker({ onPick }: { onPick: (s: Source) => void }) {
   return (
-    <div className="grid grid-cols-2 gap-3 py-2">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 py-2">
       <button
         onClick={() => onPick("google_maps")}
         className="group rounded-lg border-2 border-border bg-card p-4 text-left hover:border-primary/50 hover:bg-muted/30 transition-all"
@@ -104,7 +107,7 @@ function SourcePicker({ onPick }: { onPick: (s: Source) => void }) {
         <MapPin className="h-6 w-6 text-primary mb-2" />
         <div className="text-sm font-semibold text-foreground">Google Maps</div>
         <div className="text-[11px] text-muted-foreground mt-1 leading-snug">
-          Local businesses by niche + location. Best for restaurants, clinics, agencies, retailers in any city.
+          Local businesses by niche + location. Best for restaurants, clinics, agencies, retailers.
         </div>
       </button>
       <button
@@ -114,7 +117,17 @@ function SourcePicker({ onPick }: { onPick: (s: Source) => void }) {
         <Linkedin className="h-6 w-6 text-primary mb-2" />
         <div className="text-sm font-semibold text-foreground">LinkedIn</div>
         <div className="text-[11px] text-muted-foreground mt-1 leading-snug">
-          People by title + location + industry. Best for B2B decision-makers and SaaS / corporate prospects.
+          People by title + location + industry. Best for B2B decision-makers and SaaS prospects.
+        </div>
+      </button>
+      <button
+        onClick={() => onPick("firecrawl")}
+        className="group rounded-lg border-2 border-border bg-card p-4 text-left hover:border-primary/50 hover:bg-muted/30 transition-all"
+      >
+        <Globe className="h-6 w-6 text-primary mb-2" />
+        <div className="text-sm font-semibold text-foreground">Firecrawl (web)</div>
+        <div className="text-[11px] text-muted-foreground mt-1 leading-snug">
+          Search the open web. Best for niche directories, blog roundups, anything not in Maps or LinkedIn.
         </div>
       </button>
     </div>
@@ -246,6 +259,88 @@ function LinkedInForm({
         <DialogClose asChild><Button variant="ghost" type="button" disabled={submitting}>Cancel</Button></DialogClose>
         <Button type="submit" disabled={submitting} className="gap-1.5">
           {submitting ? <><Loader2 className="h-3 w-3 animate-spin" /> Submitting…</> : <><Sparkles className="h-3.5 w-3.5" /> Start scrape</>}
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+// ─── Step 2c: Firecrawl form ────────────────────────────
+function FirecrawlForm({
+  submitting, onSubmit,
+}: {
+  submitting: boolean;
+  onSubmit:   (payload: Record<string, unknown>) => void;
+}) {
+  const [language, setLanguage] = useState("en");
+
+  const handle = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    onSubmit({
+      source:           "firecrawl",
+      query:            (fd.get("query") as string).trim(),
+      max_results:      Number(fd.get("max_results")) || 10,
+      include_domains:  ((fd.get("include_domains") as string) || "")
+        .split(",").map((s) => s.trim()).filter(Boolean),
+      exclude_domains:  ((fd.get("exclude_domains") as string) || "")
+        .split(",").map((s) => s.trim()).filter(Boolean),
+      language,
+    });
+  };
+
+  return (
+    <form onSubmit={handle} className="space-y-4">
+      <div>
+        <Label>Search query *</Label>
+        <Input
+          name="query"
+          required
+          placeholder='e.g. "marketing agencies Cairo Egypt 10-50 employees"'
+          className="mt-1"
+        />
+        <p className="text-[10px] text-muted-foreground mt-1">
+          Plain English. Firecrawl searches the open web, then extracts company info from each result page.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label>Max results</Label>
+          <Input name="max_results" type="number" min="1" max="50" defaultValue="10" className="mt-1" />
+          <p className="text-[10px] text-muted-foreground mt-1">2 credits per 10 results.</p>
+        </div>
+        <div>
+          <Label>Language</Label>
+          <Select value={language} onValueChange={setLanguage}>
+            <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="en">English</SelectItem>
+              <SelectItem value="ar">Arabic</SelectItem>
+              <SelectItem value="fr">French</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div>
+        <Label>Restrict to domains (optional)</Label>
+        <Input
+          name="include_domains"
+          placeholder="e.g. crunchbase.com, techcrunch.com  (comma-separated)"
+          className="mt-1"
+        />
+      </div>
+      <div>
+        <Label>Exclude domains (optional)</Label>
+        <Input
+          name="exclude_domains"
+          placeholder="e.g. linkedin.com, facebook.com  (skip sites you already cover elsewhere)"
+          className="mt-1"
+        />
+      </div>
+      <DialogFooter>
+        <DialogClose asChild><Button variant="ghost" type="button" disabled={submitting}>Cancel</Button></DialogClose>
+        <Button type="submit" disabled={submitting} className="gap-1.5">
+          {submitting ? <><Loader2 className="h-3 w-3 animate-spin" /> Submitting…</> : <><Globe className="h-3.5 w-3.5" /> Start search</>}
         </Button>
       </DialogFooter>
     </form>
