@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { ImapFlow } from "imapflow";
 
 function getTransporter() {
   return nodemailer.createTransport({
@@ -116,13 +117,28 @@ ${bodyHtml}
 ${opts.signatureHtml ?? ""}
 </div>`;
 
-  const info = await getTransporter().sendMail({
+  const mailOpts: nodemailer.SendMailOptions = {
     from,
     to:       opts.to,
     subject:  opts.subject,
     html,
     text:     isHtml ? undefined : opts.body,    // text version is body only (no signature)
     replyTo:  opts.replyTo,
+  };
+
+  // Compose the raw RFC-822 bytes locally — used for both SMTP and IMAP-APPEND
+  // so the Sent folder has byte-identical content to what the recipient got.
+  const composer = nodemailer.createTransport({ streamTransport: true, buffer: true });
+  const composed = await composer.sendMail(mailOpts);
+  const rawBytes = composed.message as Buffer;
+
+  // Real SMTP send
+  const info = await getTransporter().sendMail(mailOpts);
+
+  // Fire-and-forget IMAP-APPEND so the email shows up in Namecheap PE webmail.
+  // Failure here NEVER blocks the SMTP send.
+  appendRawToImapSent(rawBytes).catch((err) => {
+    console.warn("[email] IMAP append to Sent failed:", err?.message ?? err);
   });
 
   return {
@@ -130,6 +146,37 @@ ${opts.signatureHtml ?? ""}
     accepted:  (info.accepted as string[]) ?? [],
     rejected:  (info.rejected as string[]) ?? [],
   };
+}
+
+// ── IMAP-APPEND: save raw RFC-822 bytes to the Sent folder ──
+// Uses the same mailbox credentials as SMTP. Configurable folder name
+// (Namecheap PE uses "Sent", some servers use "Sent Items" or "[Gmail]/Sent Mail").
+export async function appendRawToImapSent(rawBytes: Buffer): Promise<void> {
+  const host = process.env.IMAP_HOST ?? "mail.privateemail.com";
+  const port = Number(process.env.IMAP_PORT ?? 993);
+  const user = process.env.BREVO_SMTP_USER;
+  const pass = process.env.BREVO_SMTP_PASS;
+  const sentFolder = process.env.SENT_FOLDER ?? "Sent";
+
+  if (!user || !pass) {
+    console.warn("[email] IMAP append skipped — no SMTP/IMAP creds");
+    return;
+  }
+
+  const client = new ImapFlow({
+    host,
+    port,
+    secure: true,
+    auth: { user, pass },
+    logger: false,
+  });
+
+  try {
+    await client.connect();
+    await client.append(sentFolder, rawBytes, ["\\Seen"]);
+  } finally {
+    try { await client.logout(); } catch { /* swallow */ }
+  }
 }
 
 export async function sendPasswordResetEmail(
