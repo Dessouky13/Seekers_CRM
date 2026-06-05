@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Trash2, Search, Loader2, Users, X } from "lucide-react";
+import { Plus, Trash2, Search, Loader2, Users, X, Mail, Phone, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -152,15 +152,22 @@ function AddLeadsDialog({
   const [search, setSearch]     = useState("");
   const debounced               = useDebouncedValue(search.trim(), 300);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [emailOnly, setEmailOnly] = useState(true);   // sequences need email by default
   const enroll = useEnrollLead();
 
   const { data: leads = [], isLoading } = useQuery<ApiLead[]>({
     queryKey: ["leads-search-for-enroll", debounced],
-    queryFn:  () => apiFetch(`/crm/leads?${debounced ? `search=${encodeURIComponent(debounced)}&` : ""}limit=50`),
+    queryFn:  () => apiFetch(`/crm/leads?${debounced ? `search=${encodeURIComponent(debounced)}&` : ""}limit=100`),
     enabled:  true,
   });
 
-  const visibleLeads = leads.filter((l) => !enrolledLeadIds.has(l.id));
+  const notYetEnrolled = leads.filter((l) => !enrolledLeadIds.has(l.id));
+  const hiddenByEmailFilter = emailOnly
+    ? notYetEnrolled.filter((l) => !l.email || !l.email.trim()).length
+    : 0;
+  const visibleLeads = emailOnly
+    ? notYetEnrolled.filter((l) => !!l.email && !!l.email.trim())
+    : notYetEnrolled;
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -206,6 +213,23 @@ function AddLeadsDialog({
         />
       </div>
 
+      <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={emailOnly}
+          onChange={(e) => setEmailOnly(e.target.checked)}
+          className="h-3.5 w-3.5 accent-primary"
+        />
+        <span>
+          Email-eligible only
+          {hiddenByEmailFilter > 0 && (
+            <span className="ml-1 text-[10px] text-muted-foreground/70">
+              ({hiddenByEmailFilter} hidden — no email)
+            </span>
+          )}
+        </span>
+      </label>
+
       <div className="max-h-[340px] overflow-y-auto rounded-md border border-border bg-muted/10">
         {isLoading ? (
           <div className="p-6 text-center text-xs text-muted-foreground">
@@ -213,11 +237,19 @@ function AddLeadsDialog({
           </div>
         ) : visibleLeads.length === 0 ? (
           <div className="p-6 text-center text-xs text-muted-foreground">
-            {leads.length === 0 ? "No leads found." : "All matching leads are already enrolled."}
+            {leads.length === 0
+              ? "No leads found."
+              : emailOnly && hiddenByEmailFilter > 0
+                ? `All matching leads lack an email. Untick "Email-eligible only" to see ${hiddenByEmailFilter} phone-/social-only lead${hiddenByEmailFilter === 1 ? "" : "s"} (reach out manually).`
+                : "All matching leads are already enrolled."}
           </div>
         ) : (
           visibleLeads.map((l) => {
-            const checked = selected.has(l.id);
+            const checked  = selected.has(l.id);
+            const hasEmail = !!l.email && !!l.email.trim();
+            const hasPhone = !!l.phone && !!l.phone.trim();
+            // Detect any social URL hint inside notes (Firecrawl writes "• Facebook: https://…" etc).
+            const hasSocial = !!l.notes && /(facebook|instagram|linkedin|twitter|tiktok)\.com/i.test(l.notes);
             return (
               <button
                 key={l.id}
@@ -234,7 +266,14 @@ function AddLeadsDialog({
                   {checked && <span className="text-white text-[10px]">✓</span>}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium truncate">{l.name}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium truncate">{l.name}</span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Mail   className={cn("h-3 w-3", hasEmail  ? "text-success" : "text-muted-foreground/30")} aria-label={hasEmail  ? "Has email" : "No email"}  />
+                      <Phone  className={cn("h-3 w-3", hasPhone  ? "text-info"    : "text-muted-foreground/30")} aria-label={hasPhone  ? "Has phone" : "No phone"}  />
+                      <Share2 className={cn("h-3 w-3", hasSocial ? "text-warning" : "text-muted-foreground/30")} aria-label={hasSocial ? "Has social" : "No social"} />
+                    </div>
+                  </div>
                   <div className="text-[11px] text-muted-foreground truncate">
                     {l.company}
                     {l.email && <> · {l.email}</>}

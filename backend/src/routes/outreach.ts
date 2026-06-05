@@ -51,17 +51,38 @@ const jwtOrApiKey = createMiddleware(async (c, next) => {
 
 // ── INGEST: POST /outreach/leads/ingest ───────────────────
 // Designed for n8n, Apollo, Instantly, etc. Idempotent by email (case-insensitive).
+//
+// Permissive intake: a lead is accepted if ANY one of name/company/email/phone
+// is present. Missing name falls back to company (and vice versa) so DB notNull
+// constraints are satisfied. Long category/source strings are truncated, not
+// rejected — Firecrawl in particular returns verbose AI-generated category
+// descriptions. Empty-string email is normalised to null instead of failing
+// .email() validation. Goal: capture every lead the scrapers can find, even
+// if all we got was a phone or a Facebook page — those still convert manually.
+const emailField = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+  z.string().email().nullable().optional(),
+);
+const truncated = (max: number) =>
+  z.preprocess(
+    (v) => (v == null ? null : typeof v === "string" ? v.slice(0, max) : v),
+    z.string().max(max).nullable().optional(),
+  );
+
 const ingestSchema = z.object({
-  name:        z.string().min(1).max(200),
-  company:     z.string().min(1).max(200),
-  email:       z.string().email().optional().nullable(),
-  phone:       z.string().max(50).optional().nullable(),
-  source:      z.string().max(100).optional().nullable(),
-  category:    z.string().max(100).optional().nullable(),
+  name:        truncated(200),
+  company:     truncated(200),
+  email:       emailField,
+  phone:       truncated(100),
+  source:      truncated(500),
+  category:    truncated(500),
   deal_value:  z.number().nonnegative().optional(),
-  notes:       z.string().max(4000).optional().nullable(),
+  notes:       truncated(8000),
   // n8n flexibility: any extra fields will be ignored
-}).passthrough();
+}).passthrough().refine(
+  (d) => !!(d.name || d.company || d.email || d.phone),
+  { message: "Lead must have at least one of: name, company, email, or phone" },
+);
 
 // ── BULK INGEST (authMiddleware — for in-app CSV import) ──────────
 const bulkIngestSchema = z.object({
@@ -70,15 +91,28 @@ const bulkIngestSchema = z.object({
 
 function ingestSchemaInline() {
   return z.object({
-    name:        z.string().min(1).max(200),
-    company:     z.string().min(1).max(200),
-    email:       z.string().email().optional().nullable(),
-    phone:       z.string().max(50).optional().nullable(),
-    source:      z.string().max(100).optional().nullable(),
-    category:    z.string().max(100).optional().nullable(),
+    name:        truncated(200),
+    company:     truncated(200),
+    email:       emailField,
+    phone:       truncated(100),
+    source:      truncated(500),
+    category:    truncated(500),
     deal_value:  z.number().nonnegative().optional(),
-    notes:       z.string().max(4000).optional().nullable(),
-  }).passthrough();
+    notes:       truncated(8000),
+  }).passthrough().refine(
+    (d) => !!(d.name || d.company || d.email || d.phone),
+    { message: "Lead must have at least one of: name, company, email, or phone" },
+  );
+}
+
+// Resolve required NOT NULL fields when only one of name/company was supplied.
+function fillNameCompany(name: string | null | undefined, company: string | null | undefined): { name: string; company: string } {
+  const n = name?.trim();
+  const c = company?.trim();
+  if (n && c) return { name: n,            company: c };
+  if (n)      return { name: n,            company: n };
+  if (c)      return { name: c,            company: c };
+  return       { name: "(unknown)",        company: "(unknown)" };
 }
 
 outreach.post("/leads/ingest-bulk", authMiddleware, async (c) => {
@@ -92,6 +126,7 @@ outreach.post("/leads/ingest-bulk", authMiddleware, async (c) => {
   for (let i = 0; i < body.leads.length; i++) {
     const lead = body.leads[i];
     try {
+      const { name, company } = fillNameCompany(lead.name, lead.company);
       const emailLower = lead.email?.toLowerCase().trim() || null;
       let existing: { id: string } | undefined;
       if (emailLower) {
@@ -99,7 +134,7 @@ outreach.post("/leads/ingest-bulk", authMiddleware, async (c) => {
           .where(sql`LOWER(${leads.email}) = ${emailLower}`).limit(1);
       } else {
         [existing] = await db.select({ id: leads.id }).from(leads)
-          .where(and(eq(leads.name, lead.name), eq(leads.company, lead.company))).limit(1);
+          .where(and(eq(leads.name, name), eq(leads.company, company))).limit(1);
       }
 
       if (existing) {
@@ -114,8 +149,8 @@ outreach.post("/leads/ingest-bulk", authMiddleware, async (c) => {
       }
 
       const [newLead] = await db.insert(leads).values({
-        name:      lead.name,
-        company:   lead.company,
+        name,
+        company,
         email:     emailLower,
         phone:     lead.phone    ?? null,
         source:    lead.source   ?? "csv-import",
@@ -153,6 +188,7 @@ outreach.post("/leads/ingest-bulk", authMiddleware, async (c) => {
 
 outreach.post("/leads/ingest", apiKeyAuth, async (c) => {
   const body = ingestSchema.parse(await c.req.json());
+  const { name, company } = fillNameCompany(body.name, body.company);
   const emailLower = body.email?.toLowerCase().trim() || null;
 
   // Dedupe by lowercased email (if provided) or by exact company+name
@@ -167,7 +203,7 @@ outreach.post("/leads/ingest", apiKeyAuth, async (c) => {
     [existing] = await db
       .select({ id: leads.id })
       .from(leads)
-      .where(and(eq(leads.name, body.name), eq(leads.company, body.company)))
+      .where(and(eq(leads.name, name), eq(leads.company, company)))
       .limit(1);
   }
 
@@ -185,8 +221,8 @@ outreach.post("/leads/ingest", apiKeyAuth, async (c) => {
 
   // Create fresh lead
   const [lead] = await db.insert(leads).values({
-    name:      body.name,
-    company:   body.company,
+    name,
+    company,
     email:     emailLower,
     phone:     body.phone    ?? null,
     source:    body.source   ?? null,

@@ -59,7 +59,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"urls\": [\"{{ $json.url }}\"],\n  \"prompt\": \"Extract the primary contact and company info from this page. If it's a directory listing of multiple companies, return the FIRST company only — we'll call you again for the others. Use empty string for any field you can't confidently fill from this page.\",\n  \"schema\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"company\":  { \"type\": \"string\", \"description\": \"Business / organization name\" },\n      \"name\":     { \"type\": \"string\", \"description\": \"Primary contact person name; falls back to company name if no person is listed\" },\n      \"email\":    { \"type\": \"string\", \"description\": \"Best public contact email\" },\n      \"phone\":    { \"type\": \"string\", \"description\": \"Phone in international format if shown\" },\n      \"category\": { \"type\": \"string\", \"description\": \"Industry / niche this company operates in\" },\n      \"location\": { \"type\": \"string\", \"description\": \"City + country if shown\" },\n      \"summary\":  { \"type\": \"string\", \"description\": \"One-line summary of what this company does\" }\n    },\n    \"required\": [\"company\"]\n  }\n}",
+        "jsonBody": "={\n  \"urls\": [\"{{ $json.url }}\"],\n  \"prompt\": \"Extract the primary contact and company info from this page. If it's a directory listing of multiple companies, return the FIRST company only — we'll call you again for the others. Use empty string for any field you can't confidently fill. Always try to capture at least ONE contactable channel (email, phone, or a social profile URL) — leads with only social/phone are still useful, we reach out to them manually.\",\n  \"schema\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"company\":   { \"type\": \"string\", \"description\": \"Business / organization name\" },\n      \"name\":      { \"type\": \"string\", \"description\": \"Primary contact person name; empty string if no person is listed (don't invent one)\" },\n      \"email\":     { \"type\": \"string\", \"description\": \"Best public contact email; empty string if none\" },\n      \"phone\":     { \"type\": \"string\", \"description\": \"Phone in international format if shown; empty string if none\" },\n      \"website\":   { \"type\": \"string\", \"description\": \"Official website URL; empty string if not the source page\" },\n      \"facebook\":  { \"type\": \"string\", \"description\": \"Facebook page URL; empty string if none\" },\n      \"instagram\": { \"type\": \"string\", \"description\": \"Instagram URL; empty string if none\" },\n      \"linkedin\":  { \"type\": \"string\", \"description\": \"LinkedIn company / profile URL; empty string if none\" },\n      \"category\":  { \"type\": \"string\", \"description\": \"Industry / niche this company operates in (keep under 100 chars; pick ONE primary niche, don't list multiple)\" },\n      \"location\":  { \"type\": \"string\", \"description\": \"City + country if shown\" },\n      \"summary\":   { \"type\": \"string\", \"description\": \"One-line summary of what this company does\" }\n    },\n    \"required\": [\"company\"]\n  }\n}",
         "options": { "timeout": 90000 }
       },
       "name": "Firecrawl /extract",
@@ -79,12 +79,12 @@
         "values": {
           "string": [
             { "name": "name",     "value": "={{ ($json.data && ($json.data.name || $json.data.company)) || '' }}" },
-            { "name": "company",  "value": "={{ ($json.data && $json.data.company) || '' }}" },
+            { "name": "company",  "value": "={{ ($json.data && ($json.data.company || $json.data.name)) || '' }}" },
             { "name": "email",    "value": "={{ ($json.data && $json.data.email) || '' }}" },
             { "name": "phone",    "value": "={{ ($json.data && $json.data.phone) || '' }}" },
-            { "name": "category", "value": "={{ ($json.data && $json.data.category) || '' }}" },
+            { "name": "category", "value": "={{ ($json.data && ($json.data.category || '').slice(0, 100)) || '' }}" },
             { "name": "source",   "value": "firecrawl" },
-            { "name": "notes",    "value": "=Firecrawl extract:\\n• Location: {{ ($json.data && $json.data.location) || '—' }}\\n• Summary: {{ ($json.data && $json.data.summary) || '—' }}\\n• Source URL: {{ $json.url || '—' }}" }
+            { "name": "notes",    "value": "=Firecrawl extract:\\n• Location: {{ ($json.data && $json.data.location) || '—' }}\\n• Summary: {{ ($json.data && $json.data.summary) || '—' }}\\n• Website: {{ ($json.data && $json.data.website) || '—' }}\\n• Facebook: {{ ($json.data && $json.data.facebook) || '—' }}\\n• Instagram: {{ ($json.data && $json.data.instagram) || '—' }}\\n• LinkedIn: {{ ($json.data && $json.data.linkedin) || '—' }}\\n• Source URL: {{ $json.url || '—' }}\\n\\nChannels available:\\n• Email: {{ ($json.data && $json.data.email) ? 'YES' : 'no' }}\\n• Phone: {{ ($json.data && $json.data.phone) ? 'YES' : 'no' }}\\n• Social: {{ ($json.data && ($json.data.facebook || $json.data.instagram || $json.data.linkedin)) ? 'YES' : 'no' }}" }
           ]
         },
         "options": { "dotNotation": false }
@@ -100,8 +100,8 @@
           "options": { "caseSensitive": false, "typeValidation": "loose" },
           "conditions": [
             {
-              "id": "has-name-and-company",
-              "leftValue": "={{ $json.name && $json.company }}",
+              "id": "has-any-contactable-field",
+              "leftValue": "={{ !!($json.company || $json.name || $json.email || $json.phone) }}",
               "rightValue": "",
               "operator": { "type": "boolean", "operation": "true" }
             }
@@ -109,11 +109,11 @@
           "combinator": "and"
         }
       },
-      "name": "Has Name + Company?",
+      "name": "Has Any Contact?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [1300, 300],
-      "notes": "Skip rows where extraction returned nothing usable (e.g. 404 pages, paywalled content)."
+      "notes": "Permissive gate — pass any row that has AT LEAST ONE of company/name/email/phone. Backend fills missing name/company by falling back to each other. Phone-only and social-only leads still come through so the team can reach out manually; the sequence-enrollment picker then filters down to email-eligible leads at send time."
     },
     {
       "parameters": {
@@ -164,8 +164,8 @@
     "Firecrawl /search":   { "main": [[{ "node": "Split Each Result URL", "type": "main", "index": 0 }]] },
     "Split Each Result URL": { "main": [[{ "node": "Firecrawl /extract", "type": "main", "index": 0 }]] },
     "Firecrawl /extract":  { "main": [[{ "node": "Map to Lead Schema", "type": "main", "index": 0 }]] },
-    "Map to Lead Schema":  { "main": [[{ "node": "Has Name + Company?", "type": "main", "index": 0 }]] },
-    "Has Name + Company?": { "main": [
+    "Map to Lead Schema":  { "main": [[{ "node": "Has Any Contact?", "type": "main", "index": 0 }]] },
+    "Has Any Contact?": { "main": [
       [{ "node": "Ingest into Seekers CRM", "type": "main", "index": 0 }],
       []
     ]}
