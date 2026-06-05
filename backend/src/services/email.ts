@@ -46,46 +46,75 @@ export interface SendOutreachEmailResult {
   rejected:  string[];
 }
 
-const LOGO_URL = process.env.LOGO_URL ?? "https://seekers-crm.vercel.app/logo-symbol.png";
-const SITE_URL = process.env.SITE_URL ?? "https://seekersai.org";
-
-// Single agency-brand signature for outreach emails.
-// Always renders "The Seekers team" / "Seekers AI Automation Solutions" —
-// per-rep names go via the `signature` field on profiles (custom HTML) instead.
-// Phone falls back to SIGNATURE_PHONE env var so every email gets it,
-// including unassigned leads.
+// Deliverability-optimized signature for cold outreach.
+//
+// Cold-outreach spam triggers we deliberately AVOID:
+//   • External images (logo on third-party CDN) — biggest single spam-score hit
+//   • Multiple clickable styled <a> tags — "marketing template" fingerprint
+//   • Inline-styled wrapper divs with max-width / font-family / colors
+//
+// What we keep:
+//   • Brand identity as plain text ("The Seekers team" / company line)
+//   • Email + phone as PLAIN TEXT — Gmail/Outlook auto-link these on render,
+//     so the recipient still gets a clickable email/WhatsApp number, but
+//     spam filters see plain text. Best of both worlds.
+//
+// Phone falls back to SIGNATURE_PHONE env var so every email gets it.
 export function buildDefaultSignature(opts: {
-  name?:  string | null;  // accepted but not rendered — use custom signature for per-rep
-  title?: string | null;  // accepted but not rendered
+  name?:  string | null;
+  title?: string | null;
   email?: string | null;
   phone?: string | null;
 }): string {
-  const name  = "The Seekers team";
-  const title = "Seekers AI Automation Solutions";
   const email = opts.email ?? process.env.EMAIL_FROM      ?? "team@seekersai.org";
   const phone = opts.phone ?? process.env.SIGNATURE_PHONE ?? null;
 
-  // WhatsApp link from phone (strip spaces, drop leading + for wa.me)
-  const phoneCompact = phone ? phone.replace(/\s+/g, "") : null;
-  const whatsappLink = phoneCompact ? `https://wa.me/${phoneCompact.replace(/[^\d+]/g, "").replace(/^\+/, "")}` : null;
+  const contact = [escapeHtml(email), phone ? escapeHtml(phone) : null]
+    .filter(Boolean)
+    .join(" &middot; ");
 
-  return `
-    <div style="margin-top:32px;padding-top:16px;border-top:1px solid #e5e5e5;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;color:#555;line-height:1.5">
-      <div style="display:flex;align-items:center;gap:12px">
-        <img src="${LOGO_URL}" alt="Seekers AI" width="42" height="42" style="display:block;border-radius:6px"/>
-        <div>
-          <div style="color:#111;font-weight:600;font-size:14px">${escapeHtml(name)}</div>
-          <div style="color:#666;font-size:12px">${escapeHtml(title)}</div>
-        </div>
-      </div>
-      <div style="margin-top:10px;color:#666;font-size:12px">
-        <a href="${SITE_URL}" style="color:#7c3aed;text-decoration:none">${SITE_URL.replace(/^https?:\/\//, "")}</a>
-        &nbsp;·&nbsp;
-        <a href="mailto:${escapeHtml(email)}" style="color:#7c3aed;text-decoration:none">${escapeHtml(email)}</a>
-        ${phone ? `&nbsp;·&nbsp;<a href="${whatsappLink}" style="color:#7c3aed;text-decoration:none">${escapeHtml(phone)}</a>` : ""}
-      </div>
-    </div>
-  `.trim();
+  // Plain <p> tags only — no fonts, no colors, no <a> tags, no images.
+  // Looks like a human typed it; email clients auto-link the email and phone.
+  return [
+    `<p style="margin-top:24px;margin-bottom:4px">— The Seekers team</p>`,
+    `<p style="margin:0">Seekers AI Automation Solutions</p>`,
+    `<p style="margin:4px 0 0 0">${contact}</p>`,
+  ].join("\n");
+}
+
+// Plain-text equivalent of buildDefaultSignature. Used for the text/plain MIME
+// alternative — emails without a real text alt get a hefty spam penalty.
+export function buildDefaultSignatureText(opts: {
+  email?: string | null;
+  phone?: string | null;
+}): string {
+  const email = opts.email ?? process.env.EMAIL_FROM      ?? "team@seekersai.org";
+  const phone = opts.phone ?? process.env.SIGNATURE_PHONE ?? null;
+  const contact = [email, phone].filter(Boolean).join(" · ");
+  // "-- " (dash dash space) is the RFC-3676 sig delimiter — Gmail/Outlook
+  // collapse everything below it as quoted-signature, which is the standard
+  // friendly cold-email shape.
+  return `\n\n-- \nThe Seekers team\nSeekers AI Automation Solutions\n${contact}`;
+}
+
+// Strip HTML to plaintext for the text/plain MIME alternative.
+// Not perfect, but handles the cases our outreach bodies produce (<p>, <br>, <a>).
+function htmlToText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>\s*<p[^>]*>/gi, "\n\n")
+    .replace(/<\/?p[^>]*>/gi, "")
+    .replace(/<a[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi, "$2 ($1)")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&middot;/g, "·")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function escapeHtml(s: string): string {
@@ -94,13 +123,15 @@ function escapeHtml(s: string): string {
 
 // Generic outreach send. body can be plain text (we'll wrap it in HTML) or HTML directly.
 // signatureHtml is appended AFTER the body in the rendered HTML.
+// signatureText is the plain-text equivalent (defaults to stripping signatureHtml).
 export async function sendOutreachEmail(opts: {
-  to:            string;
-  subject:       string;
-  body:          string;
-  fromName?:     string;
-  replyTo?:      string;
+  to:             string;
+  subject:        string;
+  body:           string;
+  fromName?:      string;
+  replyTo?:       string;
   signatureHtml?: string;
+  signatureText?: string;
 }): Promise<SendOutreachEmailResult> {
   const from = opts.fromName
     ? `"${opts.fromName}" <${process.env.EMAIL_FROM ?? "team@seekersai.org"}>`
@@ -110,19 +141,25 @@ export async function sendOutreachEmail(opts: {
   const isHtml = /<\/?[a-z][\s\S]*>/i.test(opts.body);
   const bodyHtml = isHtml
     ? opts.body
-    : opts.body.split(/\n{2,}/).map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br>")}</p>`).join("");
+    : opts.body.split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px 0">${escapeHtml(p).replace(/\n/g, "<br>")}</p>`).join("\n");
 
-  const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:560px;line-height:1.55;color:#222">
-${bodyHtml}
-${opts.signatureHtml ?? ""}
-</div>`;
+  // NO outer styled wrapper div — that "max-width:560px;font-family:..." pattern
+  // is a known marketing-template fingerprint. Plain <p> tags inherit the
+  // recipient's default font/size, which looks like a hand-typed email.
+  const html = `${bodyHtml}\n${opts.signatureHtml ?? ""}`;
+
+  // Always supply a real text/plain alternative. Missing/empty text parts
+  // are a major spam-filter penalty for cold outreach.
+  const bodyText = isHtml ? htmlToText(opts.body) : opts.body;
+  const sigText  = opts.signatureText ?? (opts.signatureHtml ? htmlToText(opts.signatureHtml) : "");
+  const text     = sigText ? `${bodyText.trim()}\n${sigText}` : bodyText;
 
   const mailOpts: nodemailer.SendMailOptions = {
     from,
     to:       opts.to,
     subject:  opts.subject,
     html,
-    text:     isHtml ? undefined : opts.body,    // text version is body only (no signature)
+    text,
     replyTo:  opts.replyTo,
   };
 

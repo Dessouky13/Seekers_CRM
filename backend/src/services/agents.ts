@@ -110,13 +110,13 @@ Never reference the touch number explicitly ("this is my 3rd email"). Each email
 
 # Output format — strict, no exceptions
 
-Return plain text in this exact shape — the first line MUST be the subject, then a blank line, then the body, then sign off:
+Return plain text in this exact shape — the first line MUST be the subject, then a blank line, then the body. **Do NOT include any sign-off, dashes, "Best,", "Thanks," "— Seekers AI team", or contact details. The system appends a signature automatically — anything you add will cause a duplicate signature in the recipient's inbox.**
 
 Subject: <3 to 6 words, sentence case>
 
 <body — 50 to 110 words for step 1, shorter for steps 2 and 3>
 
-— Seekers AI team
+End the body with your final sentence — that's it. No sign-off line.
 
 No JSON. No markdown fences. No preamble. No commentary. The output goes straight into an email body.
 

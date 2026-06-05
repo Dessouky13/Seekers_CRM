@@ -5,7 +5,7 @@ import {
   outreachSequences, outreachSteps, outreachEnrollments, outreachSends,
   leads, leadActivities, profiles,
 } from "../db/schema";
-import { sendOutreachEmail, buildDefaultSignature } from "./email";
+import { sendOutreachEmail, buildDefaultSignature, buildDefaultSignatureText } from "./email";
 import { findAgent, runAgent } from "./agents";
 import { fireEventAsync } from "./webhooks";
 
@@ -20,20 +20,40 @@ export function renderTemplate(tpl: string, vars: Record<string, string | null |
 
 // Parse an AI-agent output that may begin with "Subject: ..." on the first line.
 // Returns { subject, body }. If no Subject: prefix, subject is null and body is the full output.
+// Strip trailing AI-generated sign-offs / signatures. We always append a
+// canonical signature ourselves; any sign-off the model adds becomes a duplicate
+// and tanks deliverability (looks templated). Patterns we strip from the END:
+//   "— Seekers AI team", "Best, ...", "Thanks, ...", lone "--" delimiter,
+//   "Sent from my iPhone", and any contact-info trailer (email/url/phone).
+function stripTrailingSignoff(body: string): string {
+  let lines = body.replace(/\r\n/g, "\n").split("\n");
+  // Pop trailing blank/sign-off lines until we hit real content.
+  const signoffRe = /^(\s*[-–—]+\s*$|\s*[-–—]\s*Seekers.*|\s*(best|thanks|cheers|regards|warmly|sincerely)[\s,!.]*.*|\s*Sent from my .*|\s*The Seekers team.*|\s*Seekers AI Automation Solutions.*|\s*team@seekersai\.org.*|\s*\+?\d[\d\s\-()]{6,}\s*$|\s*https?:\/\/\S+\s*$)/i;
+  while (lines.length > 0) {
+    const last = lines[lines.length - 1];
+    if (last.trim() === "" || signoffRe.test(last)) {
+      lines.pop();
+    } else {
+      break;
+    }
+  }
+  return lines.join("\n").trim();
+}
+
 export function parseSubjectAndBody(output: string): { subject: string | null; body: string } {
   const trimmed = output.replace(/^\s+/, "");
   const m = trimmed.match(/^Subject:\s*([^\n\r]+)[\r\n]+([\s\S]*)$/i);
   if (m) {
     return {
       subject: m[1].trim().slice(0, 200),
-      body:    m[2].trim(),
+      body:    stripTrailingSignoff(m[2].trim()),
     };
   }
   // Sometimes models wrap output in ```markdown blocks — strip them.
   const stripped = trimmed.replace(/^```\w*\s*|\s*```$/g, "").trim();
   const m2 = stripped.match(/^Subject:\s*([^\n\r]+)[\r\n]+([\s\S]*)$/i);
-  if (m2) return { subject: m2[1].trim().slice(0, 200), body: m2[2].trim() };
-  return { subject: null, body: trimmed };
+  if (m2) return { subject: m2[1].trim().slice(0, 200), body: stripTrailingSignoff(m2[2].trim()) };
+  return { subject: null, body: stripTrailingSignoff(trimmed) };
 }
 
 // Build the variables available to templates for a given lead.
@@ -231,6 +251,7 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
 
   // Resolve sender signature: prefer lead.assignee's signature, fall back to default
   let signatureHtml: string;
+  let signatureText: string;
   let fromName: string | undefined;
   if (lead.assigneeId) {
     const [assignee] = await db
@@ -240,21 +261,22 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
       .limit(1);
     if (assignee) {
       fromName = assignee.name;
-      signatureHtml = assignee.signature?.trim() || buildDefaultSignature({
-        name:  assignee.name,
-        title: assignee.title,
-        email: assignee.email,
-        phone: assignee.phone,
-      });
+      const hasCustom = !!assignee.signature?.trim();
+      signatureHtml = hasCustom
+        ? assignee.signature!.trim()
+        : buildDefaultSignature({ name: assignee.name, title: assignee.title, email: assignee.email, phone: assignee.phone });
+      signatureText = buildDefaultSignatureText({ email: assignee.email, phone: assignee.phone });
     } else {
       signatureHtml = buildDefaultSignature({});
+      signatureText = buildDefaultSignatureText({});
     }
   } else {
     signatureHtml = buildDefaultSignature({});
+    signatureText = buildDefaultSignatureText({});
   }
 
   // Send
-  const result = await sendOutreachEmail({ to: lead.email, subject, body, fromName, signatureHtml });
+  const result = await sendOutreachEmail({ to: lead.email, subject, body, fromName, signatureHtml, signatureText });
 
   // Fire webhook for outreach.sent
   fireEventAsync("outreach.sent", {
