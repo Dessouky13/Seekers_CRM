@@ -326,3 +326,56 @@ export function useOutreachAnalytics() {
     staleTime: 30_000,
   });
 }
+
+// ── Per-sequence analytics (drill-in) ─────────────────────
+export interface SequenceAnalytics {
+  sequence: {
+    id:          string;
+    name:        string;
+    description: string | null;
+    category:    string | null;
+    is_active:   boolean;
+    step_count:  number;
+  };
+  totals: {
+    enrolled:        number;
+    active:          number;
+    paused:          number;
+    completed:       number;
+    replied:         number;
+    failed:          number;
+    sends:           number;
+    sends_failed:    number;
+    reply_rate:      number;
+    completion_rate: number;
+  };
+  by_status: { status: EnrollmentStatus; count: number }[];
+  funnel: {
+    position:      number;
+    label:         string;
+    day_offset:    number;
+    channel:       Channel;
+    has_agent:     boolean;
+    subject:       string | null;
+    sent:          number;
+    failed:        number;
+    retention_pct: number;
+  }[];
+  sends_by_day: { day: string; count: number }[];
+  recent_failures: {
+    lead_name:    string | null;
+    lead_company: string | null;
+    lead_email:   string | null;
+    error:        string | null;
+    sent_at:      string;
+  }[];
+}
+
+export function useSequenceAnalytics(sequenceId: string | null) {
+  return useQuery<SequenceAnalytics>({
+    queryKey: ["outreach", "analytics", "sequence", sequenceId],
+    queryFn:  () => apiFetch(`/outreach/analytics/sequence/${sequenceId}`),
+    enabled:  !!sequenceId,
+    staleTime: 30_000,
+  });
+}

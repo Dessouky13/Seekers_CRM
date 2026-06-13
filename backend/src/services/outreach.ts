@@ -159,6 +159,20 @@ export async function enrollLead(opts: EnrollOptions) {
   return { enrollment, alreadyEnrolled: false };
 }
 
+// Max delivery attempts for a single step before we give up and mark the
+// enrollment failed. Transient SMTP errors (greylisting, timeouts, rate-limit)
+// are retried with a day of backoff between attempts.
+const MAX_SEND_ATTEMPTS = 3;
+
+// Classify an SMTP / send error as permanent (don't retry — content or address
+// is the problem) vs transient (retry later). Permanent: hard bounces, unknown
+// mailbox, and spam rejections (retrying spam-flagged content only burns more
+// domain reputation). Everything else (timeouts, 4xx greylisting, network) is
+// transient.
+function isPermanentSendError(msg: string): boolean {
+  return /\b(550|551|553|554)\b|spam|blocked|black\s?list|no such user|mailbox (unavailable|not found|does not exist)|user unknown|address rejected|recipient (address )?rejected|invalid recipient|relay access denied/i.test(msg);
+}
+
 // ── Scheduler tick: find due enrollments, send next step ──
 export async function processDueSends(limit = 20): Promise<{ processed: number; sent: number; failed: number }> {
   const now = new Date();
@@ -176,14 +190,18 @@ export async function processDueSends(limit = 20): Promise<{ processed: number; 
 
   for (const enrollment of due) {
     try {
-      await processSingleSend(enrollment);
-      sent++;
+      const outcome = await processSingleSend(enrollment);
+      if (outcome === "failed") failed++;
+      else sent++;   // "sent", "advanced" (non-email skip), "completed", "retry" all count as handled
     } catch (err: any) {
+      // Backstop: only reached for genuinely unexpected errors that occur
+      // BEFORE the send attempt (lead row vanished, DB error). Send failures
+      // are caught and retried inside processSingleSend. These pre-send errors
+      // are treated as permanent because they won't fix themselves.
       failed++;
-      // Mark this enrollment as failed if a single send errored — but don't crash the sweep
       await db
         .update(outreachEnrollments)
-        .set({ status: "failed", pausedReason: String(err?.message ?? err).slice(0, 500) })
+        .set({ status: "failed", pausedReason: String(err?.message ?? err).slice(0, 500), nextSendAt: null })
         .where(eq(outreachEnrollments.id, enrollment.id));
     }
   }
@@ -191,18 +209,85 @@ export async function processDueSends(limit = 20): Promise<{ processed: number; 
   return { processed: due.length, sent, failed };
 }
 
-async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSelect) {
+// Record a failed send + decide whether to retry (transient) or give up
+// (permanent / exhausted attempts). NEVER bursts: a retry is always scheduled
+// at least a day out via computeNextSendAt.
+async function handleSendFailure(
+  enrollment: typeof outreachEnrollments.$inferSelect,
+  step: typeof outreachSteps.$inferSelect,
+  err: any,
+): Promise<"retry" | "failed"> {
+  const msg = String(err?.message ?? err);
+
+  // Always log the failure to the sends table so it's visible in analytics.
+  await db.insert(outreachSends).values({
+    enrollmentId: enrollment.id,
+    stepId:       step.id,
+    channel:      "email",
+    subject:      null,
+    body:         null,
+    status:       "failed",
+    error:        msg.slice(0, 1000),
+  });
+
+  // Count failed attempts for THIS step (includes the row just inserted).
+  const [{ failures }] = await db
+    .select({ failures: sql<number>`COUNT(*)::int` })
+    .from(outreachSends)
+    .where(and(
+      eq(outreachSends.enrollmentId, enrollment.id),
+      eq(outreachSends.stepId, step.id),
+      eq(outreachSends.status, "failed"),
+    ));
+  const attempts = Number(failures);
+
+  const permanent = isPermanentSendError(msg);
+
+  if (permanent || attempts >= MAX_SEND_ATTEMPTS) {
+    await db.update(outreachEnrollments)
+      .set({
+        status:       "failed",
+        pausedReason: `${permanent ? "Permanent failure" : `Failed after ${attempts} attempts`}: ${msg}`.slice(0, 500),
+        nextSendAt:   null,
+      })
+      .where(eq(outreachEnrollments.id, enrollment.id));
+    return "failed";
+  }
+
+  // Transient → retry. Back off one extra day per prior attempt, snapped to
+  // noon Cairo & skipping the weekend (computeNextSendAt handles both).
+  const backoffDays = attempts;   // 1st retry → +1 day, 2nd → +2 days
+  await db.update(outreachEnrollments)
+    .set({
+      nextSendAt:   computeNextSendAt(new Date(), backoffDays),
+      pausedReason: `Retry ${attempts}/${MAX_SEND_ATTEMPTS}: ${msg}`.slice(0, 500),
+    })
+    .where(eq(outreachEnrollments.id, enrollment.id));
+  return "retry";
+}
+
+type SendOutcome = "sent" | "advanced" | "completed" | "retry" | "failed";
+
+async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSelect): Promise<SendOutcome> {
   // Get lead and step
   const [lead] = await db.select().from(leads).where(eq(leads.id, enrollment.leadId)).limit(1);
-  if (!lead)        throw new Error("Lead vanished");
-  if (!lead.email)  throw new Error("Lead has no email");
+  if (!lead) throw new Error("Lead vanished");   // pre-send, genuinely unexpected → backstop marks failed
+
+  // Lead has no email — can't email it. Mark failed with a clear, non-retryable
+  // reason (don't throw, so it doesn't look like a transient crash).
+  if (!lead.email) {
+    await db.update(outreachEnrollments)
+      .set({ status: "failed", pausedReason: "Lead has no email address", nextSendAt: null })
+      .where(eq(outreachEnrollments.id, enrollment.id));
+    return "failed";
+  }
 
   // If lead has reached closed_won/closed_lost, finish enrollment
   if (lead.stage === "closed_won" || lead.stage === "closed_lost") {
     await db.update(outreachEnrollments)
-      .set({ status: "completed", completedAt: new Date() })
+      .set({ status: "completed", completedAt: new Date(), nextSendAt: null })
       .where(eq(outreachEnrollments.id, enrollment.id));
-    return;
+    return "completed";
   }
 
   const steps = await db
@@ -215,15 +300,15 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
   if (!step) {
     // No more steps — mark complete
     await db.update(outreachEnrollments)
-      .set({ status: "completed", completedAt: new Date() })
+      .set({ status: "completed", completedAt: new Date(), nextSendAt: null })
       .where(eq(outreachEnrollments.id, enrollment.id));
-    return;
+    return "completed";
   }
 
   // Skip non-email steps for now (they show up as suggestions in activity timeline but don't send)
   if (step.channel !== "email") {
     await advanceStep(enrollment, steps);
-    return;
+    return "advanced";
   }
 
   const vars = buildLeadVars(lead);
@@ -275,8 +360,21 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
     signatureText = buildDefaultSignatureText({});
   }
 
-  // Send
-  const result = await sendOutreachEmail({ to: lead.email, subject, body, fromName, signatureHtml, signatureText });
+  // Send. A failure here is caught and routed to the retry/permanent-fail
+  // handler — it must NOT bubble up and permanently kill the enrollment, and
+  // it must NOT advance the step (so we don't skip a touch on a transient error).
+  let result;
+  try {
+    result = await sendOutreachEmail({ to: lead.email, subject, body, fromName, signatureHtml, signatureText });
+  } catch (sendErr) {
+    return await handleSendFailure(enrollment, step, sendErr);
+  }
+
+  // nodemailer can also report a soft rejection without throwing (recipient in
+  // the `rejected` array). Treat that the same as a thrown send failure.
+  if (result.rejected && result.rejected.length > 0 && (!result.accepted || result.accepted.length === 0)) {
+    return await handleSendFailure(enrollment, step, new Error(`Recipient rejected: ${result.rejected.join(", ")}`));
+  }
 
   // Fire webhook for outreach.sent
   fireEventAsync("outreach.sent", {
@@ -314,6 +412,7 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
     .where(eq(leads.id, lead.id));
 
   await advanceStep(enrollment, steps);
+  return "sent";
 }
 
 async function advanceStep(
@@ -332,12 +431,30 @@ async function advanceStep(
       })
       .where(eq(outreachEnrollments.id, enrollment.id));
   } else {
+    const prevStep = steps[enrollment.currentStep];
     const nextStep = steps[nextStepIdx];
+
+    // CRITICAL: anchor the next send to NOW + the *interval* between this step
+    // and the next, NOT to enrolledAt + nextStep.dayOffset.
+    //
+    // The old enrolledAt-relative formula meant any behind-schedule enrollment
+    // (paused & resumed, or enrolled days ago) would have every overdue step's
+    // nextSendAt already in the past — so the scheduler fired step 2, 3, 4…
+    // back-to-back on consecutive 5-min ticks. That's a spam cannon: e.g. a
+    // lead enrolled 13 days ago with steps at day 0/3/7 would receive all
+    // three emails within ~15 minutes of resume.
+    //
+    // By anchoring to (now + gap) we preserve the INTENDED spacing between
+    // touches no matter how late we are. gap is clamped to >= 1 day so two
+    // steps can never fire on the same scheduler tick even if misconfigured
+    // with identical day offsets.
+    const gapDays = Math.max(1, (nextStep.dayOffset ?? 0) - (prevStep?.dayOffset ?? 0));
+
     await db.update(outreachEnrollments)
       .set({
         currentStep:          nextStepIdx,
         lastStepCompletedAt:  new Date(),
-        nextSendAt:           computeNextSendAt(enrollment.enrolledAt, nextStep.dayOffset),
+        nextSendAt:           computeNextSendAt(new Date(), gapDays),
       })
       .where(eq(outreachEnrollments.id, enrollment.id));
   }

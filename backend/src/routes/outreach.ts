@@ -885,4 +885,148 @@ outreach.get("/analytics", jwtOrApiKey, async (c) => {
   });
 });
 
+// ── PER-SEQUENCE ANALYTICS ────────────────────────────────
+// GET /outreach/analytics/sequence/:id — deep dive into ONE sequence:
+// step-by-step funnel (sent / failed / retention), status breakdown,
+// sends over the last 30 days, reply + completion rates, recent failures.
+outreach.get("/analytics/sequence/:id", jwtOrApiKey, async (c) => {
+  const id = c.req.param("id");
+
+  const [seq] = await db.select().from(outreachSequences).where(eq(outreachSequences.id, id)).limit(1);
+  if (!seq) return c.json({ error: "Sequence not found" }, 404);
+
+  const [
+    stepConfig,        // step definitions for this sequence
+    statusRows,        // enrollment status breakdown
+    sendsPerStep,      // sends per step position, split by status
+    sendsByDay,        // sent emails per day, last 30d
+    recentFailures,    // most recent failed sends with lead context
+  ] = await Promise.all([
+    db.select({
+      id:        outreachSteps.id,
+      position:  outreachSteps.position,
+      dayOffset: outreachSteps.dayOffset,
+      channel:   outreachSteps.channel,
+      agentId:   outreachSteps.agentId,
+      subject:   outreachSteps.subjectTemplate,
+    }).from(outreachSteps).where(eq(outreachSteps.sequenceId, id)).orderBy(outreachSteps.position),
+
+    db.select({
+      status: outreachEnrollments.status,
+      count:  sql<number>`COUNT(*)::int`,
+    }).from(outreachEnrollments).where(eq(outreachEnrollments.sequenceId, id)).groupBy(outreachEnrollments.status),
+
+    db.select({
+      position: outreachSteps.position,
+      status:   outreachSends.status,
+      count:    sql<number>`COUNT(${outreachSends.id})::int`,
+    })
+    .from(outreachSends)
+    .innerJoin(outreachSteps, eq(outreachSends.stepId, outreachSteps.id))
+    .where(eq(outreachSteps.sequenceId, id))
+    .groupBy(outreachSteps.position, outreachSends.status),
+
+    db.select({
+      day:   sql<string>`DATE(${outreachSends.sentAt})::text`,
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(outreachSends)
+    .innerJoin(outreachEnrollments, eq(outreachSends.enrollmentId, outreachEnrollments.id))
+    .where(and(
+      eq(outreachEnrollments.sequenceId, id),
+      eq(outreachSends.status, "sent"),
+      sql`${outreachSends.sentAt} > NOW() - INTERVAL '30 days'`,
+    ))
+    .groupBy(sql`DATE(${outreachSends.sentAt})`)
+    .orderBy(sql`DATE(${outreachSends.sentAt})`),
+
+    db.select({
+      lead_name:    leads.name,
+      lead_company: leads.company,
+      lead_email:   leads.email,
+      error:        outreachSends.error,
+      sent_at:      outreachSends.sentAt,
+    })
+    .from(outreachSends)
+    .innerJoin(outreachEnrollments, eq(outreachSends.enrollmentId, outreachEnrollments.id))
+    .innerJoin(leads, eq(outreachEnrollments.leadId, leads.id))
+    .where(and(eq(outreachEnrollments.sequenceId, id), eq(outreachSends.status, "failed")))
+    .orderBy(desc(outreachSends.sentAt))
+    .limit(8),
+  ]);
+
+  // Status breakdown → totals
+  const statusMap = new Map(statusRows.map((r) => [r.status, Number(r.count)]));
+  const enrolled  = statusRows.reduce((a, r) => a + Number(r.count), 0);
+  const active    = statusMap.get("active")    ?? 0;
+  const paused    = statusMap.get("paused")    ?? 0;
+  const completed = statusMap.get("completed") ?? 0;
+  const replied   = statusMap.get("replied")   ?? 0;
+  const failed    = statusMap.get("failed")    ?? 0;
+
+  // Sent / failed counts per step position
+  const sentByPos   = new Map<number, number>();
+  const failedByPos = new Map<number, number>();
+  for (const r of sendsPerStep) {
+    const pos = Number(r.position);
+    if (r.status === "sent")   sentByPos.set(pos,   Number(r.count));
+    if (r.status === "failed") failedByPos.set(pos, Number(r.count));
+  }
+
+  // Funnel: retention is measured against step 0's sent count (the baseline).
+  const baseline = sentByPos.get(0) ?? 0;
+  const funnel = stepConfig.map((st) => {
+    const pos    = Number(st.position);
+    const sent   = sentByPos.get(pos)   ?? 0;
+    const fail   = failedByPos.get(pos) ?? 0;
+    return {
+      position:      pos,
+      label:         `Step ${pos + 1}`,
+      day_offset:    Number(st.dayOffset),
+      channel:       st.channel,
+      has_agent:     !!st.agentId,
+      subject:       st.subject,
+      sent,
+      failed:        fail,
+      retention_pct: baseline > 0 ? Math.round((sent / baseline) * 100) : 0,
+    };
+  });
+
+  const totalSends  = Array.from(sentByPos.values()).reduce((a, n) => a + n, 0);
+  const totalFailed = Array.from(failedByPos.values()).reduce((a, n) => a + n, 0);
+
+  return c.json({
+    sequence: {
+      id:          seq.id,
+      name:        seq.name,
+      description: seq.description,
+      category:    seq.category,
+      is_active:   seq.isActive,
+      step_count:  stepConfig.length,
+    },
+    totals: {
+      enrolled,
+      active,
+      paused,
+      completed,
+      replied,
+      failed,
+      sends:           totalSends,
+      sends_failed:    totalFailed,
+      reply_rate:      enrolled > 0 ? Math.round((replied / enrolled) * 100) : 0,
+      completion_rate: enrolled > 0 ? Math.round((completed / enrolled) * 100) : 0,
+    },
+    by_status:    statusRows.map((r) => ({ status: r.status, count: Number(r.count) })),
+    funnel,
+    sends_by_day: sendsByDay.map((r) => ({ day: r.day, count: Number(r.count) })),
+    recent_failures: recentFailures.map((r) => ({
+      lead_name:    r.lead_name,
+      lead_company: r.lead_company,
+      lead_email:   r.lead_email,
+      error:        r.error,
+      sent_at:      r.sent_at,
+    })),
+  });
+});
+
 export default outreach;
