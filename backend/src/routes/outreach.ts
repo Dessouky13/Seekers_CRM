@@ -940,19 +940,23 @@ outreach.get("/analytics/sequence/:id", jwtOrApiKey, async (c) => {
     .groupBy(sql`DATE(${outreachSends.sentAt})`)
     .orderBy(sql`DATE(${outreachSends.sentAt})`),
 
+    // Failures, surfaced from the enrollment itself (status='failed') so this
+    // also captures enrollments that died before per-send failure logging
+    // existed — their reason lives in paused_reason. Going forward, the same
+    // reason is also written to outreach_sends.error.
     db.select({
       lead_name:    leads.name,
       lead_company: leads.company,
       lead_email:   leads.email,
-      error:        outreachSends.error,
-      sent_at:      outreachSends.sentAt,
+      error:        outreachEnrollments.pausedReason,
+      sent_at:      outreachEnrollments.lastStepCompletedAt,
+      enrolled_at:  outreachEnrollments.enrolledAt,
     })
-    .from(outreachSends)
-    .innerJoin(outreachEnrollments, eq(outreachSends.enrollmentId, outreachEnrollments.id))
+    .from(outreachEnrollments)
     .innerJoin(leads, eq(outreachEnrollments.leadId, leads.id))
-    .where(and(eq(outreachEnrollments.sequenceId, id), eq(outreachSends.status, "failed")))
-    .orderBy(desc(outreachSends.sentAt))
-    .limit(8),
+    .where(and(eq(outreachEnrollments.sequenceId, id), eq(outreachEnrollments.status, "failed")))
+    .orderBy(desc(outreachEnrollments.enrolledAt))
+    .limit(10),
   ]);
 
   // Status breakdown → totals
@@ -1024,7 +1028,7 @@ outreach.get("/analytics/sequence/:id", jwtOrApiKey, async (c) => {
       lead_company: r.lead_company,
       lead_email:   r.lead_email,
       error:        r.error,
-      sent_at:      r.sent_at,
+      sent_at:      r.sent_at ?? r.enrolled_at,
     })),
   });
 });
