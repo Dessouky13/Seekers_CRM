@@ -4,11 +4,12 @@ import { apiFetch } from "@/lib/api";
 export type AgentScope = "lead" | "client" | "task" | "pipeline" | "global";
 
 export interface AgentDef {
-  id:          string;
-  name:        string;
-  description: string;
-  scope:       AgentScope;
-  tier:        "standard" | "premium";
+  id:            string;
+  name:          string;
+  description:   string;
+  scope:         AgentScope;
+  email_capable: boolean;
+  tier:          "standard" | "premium";
 }
 
 export interface AgentRun {

@@ -6,7 +6,7 @@ import {
   leads, leadActivities, profiles,
 } from "../db/schema";
 import { sendOutreachEmail, buildDefaultSignature, buildDefaultSignatureText } from "./email";
-import { findAgent, runAgent } from "./agents";
+import { runAgent, isEmailCapableAgent } from "./agents";
 import { fireEventAsync } from "./webhooks";
 
 // Mustache-lite template renderer. Supports {{name}}, {{company}}, etc.
@@ -268,6 +268,16 @@ async function handleSendFailure(
 
 type SendOutcome = "sent" | "advanced" | "completed" | "retry" | "failed";
 
+// Pause an enrollment because of a fixable configuration problem (e.g. step
+// wired to a non-email agent, or no body). Distinct from a send failure: this
+// is recoverable — fix the step, then resume the enrollment.
+async function holdForConfig(enrollment: typeof outreachEnrollments.$inferSelect, reason: string) {
+  await db.update(outreachEnrollments)
+    .set({ status: "paused", pausedReason: reason.slice(0, 500), nextSendAt: null })
+    .where(eq(outreachEnrollments.id, enrollment.id));
+  console.warn(`[outreach] enrollment ${enrollment.id} held: ${reason}`);
+}
+
 async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSelect): Promise<SendOutcome> {
   // Get lead and step
   const [lead] = await db.select().from(leads).where(eq(leads.id, enrollment.leadId)).limit(1);
@@ -313,25 +323,43 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
 
   const vars = buildLeadVars(lead);
 
+  // GUARD: if this email step has an agent that is NOT email-capable (a brief /
+  // enrichment / proposal writer), DO NOT send its output — that would email an
+  // internal research document to the prospect. Pause the enrollment so it can
+  // be resumed once the step is repointed to an email-writing agent.
+  if (step.agentId && !isEmailCapableAgent(step.agentId)) {
+    await holdForConfig(
+      enrollment,
+      `Step ${enrollment.currentStep + 1} uses non-email agent "${step.agentId}". Assign the Outreach Drafter (or a body template).`,
+    );
+    return "failed";
+  }
+
   // Resolve subject + body. If an agent is set, it produces both; otherwise we use templates.
   const fallbackSubject = renderTemplate(step.subjectTemplate ?? "Following up — {{company}}", vars);
   let subject: string;
   let body:    string;
 
   if (step.agentId) {
-    const agent = findAgent(step.agentId);
-    if (!agent || agent.scope !== "lead") {
-      subject = fallbackSubject;
-      body    = renderTemplate(step.bodyTemplate ?? "(no template configured)", vars);
-    } else {
-      const run = await runAgent({ agentId: step.agentId, contextId: lead.id, userId: null });
-      const parsed = parseSubjectAndBody(run.output);
-      subject = parsed.subject ?? fallbackSubject;
-      body    = parsed.body   || renderTemplate(step.bodyTemplate ?? "", vars);
-    }
+    const run = await runAgent({ agentId: step.agentId, contextId: lead.id, userId: null });
+    const parsed = parseSubjectAndBody(run.output);
+    subject = parsed.subject ?? fallbackSubject;
+    body    = parsed.body   || renderTemplate(step.bodyTemplate ?? "", vars);
   } else {
     subject = fallbackSubject;
-    body    = renderTemplate(step.bodyTemplate ?? "(no body template)", vars);
+    body    = renderTemplate(step.bodyTemplate ?? "", vars);
+  }
+
+  // GUARD: never send an empty / placeholder body. This catches steps that have
+  // neither an agent nor a real body template (which previously sent the literal
+  // text "(no body template)" or an empty email).
+  const cleanBody = (body ?? "").trim();
+  if (cleanBody.length < 10) {
+    await holdForConfig(
+      enrollment,
+      `Step ${enrollment.currentStep + 1} produced an empty body. Add the Outreach Drafter agent or a body template.`,
+    );
+    return "failed";
   }
 
   // Resolve sender signature: prefer lead.assignee's signature, fall back to default

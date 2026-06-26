@@ -12,8 +12,9 @@ const agentsRouter = new Hono<AppEnv>();
 
 // GET /agents — list available agent definitions
 agentsRouter.get("/", authMiddleware, (c) => {
-  return c.json(AGENTS.map(({ id, name, description, scope, modelEnv }) => ({
+  return c.json(AGENTS.map(({ id, name, description, scope, modelEnv, emailCapable }) => ({
     id, name, description, scope,
+    email_capable: !!emailCapable,
     tier: modelEnv === "heavy" ? "premium" : "standard",
   })));
 });

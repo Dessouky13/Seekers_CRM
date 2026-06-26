@@ -192,7 +192,9 @@ function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onBack: ()
   const addStep   = useAddStep();
   const deleteStep = useDeleteStep();
   const { data: agents = [] } = useAgents();
-  const leadAgents = agents.filter((a) => a.scope === "lead");
+  // Email steps may ONLY use email-capable agents — brief/enrichment/proposal
+  // agents produce internal documents that must never be emailed to a prospect.
+  const leadAgents = agents.filter((a) => a.scope === "lead" && a.email_capable);
 
   const [stepDialogOpen, setStepDialogOpen] = useState(false);
   const [editingStep, setEditingStep]       = useState<SequenceStep | null>(null);

@@ -16,6 +16,7 @@ import {
 } from "../db/schema";
 import { authMiddleware, adminOnly } from "../middleware/auth";
 import { createMiddleware } from "hono/factory";
+import { isEmailCapableAgent } from "../services/agents";
 import {
   enrollLead, processDueSends, autoEnrollIfMatchingCategory, handleReply,
 } from "../services/outreach";
@@ -349,9 +350,22 @@ const stepSchema = z.object({
   agent_id:         z.string().max(100).optional().nullable(),
 });
 
+// Guard: an EMAIL step's agent must be email-capable. Brief / enrichment /
+// proposal agents produce internal documents and would be sent verbatim to a
+// prospect — reject them here so the bad config never reaches the scheduler.
+function validateEmailStepAgent(channel: string | undefined, agentId: string | null | undefined): string | null {
+  if (channel === "email" && agentId && !isEmailCapableAgent(agentId)) {
+    return `Agent '${agentId}' does not write emails — it produces an internal document. Use the "Outreach Drafter" agent (or a body template) for email steps.`;
+  }
+  return null;
+}
+
 outreach.post("/sequences/:id/steps", authMiddleware, async (c) => {
   const sequenceId = c.req.param("id");
   const body = stepSchema.parse(await c.req.json());
+
+  const agentErr = validateEmailStepAgent(body.channel, body.agent_id);
+  if (agentErr) return c.json({ error: agentErr }, 400);
 
   // Auto-assign position to next free slot
   const [{ maxPos }] = await db
@@ -374,6 +388,18 @@ outreach.post("/sequences/:id/steps", authMiddleware, async (c) => {
 
 outreach.patch("/sequences/:sid/steps/:stepId", authMiddleware, async (c) => {
   const body = stepSchema.partial().parse(await c.req.json());
+
+  // Resolve the effective channel (may be unchanged) to validate the agent against.
+  let effectiveChannel = body.channel;
+  if (body.agent_id !== undefined && effectiveChannel === undefined) {
+    const [cur] = await db.select({ channel: outreachSteps.channel }).from(outreachSteps).where(eq(outreachSteps.id, c.req.param("stepId"))).limit(1);
+    effectiveChannel = cur?.channel;
+  }
+  if (body.agent_id !== undefined || body.channel !== undefined) {
+    const agentErr = validateEmailStepAgent(effectiveChannel, body.agent_id);
+    if (agentErr) return c.json({ error: agentErr }, 400);
+  }
+
   const patch: Record<string, unknown> = {};
   if (body.day_offset !== undefined)       patch.dayOffset       = body.day_offset;
   if (body.channel !== undefined)          patch.channel         = body.channel;

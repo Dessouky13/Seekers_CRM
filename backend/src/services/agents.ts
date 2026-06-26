@@ -18,6 +18,11 @@ export interface AgentDef {
   name:        string;
   description: string;
   scope:       AgentScope;
+  // True ONLY for agents that produce a sendable cold email (Subject: + body).
+  // Outreach sequence steps may only use email-capable agents — the brief /
+  // enrichment / proposal agents produce INTERNAL documents and must never be
+  // sent verbatim to a prospect.
+  emailCapable?: boolean;
   modelEnv?:   "default" | "heavy";    // default uses OPENROUTER_MODEL, heavy uses OPENROUTER_MODEL_HEAVY
   temperature?: number;
   buildPrompt: (contextId: string | null) => Promise<{
@@ -169,6 +174,7 @@ export const AGENTS: AgentDef[] = [
     name:        "Outreach Drafter",
     description: "Drafts a cold-outreach email tailored to the lead's niche, with per-touch tone (first / follow-up / break-up).",
     scope:       "lead",
+    emailCapable: true,
     temperature: 0.85,
     async buildPrompt(leadId) {
       if (!leadId) throw new Error("leadId required");
@@ -468,6 +474,13 @@ Output:
 
 export function findAgent(id: string): AgentDef | undefined {
   return AGENTS.find((a) => a.id === id);
+}
+
+// An agent is valid for an outreach EMAIL step only if it produces a sendable
+// cold email. Brief / enrichment / proposal agents are internal-only.
+export function isEmailCapableAgent(id: string | null | undefined): boolean {
+  if (!id) return false;
+  return !!findAgent(id)?.emailCapable;
 }
 
 // ── Execution ─────────────────────────────────────────────
