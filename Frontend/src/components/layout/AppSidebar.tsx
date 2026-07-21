@@ -6,19 +6,24 @@ import {
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarHeader, SidebarFooter, useSidebar,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/hooks/useAuth";
 
 // SEEKERS-TODO: Replace /logo-white.png with actual logo file uploaded to /public/logo-white.png
 // SEEKERS-TODO: Replace /logo-symbol.png with the Seekers symbol mark (square icon variant) uploaded to /public/logo-symbol.png
 
+// `memberOk: true` → visible to non-admin members. Everything else is
+// admin-only and is ALSO blocked server-side (see ADMIN_ONLY_MODULES in
+// backend/src/index.ts) — hiding it here is convenience, not the security
+// boundary.
 const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Finance", url: "/finance", icon: DollarSign },
-  { title: "Tasks", url: "/tasks", icon: CheckSquare },
+  { title: "Tasks", url: "/tasks", icon: CheckSquare, memberOk: true },
   { title: "Clients", url: "/clients", icon: Building2 },
-  { title: "CRM", url: "/crm", icon: Users },
-  { title: "Outreach", url: "/outreach", icon: Send },
+  { title: "CRM", url: "/crm", icon: Users, memberOk: true },
+  { title: "Outreach", url: "/outreach", icon: Send, memberOk: true },
   { title: "Goals", url: "/goals", icon: Target },
-  { title: "Notes", url: "/notes", icon: StickyNote },
+  { title: "Notes", url: "/notes", icon: StickyNote, memberOk: true },
   { title: "Vault", url: "/vault", icon: Lock },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
@@ -27,6 +32,9 @@ export function AppSidebar() {
   const { state, toggleSidebar } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
+  const user = useCurrentUser();
+  const isAdmin = user?.role === "admin";
+  const visibleNavItems = isAdmin ? navItems : navItems.filter((i) => i.memberOk);
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -59,7 +67,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => {
+              {visibleNavItems.map((item) => {
                 const isActive = item.url === "/" ? location.pathname === "/" : location.pathname.startsWith(item.url);
                 const isPlaceholder = false;
                 return (

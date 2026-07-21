@@ -4,7 +4,7 @@ import { z } from "zod";
 import { eq, and, not, inArray, ilike, or, sql, gte } from "drizzle-orm";
 import { db } from "../db/client";
 import { leads, leadActivities, profiles } from "../db/schema";
-import { authMiddleware, adminOnly } from "../middleware/auth";
+import { authMiddleware, adminOnly, forcedAssigneeId, canAccessOwned, isAdmin } from "../middleware/auth";
 import {
   createLeadSchema, updateLeadSchema, createLeadActivitySchema,
   crmInsightsQuerySchema,
@@ -26,6 +26,11 @@ crm.get("/leads", authMiddleware, async (c) => {
   if (q.stage)       conditions.push(eq(leads.stage, q.stage as any));
   if (q.assignee_id) conditions.push(eq(leads.assigneeId, q.assignee_id));
   if (q.category)    conditions.push(eq(leads.category, q.category));
+
+  // Members only ever see their OWN leads. Enforced server-side and applied
+  // last so it cannot be widened by a client-supplied assignee_id filter.
+  const forced = forcedAssigneeId(c.get("user"));
+  if (forced) conditions.push(eq(leads.assigneeId, forced));
   if (search) {
     conditions.push(
       or(
@@ -85,6 +90,7 @@ crm.post("/leads", authMiddleware, async (c) => {
 
 // GET /crm/stale-leads — leads not updated in 2+ days (active only)
 crm.get("/stale-leads", authMiddleware, async (c) => {
+  const forcedStale = forcedAssigneeId(c.get("user"));
   const rows = await db
     .select({
       lead:         leads,
@@ -95,6 +101,7 @@ crm.get("/stale-leads", authMiddleware, async (c) => {
     .where(and(
       not(inArray(leads.stage, ["closed_won", "closed_lost"])),
       sql`(${leads.lastActivity} IS NULL OR ${leads.lastActivity}::date <= CURRENT_DATE - INTERVAL '2 days')`,
+      ...(forcedStale ? [eq(leads.assigneeId, forcedStale)] : []),
     ))
     .orderBy(sql`${leads.lastActivity} ASC NULLS FIRST`);
 
@@ -117,6 +124,12 @@ crm.get("/leads/:id", authMiddleware, async (c) => {
 
   if (!row) return c.json({ error: "Lead not found" }, 404);
 
+  // Members may only open leads assigned to them. Return 404 (not 403) so a
+  // member can't probe which lead ids exist.
+  if (!canAccessOwned(c.get("user"), row.lead.assigneeId)) {
+    return c.json({ error: "Lead not found" }, 404);
+  }
+
   const activities = await db
     .select()
     .from(leadActivities)
@@ -134,6 +147,13 @@ crm.patch("/leads/:id", authMiddleware, async (c) => {
 
   const [existing] = await db.select().from(leads).where(eq(leads.id, id)).limit(1);
   if (!existing) return c.json({ error: "Lead not found" }, 404);
+  if (!canAccessOwned(user, existing.assigneeId)) {
+    return c.json({ error: "Lead not found" }, 404);
+  }
+  // Members cannot reassign a lead away from (or to) someone else.
+  if (!isAdmin(user) && body.assignee_id && body.assignee_id !== user.id) {
+    return c.json({ error: "Forbidden", message: "You cannot reassign leads" }, 403);
+  }
 
   const stageChanged = body.stage && body.stage !== existing.stage;
 
@@ -264,8 +284,11 @@ crm.post("/leads/:id/activities", authMiddleware, async (c) => {
   const user   = c.get("user");
   const body   = createLeadActivitySchema.parse(await c.req.json());
 
-  const [lead] = await db.select({ id: leads.id }).from(leads).where(eq(leads.id, leadId)).limit(1);
+  const [lead] = await db.select({ id: leads.id, assigneeId: leads.assigneeId }).from(leads).where(eq(leads.id, leadId)).limit(1);
   if (!lead) return c.json({ error: "Lead not found" }, 404);
+  if (!canAccessOwned(user, lead.assigneeId)) {
+    return c.json({ error: "Lead not found" }, 404);
+  }
 
   const [activity] = await db
     .insert(leadActivities)
@@ -288,23 +311,36 @@ crm.post("/leads/:id/activities", authMiddleware, async (c) => {
 
 // DELETE /crm/leads/:leadId/activities/:activityId — remove an activity from the timeline
 crm.delete("/leads/:leadId/activities/:activityId", authMiddleware, async (c) => {
+  const leadId = c.req.param("leadId");
+
+  // Members may only touch activities on their own leads.
+  const [lead] = await db.select({ assigneeId: leads.assigneeId }).from(leads).where(eq(leads.id, leadId)).limit(1);
+  if (!lead) return c.json({ error: "Activity not found" }, 404);
+  if (!canAccessOwned(c.get("user"), lead.assigneeId)) {
+    return c.json({ error: "Activity not found" }, 404);
+  }
+
   const [deleted] = await db
     .delete(leadActivities)
     .where(and(
       eq(leadActivities.id,     c.req.param("activityId")),
-      eq(leadActivities.leadId, c.req.param("leadId")),
+      eq(leadActivities.leadId, leadId),
     ))
     .returning({ id: leadActivities.id });
   if (!deleted) return c.json({ error: "Activity not found" }, 404);
   return new Response(null, { status: 204 });
 });
 
-// GET /crm/categories — distinct categories in use
+// GET /crm/categories — distinct categories in use (scoped to caller's leads)
 crm.get("/categories", authMiddleware, async (c) => {
+  const forcedCat = forcedAssigneeId(c.get("user"));
   const rows = await db
     .selectDistinct({ category: leads.category })
     .from(leads)
-    .where(sql`${leads.category} IS NOT NULL`);
+    .where(and(
+      sql`${leads.category} IS NOT NULL`,
+      ...(forcedCat ? [eq(leads.assigneeId, forcedCat)] : []),
+    ));
   return c.json(rows.map((r) => r.category).filter(Boolean));
 });
 
@@ -320,6 +356,8 @@ crm.get("/pipeline-summary", authMiddleware, async (c) => {
     closed_lost:    "Closed Lost",
   };
 
+  // Members see pipeline numbers for their OWN leads only.
+  const forcedPipe = forcedAssigneeId(c.get("user"));
   const rows = await db
     .select({
       stage:       leads.stage,
@@ -327,6 +365,7 @@ crm.get("/pipeline-summary", authMiddleware, async (c) => {
       total_value: sql<number>`SUM(deal_value::numeric)`,
     })
     .from(leads)
+    .where(forcedPipe ? eq(leads.assigneeId, forcedPipe) : undefined)
     .groupBy(leads.stage)
     .orderBy(leads.stage);
 
@@ -340,8 +379,9 @@ crm.get("/pipeline-summary", authMiddleware, async (c) => {
   );
 });
 
-// GET /crm/insights — outreach analytics + optional AI summary
-crm.get("/insights", authMiddleware, async (c) => {
+// GET /crm/insights — outreach analytics + optional AI summary (admin-only:
+// aggregates across the whole pipeline, not just the caller's leads)
+crm.get("/insights", authMiddleware, adminOnly, async (c) => {
   const parsed = crmInsightsQuerySchema.parse(c.req.query());
   const to = parsed.to ?? new Date().toISOString().slice(0, 10);
 

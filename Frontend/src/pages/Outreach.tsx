@@ -29,6 +29,7 @@ import { TrendingUp, MessageCircle, Mail as MailIcon, BarChart3 } from "lucide-r
 import { CsvImportPanel } from "@/components/modules/CsvImportPanel";
 import { EnrolledLeadsPanel } from "@/components/modules/EnrolledLeadsPanel";
 import { useAgents } from "@/hooks/useAgents";
+import { useCurrentUser } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 const channelIcons: Record<Channel, typeof Mail> = {
@@ -47,6 +48,8 @@ const statusColors: Record<EnrollmentStatus, string> = {
 
 export default function Outreach() {
   const [selectedSeqId, setSelectedSeqId] = useState<string | null>(null);
+  const currentUser = useCurrentUser();
+  const isAdmin = currentUser?.role === "admin";
 
   return (
     <div className="space-y-6 max-w-7xl">
@@ -59,31 +62,42 @@ export default function Outreach() {
         </div>
       </div>
 
-      <Tabs defaultValue="sequences">
+      {/* Members see only their own leads' enrollments. Sequence authoring,
+          company-wide analytics and ingestion setup are admin-only (also
+          enforced server-side). */}
+      <Tabs defaultValue={isAdmin ? "sequences" : "enrollments"}>
         <TabsList className="mb-4">
-          <TabsTrigger value="sequences">Sequences</TabsTrigger>
-          <TabsTrigger value="enrollments">Live Enrollments</TabsTrigger>
-          <TabsTrigger value="analytics">Analytics</TabsTrigger>
-          <TabsTrigger value="ingest">Setup & Ingestion</TabsTrigger>
+          {isAdmin && <TabsTrigger value="sequences">Sequences</TabsTrigger>}
+          <TabsTrigger value="enrollments">
+            {isAdmin ? "Live Enrollments" : "My Enrollments"}
+          </TabsTrigger>
+          {isAdmin && <TabsTrigger value="analytics">Analytics</TabsTrigger>}
+          {isAdmin && <TabsTrigger value="ingest">Setup & Ingestion</TabsTrigger>}
         </TabsList>
 
-        <TabsContent value="sequences">
-          {selectedSeqId
-            ? <SequenceEditor sequenceId={selectedSeqId} onBack={() => setSelectedSeqId(null)} />
-            : <SequencesList onOpen={setSelectedSeqId} />}
-        </TabsContent>
+        {isAdmin && (
+          <TabsContent value="sequences">
+            {selectedSeqId
+              ? <SequenceEditor sequenceId={selectedSeqId} onBack={() => setSelectedSeqId(null)} />
+              : <SequencesList onOpen={setSelectedSeqId} />}
+          </TabsContent>
+        )}
 
         <TabsContent value="enrollments">
           <EnrollmentsList />
         </TabsContent>
 
-        <TabsContent value="analytics">
-          <AnalyticsTab />
-        </TabsContent>
+        {isAdmin && (
+          <TabsContent value="analytics">
+            <AnalyticsTab />
+          </TabsContent>
+        )}
 
-        <TabsContent value="ingest">
-          <IngestDocs />
-        </TabsContent>
+        {isAdmin && (
+          <TabsContent value="ingest">
+            <IngestDocs />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

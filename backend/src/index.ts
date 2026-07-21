@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { and, eq, lt, sql } from "drizzle-orm";
 import { corsMiddleware } from "./middleware/cors";
+import { authMiddleware, adminOnly } from "./middleware/auth";
 import { errorHandler } from "./middleware/error-handler";
 import authRouter         from "./routes/auth";
 import usersRouter        from "./routes/users";
@@ -37,6 +38,28 @@ app.get("/health", (c) =>
 
 // ── API routes ────────────────────────────────────────────
 const api = new Hono<AppEnv>();
+
+// ── Module-level access control ───────────────────────────
+// Members (non-admins) are scoped to their OWN leads, tasks and notes (plus
+// outreach on their own leads — enforced inside the outreach router). Every
+// module below exposes company-wide or sensitive data and is admin-only.
+// Registered BEFORE the routers so the guard runs first.
+//
+// NOTE: /vault previously listed credentials to ANY authenticated user.
+const ADMIN_ONLY_MODULES = [
+  "/finance",    // revenue, expenses, P&L
+  "/clients",    // client directory + revenue
+  "/goals",      // company OKRs
+  "/dashboard",  // company-wide KPI aggregates
+  "/knowledge",  // internal knowledge base / RAG
+  "/vault",      // stored credentials — most sensitive
+  "/agents",     // paid AI agent runs
+] as const;
+
+for (const mod of ADMIN_ONLY_MODULES) {
+  api.use(mod,          authMiddleware, adminOnly);   // exact, e.g. GET /vault
+  api.use(`${mod}/*`,   authMiddleware, adminOnly);   // nested, e.g. GET /vault/:id
+}
 
 api.route("/auth",          authRouter);
 api.route("/users",         usersRouter);

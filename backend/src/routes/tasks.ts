@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import { tasks, subtasks, projects, profiles, clients } from "../db/schema";
-import { authMiddleware } from "../middleware/auth";
+import { authMiddleware, forcedAssigneeId, canAccessOwned, isAdmin } from "../middleware/auth";
 import { notifyTaskAssigned } from "../services/notifications";
 import {
   createTaskSchema, updateTaskSchema,
@@ -45,6 +45,11 @@ tasksRouter.get("/", authMiddleware, async (c) => {
   if (q.assignee_id) conditions.push(eq(tasks.assigneeId,  q.assignee_id));
   if (q.project_id)  conditions.push(eq(tasks.projectId,   q.project_id));
   if (q.client_id)   conditions.push(eq(tasks.clientId,    q.client_id));
+
+  // Members only ever see tasks assigned to them. Enforced server-side so it
+  // cannot be widened by dropping/altering the assignee_id query param.
+  const forcedTask = forcedAssigneeId(c.get("user"));
+  if (forcedTask) conditions.push(eq(tasks.assigneeId, forcedTask));
 
   const rows = await db
     .select({
@@ -144,6 +149,11 @@ tasksRouter.get("/:id", authMiddleware, async (c) => {
 
   if (!row) return c.json({ error: "Task not found" }, 404);
 
+  // Members may only open tasks assigned to them.
+  if (!canAccessOwned(c.get("user"), row.task.assigneeId)) {
+    return c.json({ error: "Task not found" }, 404);
+  }
+
   const taskSubtasks = await db
     .select()
     .from(subtasks)
@@ -172,6 +182,14 @@ tasksRouter.patch("/:id", authMiddleware, async (c) => {
     .limit(1);
 
   if (!existing) return c.json({ error: "Task not found" }, 404);
+  // Members may only edit tasks assigned to them, and cannot hand a task to
+  // someone else (which would make it disappear from their own view).
+  if (!canAccessOwned(user, existing.assigneeId)) {
+    return c.json({ error: "Task not found" }, 404);
+  }
+  if (!isAdmin(user) && (body as any).assignee_id && (body as any).assignee_id !== user.id) {
+    return c.json({ error: "Forbidden", message: "You cannot reassign tasks" }, 403);
+  }
 
   const updateData: Record<string, unknown> = {
     ...body,
@@ -212,9 +230,22 @@ tasksRouter.patch("/:id", authMiddleware, async (c) => {
 
 // DELETE /tasks/:id
 tasksRouter.delete("/:id", authMiddleware, async (c) => {
+  const id = c.req.param("id");
+
+  // Members may only delete their own tasks.
+  const [existing] = await db
+    .select({ assigneeId: tasks.assigneeId })
+    .from(tasks)
+    .where(eq(tasks.id, id))
+    .limit(1);
+  if (!existing) return c.json({ error: "Task not found" }, 404);
+  if (!canAccessOwned(c.get("user"), existing.assigneeId)) {
+    return c.json({ error: "Task not found" }, 404);
+  }
+
   const [deleted] = await db
     .delete(tasks)
-    .where(eq(tasks.id, c.req.param("id")))
+    .where(eq(tasks.id, id))
     .returning({ id: tasks.id });
 
   if (!deleted) return c.json({ error: "Task not found" }, 404);
@@ -223,10 +254,25 @@ tasksRouter.delete("/:id", authMiddleware, async (c) => {
 
 // ── Subtasks ──────────────────────────────────────────────
 
+// Subtasks inherit their parent task's ownership. Returns true when the caller
+// may act on this task's subtasks.
+async function mayTouchTask(user: { id: string; role?: string }, taskId: string): Promise<boolean> {
+  if (isAdmin(user)) return true;
+  const [t] = await db
+    .select({ assigneeId: tasks.assigneeId })
+    .from(tasks)
+    .where(eq(tasks.id, taskId))
+    .limit(1);
+  return !!t && canAccessOwned(user, t.assigneeId);
+}
+
 // POST /tasks/:id/subtasks
 tasksRouter.post("/:id/subtasks", authMiddleware, async (c) => {
   const taskId = c.req.param("id");
-  const body   = createSubtaskSchema.parse(await c.req.json());
+  if (!(await mayTouchTask(c.get("user"), taskId))) {
+    return c.json({ error: "Task not found" }, 404);
+  }
+  const body = createSubtaskSchema.parse(await c.req.json());
 
   const [sub] = await db
     .insert(subtasks)
@@ -237,6 +283,9 @@ tasksRouter.post("/:id/subtasks", authMiddleware, async (c) => {
 
 // PATCH /tasks/:id/subtasks/:subId — toggle done
 tasksRouter.patch("/:id/subtasks/:subId", authMiddleware, async (c) => {
+  if (!(await mayTouchTask(c.get("user"), c.req.param("id")))) {
+    return c.json({ error: "Subtask not found" }, 404);
+  }
   const subId = c.req.param("subId");
   const body  = await c.req.json().catch(() => ({}));
 
@@ -261,6 +310,9 @@ tasksRouter.patch("/:id/subtasks/:subId", authMiddleware, async (c) => {
 
 // DELETE /tasks/:id/subtasks/:subId
 tasksRouter.delete("/:id/subtasks/:subId", authMiddleware, async (c) => {
+  if (!(await mayTouchTask(c.get("user"), c.req.param("id")))) {
+    return c.json({ error: "Subtask not found" }, 404);
+  }
   const [deleted] = await db
     .delete(subtasks)
     .where(eq(subtasks.id, c.req.param("subId")))

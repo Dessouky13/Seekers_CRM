@@ -17,6 +17,7 @@ import Notes from "./pages/Notes";
 import Vault from "./pages/Vault";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import { AdminOnly } from "./components/AdminOnly";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -40,16 +41,17 @@ const App = () => (
               <RequireAuth>
                 <AppLayout>
                   <Routes>
-                    <Route path="/" element={<Dashboard />} />
-                    <Route path="/finance" element={<Finance />} />
-                    <Route path="/tasks" element={<Tasks />} />
-                    <Route path="/clients" element={<Clients />} />
-                    <Route path="/crm" element={<CRM />} />
+                    {/* Members land on CRM; the admin dashboard shows company financials */}
+                    <Route path="/"         element={<AdminOnly fallback="/crm"><Dashboard /></AdminOnly>} />
+                    <Route path="/finance"  element={<AdminOnly><Finance /></AdminOnly>} />
+                    <Route path="/tasks"    element={<Tasks />} />
+                    <Route path="/clients"  element={<AdminOnly><Clients /></AdminOnly>} />
+                    <Route path="/crm"      element={<CRM />} />
                     <Route path="/outreach" element={<Outreach />} />
-                    <Route path="/goals" element={<Goals />} />
-                    <Route path="/notes" element={<Notes />} />
-                    <Route path="/vault" element={<Vault />} />
-                    <Route path="/settings" element={<Settings />} />
+                    <Route path="/goals"    element={<AdminOnly><Goals /></AdminOnly>} />
+                    <Route path="/notes"    element={<Notes />} />
+                    <Route path="/vault"    element={<AdminOnly><Vault /></AdminOnly>} />
+                    <Route path="/settings" element={<AdminOnly><Settings /></AdminOnly>} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                 </AppLayout>

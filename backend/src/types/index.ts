@@ -71,6 +71,8 @@ export type SafeProfile = Omit<Profile, "password">;
 
 export type AppVariables = {
   user: Profile;
+  /** Set when a request authenticated via AUTOMATION_API_KEY (n8n) rather than a user JWT. */
+  isAutomation?: boolean;
 };
 
 export type AppEnv = {

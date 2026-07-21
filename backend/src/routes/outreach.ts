@@ -14,7 +14,7 @@ import {
   outreachSequences, outreachSteps, outreachEnrollments, outreachSends,
   leads, leadActivities,
 } from "../db/schema";
-import { authMiddleware, adminOnly } from "../middleware/auth";
+import { authMiddleware, adminOnly, isAdmin } from "../middleware/auth";
 import { createMiddleware } from "hono/factory";
 import { isEmailCapableAgent } from "../services/agents";
 import {
@@ -44,10 +44,23 @@ const jwtOrApiKey = createMiddleware(async (c, next) => {
   const apiKeyHeader = c.req.header("X-API-Key");
   const expected = process.env.AUTOMATION_API_KEY;
   if (apiKeyHeader && expected && !expected.startsWith("replace-") && apiKeyHeader === expected) {
+    c.set("isAutomation", true);
     return next();
   }
   // Fall through to JWT auth
   return authMiddleware(c, next);
+});
+
+// ── Admin-or-automation: for company-wide analytics ───────
+// n8n (API key) keeps working; human callers must be admins. Members must not
+// see aggregates that span other people's leads.
+const adminOrApiKey = createMiddleware(async (c, next) => {
+  if (c.get("isAutomation")) return next();
+  const user = c.get("user");
+  if (!user || user.role !== "admin") {
+    return c.json({ error: "Forbidden", message: "Admin access required" }, 403);
+  }
+  await next();
 });
 
 // ── INGEST: POST /outreach/leads/ingest ───────────────────
@@ -116,7 +129,7 @@ function fillNameCompany(name: string | null | undefined, company: string | null
   return       { name: "(unknown)",        company: "(unknown)" };
 }
 
-outreach.post("/leads/ingest-bulk", authMiddleware, async (c) => {
+outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
   const user = c.get("user");
   const body = bulkIngestSchema.parse(await c.req.json());
 
@@ -255,6 +268,30 @@ outreach.post("/leads/ingest", apiKeyAuth, async (c) => {
   return c.json({ id: lead.id, created: true, deduped: false }, 201);
 });
 
+// ── Member scoping for outreach ───────────────────────────
+// Members may enroll/track THEIR OWN leads in existing sequences, but may not
+// author sequences or view company-wide analytics. Sequence + step mutation
+// and all analytics endpoints are admin-only (applied at their definitions).
+
+// Verify the caller may act on this lead (admin: any; member: only own leads).
+async function mayUseLead(user: { id: string; role?: string }, leadId: string): Promise<boolean> {
+  if (isAdmin(user)) return true;
+  const [l] = await db.select({ assigneeId: leads.assigneeId }).from(leads).where(eq(leads.id, leadId)).limit(1);
+  return !!l && l.assigneeId === user.id;
+}
+
+// Same, but resolved through an enrollment → its lead.
+async function mayUseEnrollment(user: { id: string; role?: string }, enrollmentId: string): Promise<boolean> {
+  if (isAdmin(user)) return true;
+  const [row] = await db
+    .select({ assigneeId: leads.assigneeId })
+    .from(outreachEnrollments)
+    .innerJoin(leads, eq(outreachEnrollments.leadId, leads.id))
+    .where(eq(outreachEnrollments.id, enrollmentId))
+    .limit(1);
+  return !!row && row.assigneeId === user.id;
+}
+
 // ── SEQUENCES CRUD (JWT auth) ─────────────────────────────
 const sequenceSchema = z.object({
   name:                    z.string().min(1).max(200),
@@ -305,7 +342,7 @@ outreach.get("/sequences/:id", authMiddleware, async (c) => {
   return c.json({ ...seq, steps });
 });
 
-outreach.post("/sequences", authMiddleware, async (c) => {
+outreach.post("/sequences", authMiddleware, adminOnly, async (c) => {
   const user = c.get("user");
   const body = sequenceSchema.parse(await c.req.json());
   const [created] = await db.insert(outreachSequences).values({
@@ -320,7 +357,7 @@ outreach.post("/sequences", authMiddleware, async (c) => {
   return c.json(created, 201);
 });
 
-outreach.patch("/sequences/:id", authMiddleware, async (c) => {
+outreach.patch("/sequences/:id", authMiddleware, adminOnly, async (c) => {
   const id = c.req.param("id");
   const body = sequenceSchema.partial().parse(await c.req.json());
   const patch: Record<string, unknown> = { updatedAt: new Date() };
@@ -360,7 +397,7 @@ function validateEmailStepAgent(channel: string | undefined, agentId: string | n
   return null;
 }
 
-outreach.post("/sequences/:id/steps", authMiddleware, async (c) => {
+outreach.post("/sequences/:id/steps", authMiddleware, adminOnly, async (c) => {
   const sequenceId = c.req.param("id");
   const body = stepSchema.parse(await c.req.json());
 
@@ -386,7 +423,7 @@ outreach.post("/sequences/:id/steps", authMiddleware, async (c) => {
   return c.json(step, 201);
 });
 
-outreach.patch("/sequences/:sid/steps/:stepId", authMiddleware, async (c) => {
+outreach.patch("/sequences/:sid/steps/:stepId", authMiddleware, adminOnly, async (c) => {
   const body = stepSchema.partial().parse(await c.req.json());
 
   // Resolve the effective channel (may be unchanged) to validate the agent against.
@@ -411,7 +448,7 @@ outreach.patch("/sequences/:sid/steps/:stepId", authMiddleware, async (c) => {
   return c.json(updated);
 });
 
-outreach.delete("/sequences/:sid/steps/:stepId", authMiddleware, async (c) => {
+outreach.delete("/sequences/:sid/steps/:stepId", authMiddleware, adminOnly, async (c) => {
   const [del] = await db.delete(outreachSteps).where(eq(outreachSteps.id, c.req.param("stepId"))).returning({ id: outreachSteps.id });
   if (!del) return c.json({ error: "Not found" }, 404);
   return new Response(null, { status: 204 });
@@ -424,6 +461,11 @@ outreach.post("/enroll", authMiddleware, async (c) => {
     lead_id:     z.string().uuid(),
     sequence_id: z.string().uuid(),
   }).parse(await c.req.json());
+
+  // Members may only enroll their OWN leads.
+  if (!(await mayUseLead(user, body.lead_id))) {
+    return c.json({ error: "Lead not found" }, 404);
+  }
 
   try {
     const result = await enrollLead({
@@ -452,6 +494,12 @@ outreach.post("/enroll-bulk", authMiddleware, async (c) => {
 
   for (const leadId of body.lead_ids) {
     try {
+      // Members may only bulk-enroll their OWN leads; others are skipped.
+      if (!(await mayUseLead(user, leadId))) {
+        errors++;
+        errorRows.push({ lead_id: leadId, error: "Not your lead" });
+        continue;
+      }
       const res = await enrollLead({
         leadId,
         sequenceId: body.sequence_id,
@@ -480,6 +528,10 @@ outreach.get("/enrollments", authMiddleware, async (c) => {
   if (q.status)       conditions.push(eq(outreachEnrollments.status, q.status as any));
   if (q.lead_id)      conditions.push(eq(outreachEnrollments.leadId, q.lead_id));
   if (q.sequence_id)  conditions.push(eq(outreachEnrollments.sequenceId, q.sequence_id));
+
+  // Members only see enrollments for THEIR leads (join filter on leads.assignee).
+  const me = c.get("user");
+  if (!isAdmin(me)) conditions.push(eq(leads.assigneeId, me.id));
 
   // Explicit column selection — avoids drizzle's whole-table expansion which
   // can emit unqualified column refs and cause "id is ambiguous" with joins.
@@ -512,6 +564,7 @@ outreach.get("/enrollments", authMiddleware, async (c) => {
 });
 
 outreach.post("/enrollments/:id/pause", authMiddleware, async (c) => {
+  if (!(await mayUseEnrollment(c.get("user"), c.req.param("id")))) return c.json({ error: "Not found" }, 404);
   const reason = c.req.query("reason") ?? "manual";
   const [updated] = await db.update(outreachEnrollments)
     .set({ status: "paused", pausedReason: reason })
@@ -522,6 +575,7 @@ outreach.post("/enrollments/:id/pause", authMiddleware, async (c) => {
 });
 
 outreach.post("/enrollments/:id/resume", authMiddleware, async (c) => {
+  if (!(await mayUseEnrollment(c.get("user"), c.req.param("id")))) return c.json({ error: "Not found" }, 404);
   const [updated] = await db.update(outreachEnrollments)
     .set({ status: "active", pausedReason: null })
     .where(eq(outreachEnrollments.id, c.req.param("id")))
@@ -531,6 +585,7 @@ outreach.post("/enrollments/:id/resume", authMiddleware, async (c) => {
 });
 
 outreach.post("/enrollments/:id/cancel", authMiddleware, async (c) => {
+  if (!(await mayUseEnrollment(c.get("user"), c.req.param("id")))) return c.json({ error: "Not found" }, 404);
   const [updated] = await db.update(outreachEnrollments)
     .set({ status: "completed", completedAt: new Date(), nextSendAt: null, pausedReason: "cancelled" })
     .where(eq(outreachEnrollments.id, c.req.param("id")))
@@ -595,6 +650,7 @@ outreach.post("/sends/purge", authMiddleware, adminOnly, async (c) => {
 
 // ── SENDS history (per enrollment) ────────────────────────
 outreach.get("/enrollments/:id/sends", authMiddleware, async (c) => {
+  if (!(await mayUseEnrollment(c.get("user"), c.req.param("id")))) return c.json({ error: "Not found" }, 404);
   const rows = await db
     .select()
     .from(outreachSends)
@@ -632,7 +688,7 @@ outreach.post("/webhooks/reply", apiKeyAuth, async (c) => {
 });
 
 // ── ANALYTICS ─────────────────────────────────────────────
-outreach.get("/analytics", jwtOrApiKey, async (c) => {
+outreach.get("/analytics", jwtOrApiKey, adminOrApiKey, async (c) => {
   // Overall enrollment counts by status
   const byStatus = await db
     .select({
@@ -915,7 +971,7 @@ outreach.get("/analytics", jwtOrApiKey, async (c) => {
 // GET /outreach/analytics/sequence/:id — deep dive into ONE sequence:
 // step-by-step funnel (sent / failed / retention), status breakdown,
 // sends over the last 30 days, reply + completion rates, recent failures.
-outreach.get("/analytics/sequence/:id", jwtOrApiKey, async (c) => {
+outreach.get("/analytics/sequence/:id", jwtOrApiKey, adminOrApiKey, async (c) => {
   const id = c.req.param("id");
 
   const [seq] = await db.select().from(outreachSequences).where(eq(outreachSequences.id, id)).limit(1);

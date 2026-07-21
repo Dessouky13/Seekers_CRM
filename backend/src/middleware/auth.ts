@@ -60,3 +60,41 @@ export const adminOnly = createMiddleware(async (c, next) => {
   }
   await next();
 });
+
+// ── Row-level scoping helpers ─────────────────────────────
+// Members only ever see records assigned to them. Admins see everything.
+// These are enforced SERVER-SIDE — never trust a client-supplied assignee
+// filter, or a member could just drop the query param and see all records.
+
+export interface AuthedUser {
+  id:   string;
+  role: "admin" | "member";
+  name: string;
+  email: string;
+}
+
+export function isAdmin(user: { role?: string } | null | undefined): boolean {
+  return user?.role === "admin";
+}
+
+/**
+ * Returns the assignee id a query MUST be filtered by, or null when the caller
+ * is an admin (no restriction). Use in list endpoints:
+ *   const forced = forcedAssigneeId(user);
+ *   if (forced) conditions.push(eq(table.assigneeId, forced));
+ */
+export function forcedAssigneeId(user: { id: string; role?: string }): string | null {
+  return isAdmin(user) ? null : user.id;
+}
+
+/**
+ * True when the caller may act on a record owned by `ownerId`.
+ * Admins always may; members only for their own records.
+ */
+export function canAccessOwned(
+  user: { id: string; role?: string },
+  ownerId: string | null | undefined,
+): boolean {
+  if (isAdmin(user)) return true;
+  return !!ownerId && ownerId === user.id;
+}
