@@ -97,14 +97,53 @@ export const createTransactionSchema = z.object({
   type:        z.enum(["income", "expense"]),
   amount:      z.number().positive("Amount must be positive"),
   currency:    z.string().length(3).optional(),
-  category:    z.string().min(1).max(100),
+  // Multi-select. categories[0] is the PRIMARY category that owns the amount
+  // in P&L breakdowns, so totals always reconcile. `category` is still
+  // accepted for backwards compatibility (older clients / n8n).
+  categories:  z.array(z.string().min(1).max(100)).min(1).max(10).optional(),
+  category:    z.string().min(1).max(100).optional(),
+  tool_id:     z.string().uuid().nullable().optional(),
   client_id:   z.string().uuid().optional(),
   client_name: z.string().max(200).optional(),
   status:      z.enum(["completed", "pending", "cancelled"]).optional(),
+  // Cash position: who physically holds / fronted this money (null = company account)
+  held_by:     z.string().uuid().nullable().optional(),
+  settled:     z.boolean().optional(),
+  notes:       z.string().optional(),
+}).refine(
+  (d) => !!(d.categories?.length || d.category),
+  { message: "At least one category is required", path: ["categories"] },
+);
+
+// .partial() isn't available on a refined schema — declare the PATCH shape
+// explicitly so any subset of fields can be sent.
+export const updateTransactionSchema = z.object({
+  date:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD").optional(),
+  type:        z.enum(["income", "expense"]).optional(),
+  amount:      z.number().positive("Amount must be positive").optional(),
+  currency:    z.string().length(3).optional(),
+  categories:  z.array(z.string().min(1).max(100)).min(1).max(10).optional(),
+  category:    z.string().min(1).max(100).optional(),
+  tool_id:     z.string().uuid().nullable().optional(),
+  client_id:   z.string().uuid().optional(),
+  client_name: z.string().max(200).optional(),
+  status:      z.enum(["completed", "pending", "cancelled"]).optional(),
+  held_by:     z.string().uuid().nullable().optional(),
+  settled:     z.boolean().optional(),
   notes:       z.string().optional(),
 });
 
-export const updateTransactionSchema = createTransactionSchema.partial();
+// ── Tools ─────────────────────────────────────────────────
+export const createToolSchema = z.object({
+  name:           z.string().min(1).max(120),
+  vendor:         z.string().max(120).nullable().optional(),
+  url:            z.string().max(300).nullable().optional(),
+  kind:           z.string().max(60).nullable().optional(),
+  monthly_budget: z.number().nonnegative().nullable().optional(),
+  active:         z.boolean().optional(),
+  notes:          z.string().max(2000).nullable().optional(),
+});
+export const updateToolSchema = createToolSchema.partial();
 
 // ── CRM / Leads ───────────────────────────────────────────
 

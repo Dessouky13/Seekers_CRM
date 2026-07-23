@@ -13,8 +13,14 @@ import { toast } from "sonner";
 import {
   useTransactions, useFinanceSummary, useCategories,
   useCreateTransaction, useUpdateTransaction, useDeleteTransaction,
+  useTools,
 } from "@/hooks/useFinance";
 import { useClients } from "@/hooks/useClients";
+import { useUsers } from "@/hooks/useTasks";
+import { CategoryMultiSelect } from "@/components/modules/CategoryMultiSelect";
+import { MonthlyAnalytics } from "@/components/modules/finance/MonthlyAnalytics";
+import { ToolsPanel } from "@/components/modules/finance/ToolsPanel";
+import { CashPositionsPanel } from "@/components/modules/finance/CashPositionsPanel";
 import { cn } from "@/lib/utils";
 import type { ApiTransaction } from "@/lib/types";
 
@@ -80,6 +86,12 @@ export default function Finance() {
   const [dateMode,   setDateMode]   = useState<"range" | "cumulative">("range");
   const [editTx, setEditTx]         = useState<ApiTransaction | null>(null);
   const [isOpen, setIsOpen]         = useState(false);
+  // Controlled form state for the new multi-value fields
+  const [formCats,   setFormCats]   = useState<string[]>([]);
+  const [formType,   setFormType]   = useState<"income" | "expense">("income");
+  const [formToolId, setFormToolId] = useState<string>("");
+  const [formHeldBy, setFormHeldBy] = useState<string>("");
+  const [section,    setSection]    = useState("overview");
 
   // All transactions for category breakdowns (no filter)
   const { data: allTxRes }  = useTransactions({ limit: 2000 });
@@ -99,6 +111,18 @@ export default function Finance() {
   });
   const { data: categories = [] } = useCategories();
   const { data: clients = [] } = useClients();
+  const { data: tools = [] } = useTools();
+  const { data: users = [] } = useUsers();
+
+  // Load the record being edited into the controlled fields.
+  const openDialog = (tx: ApiTransaction | null) => {
+    setEditTx(tx);
+    setFormCats(tx?.categories?.length ? tx.categories : tx?.category ? [tx.category] : []);
+    setFormType(tx?.type ?? "income");
+    setFormToolId(tx?.toolId ?? "");
+    setFormHeldBy(tx?.heldBy ?? "");
+    setIsOpen(true);
+  };
 
   const createTx = useCreateTransaction();
   const updateTx = useUpdateTransaction();
@@ -115,11 +139,19 @@ export default function Finance() {
   const handleSave = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+
+    if (formCats.length === 0) {
+      toast.error("Pick at least one category");
+      return;
+    }
+
     const body = {
       date:        fd.get("date") as string,
-      type:        fd.get("type") as string,
+      type:        formType,
       amount:      Number(fd.get("amount")),
-      category:    fd.get("category") as string,
+      categories:  formCats,                 // categories[0] is the primary
+      tool_id:     formToolId || null,
+      held_by:     formHeldBy || null,
       client_id:   (fd.get("client_id") as string) || undefined,
       status:      "completed",
       notes:       (fd.get("notes") as string) || undefined,
@@ -161,27 +193,76 @@ export default function Finance() {
         </div>
         <Dialog open={isOpen} onOpenChange={(o) => { setIsOpen(o); if (!o) setEditTx(null); }}>
           <DialogTrigger asChild>
-            <Button size="sm" className="gap-1.5"><Plus className="h-3.5 w-3.5" /> Add Transaction</Button>
+            <Button size="sm" className="gap-1.5" onClick={() => openDialog(null)}>
+              <Plus className="h-3.5 w-3.5" /> Add Transaction
+            </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>{editTx ? "Edit" : "Add"} Transaction</DialogTitle></DialogHeader>
             <form onSubmit={handleSave} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Type</Label>
-                  <select name="type" defaultValue={editTx?.type ?? "income"} className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
+                  <select
+                    value={formType}
+                    onChange={(e) => setFormType(e.target.value as "income" | "expense")}
+                    className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
                     <option value="income">Income</option>
                     <option value="expense">Expense</option>
                   </select>
                 </div>
                 <div><Label>Amount</Label><Input name="amount" type="number" step="0.01" min="0" defaultValue={editTx ? Number(editTx.amount) : undefined} required className="mt-1" /></div>
-                <div><Label>Date</Label><Input name="date" type="date" defaultValue={editTx?.date ?? new Date().toISOString().slice(0, 10)} required className="mt-1" /></div>
-                <div>
-                  <Label>Category</Label>
-                  <Input name="category" list="cat-list" defaultValue={editTx?.category} required className="mt-1" placeholder="e.g. Tools" />
-                  <datalist id="cat-list">{allCats.map((c) => <option key={c} value={c} />)}</datalist>
+                <div className="col-span-2"><Label>Date</Label><Input name="date" type="date" defaultValue={editTx?.date ?? new Date().toISOString().slice(0, 10)} required className="mt-1" /></div>
+              </div>
+
+              <div>
+                <Label>Categories</Label>
+                <div className="mt-1.5">
+                  <CategoryMultiSelect value={formCats} onChange={setFormCats} suggestions={allCats} />
                 </div>
               </div>
+
+              {/* Tool picker — only meaningful for expenses */}
+              {formType === "expense" && (
+                <div>
+                  <Label>Tool <span className="text-muted-foreground font-normal text-xs">(instead of typing it in notes)</span></Label>
+                  <select
+                    value={formToolId}
+                    onChange={(e) => setFormToolId(e.target.value)}
+                    className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">— none —</option>
+                    {tools.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}{t.kind ? ` · ${t.kind}` : ""}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <Label>
+                  Held by <span className="text-muted-foreground font-normal text-xs">
+                    ({formType === "income" ? "who collected this cash" : "who paid from their own pocket"})
+                  </span>
+                </Label>
+                <select
+                  value={formHeldBy}
+                  onChange={(e) => setFormHeldBy(e.target.value)}
+                  className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">Company account — nothing outstanding</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </select>
+                {formHeldBy && (
+                  <p className="text-[10px] text-warning mt-1">
+                    Will show as outstanding in <span className="font-medium">Cash</span> until you settle it.
+                  </p>
+                )}
+              </div>
+
               <div>
                 <Label>Client (optional)</Label>
                 <select
@@ -207,6 +288,20 @@ export default function Finance() {
         </Dialog>
       </div>
 
+      {/* ── Top-level sections ── */}
+      <Tabs value={section} onValueChange={setSection}>
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="monthly">Monthly</TabsTrigger>
+          <TabsTrigger value="tools">Tools</TabsTrigger>
+          <TabsTrigger value="cash">Cash</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="monthly" className="mt-4"><MonthlyAnalytics /></TabsContent>
+        <TabsContent value="tools"   className="mt-4"><ToolsPanel /></TabsContent>
+        <TabsContent value="cash"    className="mt-4"><CashPositionsPanel /></TabsContent>
+
+        <TabsContent value="overview" className="mt-4 space-y-6">
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard 
@@ -367,14 +462,14 @@ export default function Finance() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/30">
-                      {["Date", "Type", "Amount", "Category", "Client", "Notes", ""].map((h) => (
+                      {["Date", "Type", "Amount", "Categories", "Tool", "Client", "Held by", "Notes", ""].map((h) => (
                         <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {transactions.length === 0 ? (
-                      <tr><td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">No transactions match filters.</td></tr>
+                      <tr><td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">No transactions match filters.</td></tr>
                     ) : transactions.map((t) => (
                       <tr key={t.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                         <td className="px-4 py-3 text-muted-foreground tabular-nums text-xs">{t.date}</td>
@@ -388,12 +483,33 @@ export default function Finance() {
                         )}>
                           {t.type === "expense" ? "−" : "+"}{fmt(Number(t.amount))}
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground text-xs">{t.category}</td>
+                        <td className="px-4 py-3 text-xs">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="text-foreground">{t.category}</span>
+                            {(t.categories ?? []).slice(1).map((c) => (
+                              <Badge key={c} variant="outline" className="text-[9px] text-muted-foreground">{c}</Badge>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs">
+                          {t.tool_name
+                            ? <Badge variant="outline" className="text-[9px] border-primary/30 text-primary">{t.tool_name}</Badge>
+                            : <span className="text-muted-foreground">—</span>}
+                        </td>
                         <td className="px-4 py-3 text-muted-foreground text-xs">{t.clientName ?? "—"}</td>
+                        <td className="px-4 py-3 text-xs">
+                          {t.held_by_name
+                            ? (
+                              <span className={cn("text-[11px]", t.settledAt ? "text-muted-foreground line-through" : "text-warning")}>
+                                {t.held_by_name}
+                              </span>
+                            )
+                            : <span className="text-muted-foreground">—</span>}
+                        </td>
                         <td className="px-4 py-3 text-muted-foreground text-xs max-w-[160px] truncate" title={t.notes ?? ""}>{t.notes ?? "—"}</td>
                         <td className="px-4 py-3">
                           <div className="flex gap-1">
-                            <button onClick={() => { setEditTx(t); setIsOpen(true); }} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+                            <button onClick={() => openDialog(t)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
                               <Pencil className="h-3.5 w-3.5" />
                             </button>
                             <button onClick={() => handleDelete(t.id)} className="p-1 text-muted-foreground hover:text-destructive transition-colors">
@@ -431,6 +547,8 @@ export default function Finance() {
         {/* ── SETUP FEES ── */}
         <TabsContent value="setup">
           <CategorySummary transactions={allTransactions} catLabel="Client Setup Fee" icon={Zap} colorClass="text-violet-600" />
+        </TabsContent>
+      </Tabs>
         </TabsContent>
       </Tabs>
     </div>

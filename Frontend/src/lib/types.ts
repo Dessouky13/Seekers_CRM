@@ -79,10 +79,20 @@ export interface ApiTransaction {
   type: "income" | "expense";
   amount: string;
   currency: string;
+  /** Primary category — owns the amount in P&L breakdowns (= categories[0]) */
   category: string;
+  /** Full multi-select; categories[0] === category */
+  categories: string[];
+  toolId: string | null;
+  tool_name: string | null;
   clientId: string | null;
   clientName: string | null;
   status: "completed" | "pending" | "cancelled";
+  /** Who physically holds/fronted this money; null = company account */
+  heldBy: string | null;
+  held_by_name: string | null;
+  /** Set once handed over / reimbursed */
+  settledAt: string | null;
   notes: string | null;
   createdAt: string;
 }

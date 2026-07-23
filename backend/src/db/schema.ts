@@ -128,16 +128,55 @@ export const subtasks = pgTable("subtasks", {
 });
 
 // ── Transactions ──────────────────────────────────────────
+// ── Tools / Subscriptions ─────────────────────────────────
+// Tool names used to be typed free-hand into transaction notes ("Claude",
+// "Claude.ai", "Openai API", "OpenAI API"), which made per-tool spend
+// impossible to total. Tools are now first-class rows and transactions
+// reference them, so naming is normalised once.
+export const tools = pgTable("tools", {
+  id:        uuid("id").primaryKey().defaultRandom(),
+  name:      text("name").notNull().unique(),
+  vendor:    text("vendor"),                     // e.g. "Anthropic"
+  url:       text("url"),
+  // What the tool is for — free text so it can be grouped in reports.
+  kind:      text("kind"),                       // e.g. "AI", "Infra", "Automation"
+  // Expected recurring cost, for budget-vs-actual. Null = variable/usage-based.
+  monthlyBudget: numeric("monthly_budget", { precision: 12, scale: 2 }),
+  active:    boolean("active").notNull().default(true),
+  notes:     text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  nameIdx:   index("idx_tools_name").on(t.name),
+  activeIdx: index("idx_tools_active").on(t.active),
+}));
+
 export const transactions = pgTable("transactions", {
   id:         uuid("id").primaryKey().defaultRandom(),
   date:       date("date").notNull(),
   type:       text("type", { enum: ["income", "expense"] }).notNull(),
   amount:     numeric("amount", { precision: 12, scale: 2 }).notNull(),
   currency:   text("currency").notNull().default("EGP"),
+  // PRIMARY category — owns the amount in P&L breakdowns so totals always
+  // reconcile to the real total. Kept in sync with categories[0].
   category:   text("category").notNull(),
+  // Full multi-select. categories[0] === category. Extra entries are tags
+  // used for filtering, and never double-count in the P&L breakdown.
+  categories: text("categories").array().notNull().default(sql`ARRAY[]::text[]`),
+  // Which tool this expense paid for (expenses only). Replaces typing the
+  // tool name into notes.
+  toolId:     uuid("tool_id").references(() => tools.id, { onDelete: "set null" }),
   clientId:   uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
   clientName: text("client_name"),
   status:     text("status", { enum: ["completed", "pending", "cancelled"] }).notNull().default("completed"),
+  // ── Cash position ──
+  // Who physically holds/fronted this money instead of the company account.
+  //   income  + heldBy=X → X is holding company cash (X owes the company)
+  //   expense + heldBy=X → X paid from their own pocket (company owes X)
+  // NULL = went through the company account, nothing outstanding.
+  heldBy:     uuid("held_by").references(() => profiles.id, { onDelete: "set null" }),
+  // Set once the money has actually been handed over / reimbursed.
+  settledAt:  timestamp("settled_at", { withTimezone: true }),
   notes:      text("notes"),
   createdBy:  uuid("created_by").references(() => profiles.id, { onDelete: "set null" }),
   createdAt:  timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -146,6 +185,8 @@ export const transactions = pgTable("transactions", {
   dateIdx: index("idx_transactions_date").on(t.date),
   typeIdx: index("idx_transactions_type").on(t.type),
   clientIdx: index("idx_transactions_client").on(t.clientId),
+  toolIdx:   index("idx_transactions_tool").on(t.toolId),
+  heldByIdx: index("idx_transactions_held_by").on(t.heldBy, t.settledAt),
 }));
 
 // ── Leads ─────────────────────────────────────────────────
