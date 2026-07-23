@@ -18,6 +18,7 @@ import Vault from "./pages/Vault";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import { AdminOnly } from "./components/AdminOnly";
+import Team from "./pages/Team";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -51,6 +52,7 @@ const App = () => (
                     <Route path="/goals"    element={<AdminOnly><Goals /></AdminOnly>} />
                     <Route path="/notes"    element={<Notes />} />
                     <Route path="/vault"    element={<AdminOnly><Vault /></AdminOnly>} />
+                    <Route path="/team"     element={<AdminOnly><Team /></AdminOnly>} />
                     <Route path="/settings" element={<AdminOnly><Settings /></AdminOnly>} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>

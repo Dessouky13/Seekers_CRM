@@ -14,12 +14,27 @@ import type { AppEnv } from "../types";
 const finance = new Hono<AppEnv>();
 
 // ── Accounting cycle ──────────────────────────────────────
-// Seekers closes the books on the 20th: a period runs from the 20th of one
-// month to the 19th of the next, and is NAMED AFTER THE MONTH IT CLOSES IN.
-//   "June 2026"  =  2026-05-20 → 2026-06-19
-//   "July 2026"  =  2026-06-20 → 2026-07-19
+// Seekers closes the books ON the 20th: a period ends on the 20th and is
+// NAMED AFTER THE MONTH IT CLOSES IN. cycle_day is the day a period STARTS,
+// so closing on the 20th means starting on the 21st.
+//   "June 2026"  =  2026-05-21 → 2026-06-20
+//   "July 2026"  =  2026-06-21 → 2026-07-20
+// This puts bills dated the 20th INSIDE that month's period (tool invoices
+// are entered on the 20th, and they belong to the month being closed).
 // Configurable per-request via ?cycle_day= (1 = plain calendar months).
-const DEFAULT_CYCLE_DAY = Number(process.env.FINANCE_CYCLE_DAY ?? 20);
+const DEFAULT_CYCLE_DAY = Number(process.env.FINANCE_CYCLE_DAY ?? 21);
+
+/** 1 → "1st", 2 → "2nd", 21 → "21st" */
+function ordinal(n: number): string {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1:  return `${n}st`;
+    case 2:  return `${n}nd`;
+    case 3:  return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
 
 function clampCycleDay(raw?: string): number {
   const n = Number(raw ?? DEFAULT_CYCLE_DAY);
@@ -453,7 +468,7 @@ finance.get("/monthly", authMiddleware, async (c) => {
   return c.json({
     cycle_day:   cycleDay,
     cycle_label: cycleDay > 1
-      ? `Periods run ${cycleDay}th → ${cycleDay - 1}th, named after the closing month`
+      ? `Books close on the ${ordinal(cycleDay - 1)} · each period runs ${ordinal(cycleDay)} → ${ordinal(cycleDay - 1)}, named after the month it closes in`
       : "Calendar months",
     periods:     withDeltas,
     totals: {

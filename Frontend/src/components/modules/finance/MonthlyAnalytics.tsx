@@ -98,7 +98,7 @@ export function MonthlyAnalytics() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Income vs Expenses</p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Each bar is one {data.cycle_day}th→{data.cycle_day - 1}th period. Line = profit.</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">One bar per accounting period. Line = profit.</p>
           </div>
           <div className="text-right">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Best / worst</p>

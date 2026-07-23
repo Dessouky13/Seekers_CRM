@@ -41,6 +41,9 @@ export const updateProfileSchema = z.object({
   title:     z.string().max(120).optional().nullable(),
   phone:     z.string().max(40).optional().nullable(),
   signature: z.string().max(8000).optional().nullable(),
+  // Admin-only — the route rejects this field for non-admins and refuses to
+  // demote the last remaining admin.
+  role:      z.enum(["admin", "member"]).optional(),
 });
 
 export const inviteUserSchema = z.object({
