@@ -1,0 +1,212 @@
+{
+  "name": "Seekers CRM — OpenStreetMap Lead Sourcing (free)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "seekers-osm",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Receive OSM Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [200, 300],
+      "webhookId": "seekers-osm",
+      "notes": "POST { area, category, limit? }.\n  area     — city/region, e.g. \"Cairo, Egypt\" or \"Dubai, UAE\". ALWAYS include the country: bare \"Cairo\" matches Cairo, Georgia USA.\n  category — one of: dentist, doctors, clinic, gym, restaurant, cafe, hotel, pharmacy, veterinary, hairdresser, car_repair, real_estate_agent, lawyer, school.\n  limit    — max elements (default 100, hard cap 300)."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, message: 'OSM sourcing started. Leads will appear in the CRM over the next 1-2 minutes.' } }}"
+      },
+      "name": "Respond OK to caller",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [420, 470],
+      "notes": "Answer immediately so the caller isn't held open while Overpass works."
+    },
+    {
+      "parameters": {
+        "url": "https://nominatim.openstreetmap.org/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "q", "value": "={{ $json.body.area }}" },
+            { "name": "format", "value": "json" },
+            { "name": "limit", "value": "1" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "User-Agent", "value": "SeekersCRM/1.0 (team@seekersai.org)" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      },
+      "name": "Geocode area (Nominatim)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [420, 300],
+      "notes": "REQUIRED STEP — do not skip.\nOverpass's `area[name=\"Cairo\"]` matches every place on earth called Cairo and silently picks one (verified: it returns a dentist in Cairo, GEORGIA, USA). Nominatim resolves the name to a specific OSM relation id, which we convert to an Overpass area id.\nNominatim's usage policy REQUIRES a real User-Agent and max 1 request/second — respect both."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Nominatim → Overpass area id, then build the Overpass QL query.\n// Overpass area ids are offset: relation + 3600000000, way + 2400000000.\nconst body   = $('Receive OSM Request').first().json.body || {};\nconst hit    = $input.first().json;\n\nif (!hit || !hit.osm_id) {\n  throw new Error(`Could not geocode area \"${body.area}\". Include the country, e.g. \"Cairo, Egypt\".`);\n}\n\nconst offset  = hit.osm_type === 'relation' ? 3600000000 : 2400000000;\nconst areaId  = offset + Number(hit.osm_id);\nconst limit   = Math.min(Number(body.limit) || 100, 300);\nconst category = String(body.category || 'dentist').trim();\n\n// Map a friendly category to the OSM tags that actually carry it. Many\n// businesses are tagged under `shop`/`office`/`healthcare` rather than\n// `amenity`, so we union several tag spellings or we miss most of them.\nconst TAGS = {\n  dentist:           ['amenity=dentist', 'healthcare=dentist'],\n  doctors:           ['amenity=doctors', 'healthcare=doctor'],\n  clinic:            ['amenity=clinic', 'healthcare=clinic'],\n  hospital:          ['amenity=hospital', 'healthcare=hospital'],\n  pharmacy:          ['amenity=pharmacy', 'healthcare=pharmacy'],\n  veterinary:        ['amenity=veterinary'],\n  gym:               ['leisure=fitness_centre', 'amenity=gym'],\n  restaurant:        ['amenity=restaurant'],\n  cafe:              ['amenity=cafe'],\n  hotel:             ['tourism=hotel'],\n  hairdresser:       ['shop=hairdresser'],\n  beauty:            ['shop=beauty'],\n  car_repair:        ['shop=car_repair'],\n  real_estate_agent: ['office=estate_agent'],\n  lawyer:            ['office=lawyer'],\n  school:            ['amenity=school'],\n  travel_agency:     ['shop=travel_agency'],\n};\n\nconst selectors = TAGS[category] || [`amenity=${category}`];\nconst union = selectors\n  .map((sel) => {\n    const [k, v] = sel.split('=');\n    return `  nwr[\"${k}\"=\"${v}\"](area.a);`;\n  })\n  .join('\\n');\n\nconst query = `[out:json][timeout:90];\\narea(${areaId})->.a;\\n(\\n${union}\\n);\\nout center ${limit};`;\n\nreturn [{ json: { query, areaId, category, limit, areaLabel: hit.display_name } }];"
+      },
+      "name": "Build Overpass query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300],
+      "notes": "Converts the geocode result into an Overpass area id and builds the QL.\nThe category→tag map matters: a gym is `leisure=fitness_centre`, a lawyer is `office=lawyer`. Querying only `amenity=` would return almost nothing for most categories."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://overpass-api.de/api/interpreter",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain",
+        "body": "={{ $json.query }}",
+        "options": {
+          "timeout": 120000,
+          "response": { "response": { "neverError": true } }
+        }
+      },
+      "name": "Overpass (primary)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [860, 300],
+      "notes": "Overpass is a FREE SHARED service and regularly returns \"server is probably too busy\" as an HTML error page instead of JSON (confirmed in testing). neverError keeps the run alive so the fallback node can retry on a mirror."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "got-json",
+              "leftValue": "={{ !!$json.elements }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Primary returned data?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1080, 300],
+      "notes": "A busy Overpass returns HTML, so `elements` is missing. TRUE → carry on; FALSE → retry on the mirror."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://overpass.kumi.systems/api/interpreter",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain",
+        "body": "={{ $('Build Overpass query').first().json.query }}",
+        "options": {
+          "timeout": 120000,
+          "response": { "response": { "neverError": true } }
+        }
+      },
+      "name": "Overpass (mirror)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1080, 470],
+      "notes": "Community mirror, same API and data. If BOTH are busy, re-run the webhook in a few minutes — this is normal for a free service, not a bug."
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "elements",
+        "options": {}
+      },
+      "name": "Split elements",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 3,
+      "position": [1300, 300],
+      "notes": "One OSM node/way/relation per n8n item."
+    },
+    {
+      "parameters": {
+        "jsCode": "// OSM tags → the CRM lead schema.\n// Keeps only rows we could actually contact; everything else is noise that\n// would bloat the CRM and drag down list quality.\nconst meta = $('Build Overpass query').first().json;\nconst out  = [];\n\nfor (const item of $input.all()) {\n  const el = item.json;\n  const t  = el.tags || {};\n\n  const company = (t.name || t['name:en'] || '').trim();\n  const phone   = (t.phone || t['contact:phone'] || t['contact:mobile'] || '').trim();\n  const email   = (t.email || t['contact:email'] || '').trim();\n  const website = (t.website || t['contact:website'] || '').trim();\n\n  // Must be identifiable AND reachable somehow.\n  if (!company) continue;\n  if (!phone && !email && !website) continue;\n\n  const address = [t['addr:street'], t['addr:housenumber'], t['addr:city'], t['addr:country']]\n    .filter(Boolean).join(', ');\n\n  const osmUrl = `https://www.openstreetmap.org/${el.type}/${el.id}`;\n\n  const notes = [\n    `Source: OpenStreetMap (${meta.areaLabel || 'unknown area'})`,\n    address        ? `Address: ${address}`            : null,\n    website        ? `Website: ${website}`            : null,\n    t.opening_hours? `Hours: ${t.opening_hours}`      : null,\n    t['addr:city'] ? `City: ${t['addr:city']}`        : null,\n    `OSM: ${osmUrl}`,\n    '',\n    `Channels — phone: ${phone ? 'YES' : 'no'} | email: ${email ? 'YES' : 'no'} | website: ${website ? 'YES' : 'no'}`,\n  ].filter((l) => l !== null).join('\\n');\n\n  out.push({\n    json: {\n      // The ingest API accepts company-only leads and falls back name<->company.\n      name:     company,\n      company,\n      email,               // '' is normalised to null server-side\n      phone,\n      category: String(meta.category || '').slice(0, 100),\n      source:   'openstreetmap',\n      notes,\n    },\n  });\n}\n\nreturn out;"
+      },
+      "name": "Map to CRM lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 300],
+      "notes": "Drops unnamed and unreachable elements (OSM is full of POIs with no contact details at all — measured ~21% contactable for Cairo dentists). Records which channels exist in the notes so the CRM's email-only sequence filter can do the rest."
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "name": "One at a time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1740, 300],
+      "notes": "Paced ingestion — keeps the CRM's dedupe path predictable and avoids a burst of writes."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agency.seekersai.org/api/v1/outreach/leads/ingest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "response": { "response": { "neverError": true } }
+        }
+      },
+      "name": "Ingest into Seekers CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1960, 300],
+      "credentials": {
+        "httpHeaderAuth": { "id": "seekers-crm-api-key", "name": "Seekers CRM API Key" }
+      },
+      "notes": "Idempotent: de-dupes by email when present, otherwise by name+company. Safe to re-run the same area/category — you'll get updates, not duplicates."
+    },
+    {
+      "parameters": { "amount": 1, "unit": "seconds" },
+      "name": "Throttle",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2180, 300],
+      "notes": "Gentle on the CRM and keeps the loop readable in the execution log."
+    }
+  ],
+  "connections": {
+    "Receive OSM Request": {
+      "main": [[
+        { "node": "Geocode area (Nominatim)", "type": "main", "index": 0 },
+        { "node": "Respond OK to caller", "type": "main", "index": 0 }
+      ]]
+    },
+    "Geocode area (Nominatim)": { "main": [[{ "node": "Build Overpass query", "type": "main", "index": 0 }]] },
+    "Build Overpass query":     { "main": [[{ "node": "Overpass (primary)", "type": "main", "index": 0 }]] },
+    "Overpass (primary)":       { "main": [[{ "node": "Primary returned data?", "type": "main", "index": 0 }]] },
+    "Primary returned data?":   { "main": [
+      [{ "node": "Split elements", "type": "main", "index": 0 }],
+      [{ "node": "Overpass (mirror)", "type": "main", "index": 0 }]
+    ]},
+    "Overpass (mirror)":        { "main": [[{ "node": "Split elements", "type": "main", "index": 0 }]] },
+    "Split elements":           { "main": [[{ "node": "Map to CRM lead", "type": "main", "index": 0 }]] },
+    "Map to CRM lead":          { "main": [[{ "node": "One at a time", "type": "main", "index": 0 }]] },
+    "One at a time":            { "main": [[{ "node": "Ingest into Seekers CRM", "type": "main", "index": 0 }]] },
+    "Ingest into Seekers CRM":  { "main": [[{ "node": "Throttle", "type": "main", "index": 0 }]] },
+    "Throttle":                 { "main": [[{ "node": "One at a time", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "seekers-osm-v1",
+  "id": "seekers-osm-leads",
+  "tags": [{ "name": "Seekers" }, { "name": "OpenStreetMap" }, { "name": "Lead Sourcing" }]
+}

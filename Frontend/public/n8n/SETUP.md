@@ -369,3 +369,85 @@ In your CRM:
 - Add per-rep email signatures via lead.assigneeId → reps.signature
 - Add a "Reschedule next send" button on each enrollment
 - Connect n8n to Slack so reps get pinged in real-time when a lead replies
+
+---
+
+## OpenStreetMap Lead Sourcing (free, no API key)
+
+**Workflow:** `seekers-osm-leads.json` · **Webhook:** `POST /webhook/seekers-osm`
+
+A **zero-cost** lead source that complements — but does **not** replace — Apify/Google Maps.
+OpenStreetMap is open data, so there's no API key, no anti-bot, no scraping, and no legal
+grey area. It's a clean way to add volume without adding subscription cost.
+
+### What it does
+
+1. **Geocodes** the area with Nominatim (`"Cairo, Egypt"` → OSM relation `5466227`).
+2. Converts that to an Overpass **area id** and builds an Overpass QL query.
+3. Queries Overpass (with a **mirror fallback** — see below).
+4. Maps OSM tags to the CRM lead schema and drops unreachable rows.
+5. `POST`s each lead to `/outreach/leads/ingest` (idempotent — safe to re-run).
+
+### Import & run
+
+1. n8n → Import from file → `seekers-osm-leads.json`.
+2. Confirm the **`Seekers CRM API Key`** credential is attached to *Ingest into Seekers CRM*.
+3. Activate, then POST:
+
+```bash
+curl -X POST https://n8n.srv1131703.hstgr.cloud/webhook/seekers-osm \
+  -H 'Content-Type: application/json' \
+  -d '{"area":"Cairo, Egypt","category":"dentist","limit":100}'
+```
+
+More examples:
+```json
+{"area":"Dubai, UAE",        "category":"clinic"}
+{"area":"Giza, Egypt",       "category":"gym"}
+{"area":"Riyadh, Saudi Arabia","category":"real_estate_agent"}
+{"area":"Alexandria, Egypt", "category":"hotel"}
+```
+
+**Supported categories:** dentist, doctors, clinic, hospital, pharmacy, veterinary, gym,
+restaurant, cafe, hotel, hairdresser, beauty, car_repair, real_estate_agent, lawyer,
+school, travel_agency. (Anything else falls back to `amenity=<value>`.)
+
+### ⚠️ Always include the country in `area`
+
+`"Cairo"` alone matches **Cairo, Georgia, USA** — verified in testing, it returned an
+American dentist. The Nominatim geocode step exists precisely to prevent this, but it can
+only disambiguate if you tell it the country.
+
+### Honest expectations — read before you rely on this
+
+Measured against live Overpass data (Cairo, `dentist`, Aug 2026):
+
+| Metric | Result |
+|---|---|
+| Elements returned | 21 |
+| With a name | 19 |
+| **With any contact detail (phone/email/website)** | **4 — about 21%** |
+
+So: **OSM is thin compared to Google Maps.** Google would return hundreds of Cairo
+dentists; OSM had 21, and only 4 were contactable. Coverage is community-maintained, so it
+varies a lot by city and category — established brick-and-mortar businesses in well-mapped
+cities do best; email addresses are rare almost everywhere.
+
+**Use it as a free supplement to Apify, not a replacement.** The workflow deliberately
+discards any element with no phone, email *or* website, because an uncontactable row is
+just noise in the CRM.
+
+### Overpass etiquette (important)
+
+Overpass is a **free, shared, volunteer-run** service. In testing it returned
+*"the server is probably too busy"* as an HTML error page rather than JSON — this is
+normal, not a bug. The workflow handles it:
+
+- **Primary** `overpass-api.de` → if the response has no `elements`, it retries the
+  **mirror** `overpass.kumi.systems`.
+- If **both** are busy, just re-run the webhook in a few minutes.
+
+Rules to respect so we don't get blocked:
+- **Nominatim requires a real User-Agent** (already set) and **max 1 request/second**.
+- Don't loop hundreds of areas back-to-back — run a handful of area/category pairs at a time.
+- Keep `limit` sane (hard-capped at 300).

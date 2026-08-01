@@ -59,7 +59,7 @@ Build them in this order. **W1–W3 are this week.** The rest are gated (see §5
 | **W1** | **Error Handler** | Called on any failure | Catches a failure from any other workflow → sends WhatsApp alert (workflow name, node, error, sample payload) → writes a row to an `n8n_errors` table. Attach it to **every** workflow you build. | 🔨 Build first |
 | **W2** | **Sheet Migration** | Manual, one-off | Reads the old Google Sheet → maps columns → `POST /outreach/leads/ingest` per row (batches of 20, 1s delay) → failures go to a `migration-errors` sheet. Then the sheet is dead. | 🔨 This week |
 | **W3** | **Nightly Backup** | Cron 03:00 | `pg_dump` the CRM database → upload to Hetzner storage box → keep 14 days. | 🔨 This week |
-| **W4** | **OSM Lead Sourcing** | Webhook `/seekers-osm` | Free lead source. Takes `{area, category}` → queries the OpenStreetMap Overpass API (no API key, no anti-bot, legal open data) → maps POIs to leads → `POST /outreach/leads/ingest`. **JSON is being written for you — import it.** | ⏳ Ready soon |
+| **W4** | **OSM Lead Sourcing** | Webhook `/seekers-osm` | Free supplementary lead source. Takes `{area, category}` → geocodes via Nominatim → queries OpenStreetMap Overpass (no API key, no anti-bot, legal open data) → maps POIs to leads → `POST /outreach/leads/ingest`. **JSON is written — just import `seekers-osm-leads.json`.** ⚠️ Thin data: see §4 Step 5. | ✅ Ready |
 | **W5** | **Enrichment Pipeline** | Webhook or cron over un-enriched leads | The "90-second SDR". Per lead: call Scrapling `/fingerprint` + `/contacts` + `/reviews` → call Google PageSpeed API → run the email waterfall (scraped → pattern-guess + SMTP verify → Hunter → Apollo) → send reviews to Claude for complaint tags → `POST /intel/fingerprint`, `/intel/reviews`, `/intel/enrichment`. | 🔒 Needs Scrapling URL |
 | **W6** | **Audit Renderer** | CRM webhook `audit.requested` | Receives audit content from the CRM → renders a branded 1-page PDF → generates a personalised HTML landing page → publishes both to `audits.seekersai.co/{slug}` → `POST /audits` with the URLs. Page includes a 1×1 pixel that calls `POST /intent`. | 🔒 After W5 |
 | **W7** | **WhatsApp Sender** | CRM webhook `outreach.send.channel` (channel=whatsapp) | Sends the approved WABA template to the lead → `POST /events` type `sent`. On an inbound WhatsApp reply → `POST /outreach/webhooks/reply` so the CRM pauses the sequence. | 🔒 Gated |
@@ -182,12 +182,21 @@ Subscribe your n8n webhook URLs in the CRM's **Settings → Webhooks** UI.
 4. ✅ **Done when:** you restore last night's dump into a scratch database and it opens clean.
 
 ### ▶ Step 5 — W4: OSM Lead Sourcing
-1. Download `seekers-osm-leads.json` (Dessouky is preparing it) and **import** it into n8n.
-2. Confirm the `Seekers CRM API Key` credential is attached to the ingest node.
-3. Activate it and POST a test: `{ "area": "Cairo", "category": "dentist", "limit": 50 }`.
-4. Check the CRM CRM page for leads with source `openstreetmap`.
-5. ✅ **Done when:** 50 real Cairo dentists land in the CRM, most with a phone number.
-6. ⚠️ Overpass is a free shared service — keep a delay between calls and don't hammer it.
+1. **Import** `Frontend/public/n8n/seekers-osm-leads.json` into n8n *(ready now)*.
+2. Confirm the `Seekers CRM API Key` credential is attached to the *Ingest into Seekers CRM* node.
+3. Activate, then POST: `{ "area": "Cairo, Egypt", "category": "dentist", "limit": 100 }`
+   ⚠️ **Always include the country.** Bare `"Cairo"` resolves to Cairo, **Georgia, USA** —
+   verified in testing. The Nominatim geocode step can only disambiguate if you tell it.
+4. Check the CRM for leads with source `openstreetmap`.
+5. ✅ **Done when:** leads appear with source `openstreetmap` and a phone number.
+   **Set your expectations from real measured data, not the pitch:** a live Cairo `dentist`
+   query returned **21 elements, 19 named, only 4 contactable (~21%)**. OSM is *far* thinner
+   than Google Maps — it's a free supplement to Apify, not a replacement. The workflow
+   deliberately discards rows with no phone/email/website, so a small result set is correct
+   behaviour, not a bug.
+6. ⚠️ Overpass is a free, volunteer-run, shared service and frequently answers *"server is
+   probably too busy"*. The workflow already retries on a mirror; if both are busy, re-run in
+   a few minutes. Nominatim requires max 1 request/second — don't loop dozens of areas.
 
 ### ▶ Steps 6+ — gated work
 W5 (enrichment) starts when Dessouky sends the Scrapling URL **and** v1 has been sending
