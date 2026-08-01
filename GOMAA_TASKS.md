@@ -5,8 +5,27 @@
 This is everything that **cannot** live inside the SEEKERS CRM app and must run in
 **n8n / infrastructure**. The CRM (agency.seekersai.org) owns all *data, scheduling,
 scoring, UI and AI drafting*. Your job is everything that **touches the outside world**:
-scraping, HTTP fetching, email verification, WhatsApp/LinkedIn, PDF rendering, DNS/IMAP
+HTTP orchestration, email verification, WhatsApp/LinkedIn, PDF rendering, DNS/IMAP
 checks, and infra (backups, alerting).
+
+---
+
+## 📣 UPDATE — 2026-08-01 · New direction on scraping
+
+**You are NOT building the scraper anymore.** We're standardizing web scraping on
+**[Scrapling](https://github.com/d4vinci/Scrapling)** (a Python framework: renders
+CSR-only sites, bypasses Cloudflare, adaptive selectors that survive site redesigns).
+
+- **Dessouky will set up Scrapling** as a small internal HTTP service and hand you a
+  **base URL + endpoints + an API key**. Timing: later — **not needed until Module 2
+  (Week 6)**, which is gated behind the 2-week rule anyway. It does **not** block Section A.
+- **Your job when it's ready:** call that service from n8n with a plain **HTTP Request
+  node**, then `POST` the result to the CRM (`/intel/*`). That's it — no Python, no
+  browser install, no service to run on your side.
+- Until Dessouky delivers the service URL, **skip B1–B4** and focus on Section A + the
+  webhook wiring in Week 5.
+
+Everything else in this doc is unchanged.
 
 ---
 
@@ -127,31 +146,25 @@ Live events: `lead.created`, `lead.replied`, `outreach.sent`, and now `lead.hot`
 
 > **Outcome:** every A/B lead arrives at the sequencer already researched — tech gaps,
 > a verified email, and a review-based hook — with **zero paid credits** on the bulk.
-> **Gate to start:** v1 has sent for 2 full weeks. You **fetch**; the CRM stores + scores.
-> **Engine: [Scrapling](https://github.com/d4vinci/Scrapling)** (Python) does all the
-> actual fetching/parsing in B1–B4 — see B0. Raw n8n HTTP nodes can't render CSR-only
-> sites or get past Cloudflare; Scrapling can, and its adaptive selectors survive site
-> redesigns (so these workflows don't break every month).
+> **Gate to start:** v1 has sent for 2 full weeks **AND** Dessouky has delivered the
+> Scrapling service URL (see B0). You **orchestrate + fetch via the service**; the CRM stores + scores.
 
-### B0. Stand up the Scrapling scraper service (do before B1–B4)
-- [ ] On the VPS, create a small **Python FastAPI microservice** that wraps Scrapling
-      (`pip install "scrapling[fetchers]" fastapi uvicorn` → `scrapling install` for browsers).
-- [ ] Expose internal endpoints n8n will call (not public; bind localhost / private net):
-      `GET /fingerprint?url=`, `GET /reviews?url=`, `GET /contacts?url=`, `GET /page?url=`
-      (each returns clean JSON). Use `DynamicFetcher` for JS/CSR sites, `StealthyFetcher`
-      for Cloudflare-protected ones, plain `Fetcher` otherwise.
-- [ ] Run under pm2/systemd with the Module 8 error handler + a `/health` route.
-- [ ] **DoD:** `curl localhost:PORT/fingerprint?url=<a real client site>` returns JSON with
-      the tech signals; a known CSR-only site is correctly flagged `csr_only:true`.
-- [ ] n8n stays the **orchestrator** (tier logic, dedupe, rate-limit); it calls this
-      service, then POSTs to the CRM. The service only scrapes — it never writes to the CRM.
+### B0. ⏳ Scrapling service — PROVIDED BY DESSOUKY (you don't build this)
+- **Dessouky sets up** a small internal Scrapling HTTP service and gives you:
+  a **base URL**, an **API key** (store as an n8n Header Auth credential `Scrapling`), and
+  these endpoints, each returning clean JSON:
+  `GET /fingerprint?url=` · `GET /reviews?url=` · `GET /contacts?url=` · `GET /page?url=`.
+- **Your side = one n8n HTTP Request node per call.** No Python, no browser, no service to run.
+  Example: `HTTP Request → GET {SCRAPLING_URL}/fingerprint?url={{ $json.domain }}`
+  with header `X-API-Key: {{creds}}` → then `POST /intel/fingerprint` to the CRM.
+- **Blocker:** if you've reached Week 6 and don't have the service URL yet, ping Dessouky —
+  do not rebuild scraping with raw n8n HTTP nodes (they can't render CSR sites or bypass Cloudflare).
 
-### B1. Tech Fingerprinting (Scrapling)
+### B1. Tech Fingerprinting (via the Scrapling service)
 - [ ] Input: a domain (from a CRM webhook or a poll of A/B-tier leads).
-- [ ] Call the scraper service `GET /fingerprint?url=` → chat widget (Tawk/Intercom/WhatsApp
+- [ ] `GET {SCRAPLING_URL}/fingerprint?url=` → chat widget (Tawk/Intercom/WhatsApp
       btn/none), booking (Calendly/custom/none), CMS/framework (WordPress/Wix/custom React +
-      **CSR-only** flag via the browser fetcher), analytics (GA4/Meta pixel/none), SSL,
-      mobile viewport, Arabic support.
+      **CSR-only** flag), analytics (GA4/Meta pixel/none), SSL, mobile viewport, Arabic support.
 - [ ] Also call **Google PageSpeed Insights API** (free key) for the performance score.
 - [ ] `POST /intel/fingerprint` with the assembled `tech_fingerprint` JSON.
 - [ ] **DoD:** 100 leads fingerprinted; each stored JSON has ≥6 signals; CSR-only sites
@@ -313,6 +326,7 @@ Live events: `lead.created`, `lead.replied`, `outreach.sent`, and now `lead.hot`
 ## SECRETS / ACCOUNTS TO GATHER (store all in n8n credentials, never in workflow JSON)
 
 - [ ] `AUTOMATION_API_KEY` (from Dessouky) — the CRM API key.
+- [ ] **Scrapling service** base URL + API key (from Dessouky, delivered before Week 6).
 - [ ] Firecrawl API key (already have).
 - [ ] Google PageSpeed Insights API key (free).
 - [ ] Hunter.io account (free tier).
@@ -331,7 +345,7 @@ Live events: `lead.created`, `lead.replied`, `outreach.sent`, and now `lead.hot`
 |---|---|---|
 | **Now** | Section A (kill sheet, error backbone, backups) | Sheet migrated; forced-failure alerts; restore test passes |
 | 5 | Wire outbound webhooks with the CRM; Module 8 DLQ + circuit breakers | Double-run a send workflow → no double-send (idempotency proven) |
-| 6 | Module 2 (B1–B4) | 100 leads enriched; ≥60% verified email, no paid credits |
+| 6 | Module 2 (B1–B4) — *needs Dessouky's Scrapling service URL first (B0)* | 100 leads enriched; ≥60% verified email, no paid credits |
 | 7 | Module 3 (C1–C3) | 10 audit pages live; `lead.hot` fires on 3rd view |
 | 8 | Module 4 (D1–D4) + Module 6 (E1–E5) | Egypt lead email→WhatsApp→call end-to-end; seed test ≥80% inbox |
 | 9 | Module 7 (F) | First demo brief auto-delivered before a real call |
@@ -342,6 +356,7 @@ Live events: `lead.created`, `lead.replied`, `outreach.sent`, and now `lead.hot`
 
 ## WHAT YOU DO **NOT** BUILD (owned by the CRM — don't duplicate)
 
+- ❌ **The Scrapling scraper service — Dessouky sets it up; you just call it over HTTP.**
 - ❌ NocoDB / any admin grid — the CRM is the admin UI.
 - ❌ A second sequencer / send scheduler — the CRM schedules and sends email.
 - ❌ ICP scoring, A/B winner math, objection library, ICP recalibration — CRM (data + AI).
