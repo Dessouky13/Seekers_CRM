@@ -28,6 +28,7 @@ import { db } from "./db/client";
 import { tasks } from "./db/schema";
 import { runStaleLeadNotificationSweep } from "./services/notifications";
 import { processDueSends } from "./services/outreach";
+import { pollInbox } from "./services/inbox";
 import type { AppEnv } from "./types";
 
 const app = new Hono<AppEnv>();
@@ -163,5 +164,20 @@ setInterval(async () => {
     console.error("[outreach] sweep failed", error);
   }
 }, Math.max(1, outreachSweepMinutes) * 60_000);
+
+// ── Inbox poller: read INBOX replies/bounces every N minutes ────────
+// Runs tighter than the outreach sweep so a reply pauses the sequence before
+// the next scheduled touch goes out.
+const inboxPollMinutes = Number(process.env.INBOX_POLL_MINUTES ?? 2);
+setInterval(async () => {
+  try {
+    const result = await pollInbox();
+    if (result.processed > 0) {
+      console.log(`[inbox] tick: processed=${result.processed} replies=${result.replies} bounces=${result.bounces}`);
+    }
+  } catch (error) {
+    console.error("[inbox] poll failed", error);
+  }
+}, Math.max(1, inboxPollMinutes) * 60_000);
 
 export default app;

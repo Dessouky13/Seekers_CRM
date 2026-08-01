@@ -1,367 +1,222 @@
-# SEEKERS Outbound Machine v2.0 — Gomaa's Work (n8n + Infra)
+# Gomaa — n8n Build Plan (Seekers Outbound Machine)
 
-**Companion to [NEWPLAN.md](NEWPLAN.md). Owner: Gomaa · Architecture review: Dessouky**
-
-This is everything that **cannot** live inside the SEEKERS CRM app and must run in
-**n8n / infrastructure**. The CRM (agency.seekersai.org) owns all *data, scheduling,
-scoring, UI and AI drafting*. Your job is everything that **touches the outside world**:
-HTTP orchestration, email verification, WhatsApp/LinkedIn, PDF rendering, DNS/IMAP
-checks, and infra (backups, alerting).
+**Owner:** Gomaa · **Architecture:** Dessouky · **Updated:** 2026-08-01
+Companion to [NEWPLAN.md](NEWPLAN.md), which explains the *strategy*. This file is the *build instructions*.
 
 ---
 
-## 📣 UPDATE — 2026-08-01 · New direction on scraping
+## 1. WHAT THIS IS — read this first
 
-**You are NOT building the scraper anymore.** We're standardizing web scraping on
-**[Scrapling](https://github.com/d4vinci/Scrapling)** (a Python framework: renders
-CSR-only sites, bypasses Cloudflare, adaptive selectors that survive site redesigns).
+We are building a machine that finds businesses, researches each one automatically, emails them something specific enough to get a reply, and tells us the moment someone answers.
 
-- **Dessouky will set up Scrapling** as a small internal HTTP service and hand you a
-  **base URL + endpoints + an API key**. Timing: later — **not needed until Module 2
-  (Week 6)**, which is gated behind the 2-week rule anyway. It does **not** block Section A.
-- **Your job when it's ready:** call that service from n8n with a plain **HTTP Request
-  node**, then `POST` the result to the CRM (`/intel/*`). That's it — no Python, no
-  browser install, no service to run on your side.
-- Until Dessouky delivers the service URL, **skip B1–B4** and focus on Section A + the
-  webhook wiring in Week 5.
+**Two systems, one job:**
 
-Everything else in this doc is unchanged.
-
----
-
-## GROUND RULES (read first — these prevent disasters)
-
-1. **The CRM is the single brain.** It decides *who* to contact, *what* step, and *when*.
-   You never run a second sequencer or a second sending scheduler. You **execute**
-   actions the CRM asks for and **push data back**. Two senders = double-emailed leads =
-   burned domain.
-2. **Everything is idempotent.** Every workflow that can run twice must be safe to run
-   twice. Key sends/actions by `(contact_id, step)`. A re-run must never double-send.
-3. **You POST results to the CRM; you don't hold the source of truth.** The Google Sheet
-   is being killed. Postgres (inside the CRM) is the record.
-4. **The 2-week rule (from NEWPLAN):** Do **not** build Module 2+ enrichment until v1.0 has
-   been sending for 2 full weeks. Start with the foundation tasks (Section A) + migrating
-   the sheet. Complexity before volume is procrastination.
-5. **Public data only.** No scraping behind login walls (no LinkedIn logged-in scraping).
-   Search-engine / public-page queries only.
-6. **Every workflow has an error branch** (see Module 8). No silent failures.
-
----
-
-## SHARED INTERFACE — CRM endpoints you call
-
-Base URL: `https://agency.seekersai.org/api/v1`
-Auth: `X-API-Key: <AUTOMATION_API_KEY>` (from Dessouky; n8n **Header Auth** credential
-`Seekers CRM API Key` — same one the Firecrawl flow uses).
-
-> ⚠️ **Hard constraint — verified against the codebase:** n8n can ONLY reach endpoints
-> that accept the API key. **Exactly four exist today.** Everything else in the CRM
-> requires a human login (JWT) and is unreachable from n8n. So any new v2 endpoint you
-> depend on must be built by Dessouky with **`apiKeyAuth`** — flag it explicitly when you
-> request it.
-
-**✅ LIVE + API-key-reachable (use today):**
-| Endpoint | Purpose | Body |
+| | **SEEKERS CRM** (Dessouky) | **n8n** (you) |
 |---|---|---|
-| `POST /outreach/leads/ingest` | create/patch one lead (idempotent by email) | `{ name, company, email?, phone?, source?, category?, notes? }` |
-| `POST /outreach/webhooks/reply` | report inbound reply → CRM pauses sequence | `{ from_email, subject?, body_preview? }` |
-| `GET /outreach/analytics` | read outreach metrics | — |
-| `GET /outreach/analytics/sequence/:id` | per-sequence funnel | — |
+| Role | The **brain** | The **hands** |
+| Owns | The database, who to contact, what step, when to send, all email sending, all AI writing, scoring, the UI | Everything that touches the outside world: fetching web pages, verifying emails, WhatsApp, LinkedIn, rendering PDFs, DNS/IMAP checks, backups |
 
-**🔒 Exists but JWT-only — you CANNOT call these from n8n** (they're for the app/humans):
-`/crm/*`, `/finance/*`, `/tasks/*`, `/users/*`, `/outreach/sequences|enroll|enrollments`,
-`/outreach/leads/ingest-bulk` (admin), `/dashboard`, `/goals`, `/notes`, `/vault`,
-`/knowledge`, `/webhooks`. If you think you need one of these, tell Dessouky — the answer
-is usually "the CRM does that, not you."
+**The rule that prevents disasters:** the CRM decides, you execute. You never build a second
+sender or a second scheduler — two senders means leads get double-emailed and our domain
+gets burned. If a task produces **data**, you `POST` it to the CRM. If a task performs an
+**action**, the CRM triggers **you** via a webhook.
 
-**🟢 LIVE NOW — built + verified in production (use the same `X-API-Key`).**
-To match a lead, send **any one** of `lead_id`, `domain`, or `email` (ingest the lead
-first if it doesn't exist). Every call also appends an `events` row automatically.
-| Endpoint | Body | Feeds |
+### The flow, end to end
+
+```
+ ①  SOURCE            ②  RESEARCH              ③  DECIDE + WRITE        ④  SEND
+ (you, n8n)           (you, n8n)               (CRM — already built)    (CRM sends email)
+ ─────────────        ─────────────            ─────────────────        ──────────────
+ Google Maps    ─┐    tech fingerprint  ─┐     stores everything        email  → CRM
+ OpenStreetMap  ─┼─►  reviews/complaints ─┼──► scores the lead     ────► WhatsApp → YOU
+ Firecrawl web  ─┘    find + verify email┘     AI writes the email      LinkedIn → YOU
+                                                                         call task → YOU
+        │                     │                                               │
+        └── POST /leads/ingest└── POST /intel/*                               │
+                                                                              ▼
+ ⑥  ALERT  ◄──────────────────  ⑤  REPLY DETECTED
+ WhatsApp to us                 CRM reads the inbox itself, auto-pauses the sequence
+ (you wire this)                ⚠️ NEW — you no longer build reply detection
+```
+
+### ⚠️ What changed this week (two things came off your plate)
+
+1. **Reply detection is now the CRM's job.** Dessouky is building an IMAP inbox poller
+   inside the CRM. It reads the inbox every ~2 minutes, matches the sender to a lead,
+   pauses their sequence, and fires the `lead.replied` webhook. **You do not build an
+   email-watcher workflow.** You only subscribe to the webhook and send the WhatsApp alert.
+2. **Scrapling is Dessouky's to set up.** It'll be an internal HTTP service. You will just
+   call it with an HTTP Request node. No Python, no browsers, nothing to host on your side.
+
+---
+
+## 2. HOW MANY WORKFLOWS — 10 total
+
+Build them in this order. **W1–W3 are this week.** The rest are gated (see §5).
+
+| # | Workflow | Trigger | What it does exactly | Status |
+|---|---|---|---|---|
+| **W1** | **Error Handler** | Called on any failure | Catches a failure from any other workflow → sends WhatsApp alert (workflow name, node, error, sample payload) → writes a row to an `n8n_errors` table. Attach it to **every** workflow you build. | 🔨 Build first |
+| **W2** | **Sheet Migration** | Manual, one-off | Reads the old Google Sheet → maps columns → `POST /outreach/leads/ingest` per row (batches of 20, 1s delay) → failures go to a `migration-errors` sheet. Then the sheet is dead. | 🔨 This week |
+| **W3** | **Nightly Backup** | Cron 03:00 | `pg_dump` the CRM database → upload to Hetzner storage box → keep 14 days. | 🔨 This week |
+| **W4** | **OSM Lead Sourcing** | Webhook `/seekers-osm` | Free lead source. Takes `{area, category}` → queries the OpenStreetMap Overpass API (no API key, no anti-bot, legal open data) → maps POIs to leads → `POST /outreach/leads/ingest`. **JSON is being written for you — import it.** | ⏳ Ready soon |
+| **W5** | **Enrichment Pipeline** | Webhook or cron over un-enriched leads | The "90-second SDR". Per lead: call Scrapling `/fingerprint` + `/contacts` + `/reviews` → call Google PageSpeed API → run the email waterfall (scraped → pattern-guess + SMTP verify → Hunter → Apollo) → send reviews to Claude for complaint tags → `POST /intel/fingerprint`, `/intel/reviews`, `/intel/enrichment`. | 🔒 Needs Scrapling URL |
+| **W6** | **Audit Renderer** | CRM webhook `audit.requested` | Receives audit content from the CRM → renders a branded 1-page PDF → generates a personalised HTML landing page → publishes both to `audits.seekersai.co/{slug}` → `POST /audits` with the URLs. Page includes a 1×1 pixel that calls `POST /intent`. | 🔒 After W5 |
+| **W7** | **WhatsApp Sender** | CRM webhook `outreach.send.channel` (channel=whatsapp) | Sends the approved WABA template to the lead → `POST /events` type `sent`. On an inbound WhatsApp reply → `POST /outreach/webhooks/reply` so the CRM pauses the sequence. | 🔒 Gated |
+| **W8** | **Alerts & Task Digest** | CRM webhooks `lead.replied`, `lead.hot`, `outreach.send.channel` (linkedin/call) | **The one you actually want most.** A reply, a hot lead (3+ audit views), or a blacklisted mailbox → instant WhatsApp. Plus a 9am digest of that day's LinkedIn/call tasks. | 🔨 Build after W1 |
+| **W9** | **Deliverability Checks** | Cron: weekly + daily | Weekly: each mailbox emails a seed list → IMAP-check which folder it landed in → `POST /mailboxes/health` with inbox-placement %. Daily: DNSBL blacklist lookups → post + alert. Weekly: parse DMARC XML reports. | 🔒 Gated |
+| **W10** | **Demo Brief** | Cal.com webhook + CRM `demo.booked` | Forwards the Cal.com booking to `POST /webhooks/cal` → CRM writes the brief → you render it to PDF → WhatsApp it to the group 12h before the call. After the call, a voice note → transcribe → `POST /events` won/lost. | 🔒 Last |
+
+---
+
+## 3. ENDPOINTS, URLS AND CREDENTIALS
+
+### 3.1 CRM API — `https://agency.seekersai.org/api/v1`
+
+Every call needs the header `X-API-Key: <AUTOMATION_API_KEY>`.
+In n8n create **one** Header Auth credential named **`Seekers CRM API Key`** and reuse it everywhere.
+
+> ⚠️ **You can only call endpoints that accept the API key.** Everything else in the CRM
+> requires a human login and will return 401 from n8n. The full list you *can* call is below —
+> if you need something not on this list, ask Dessouky rather than working around it.
+
+**Lead intake**
+| Method | Endpoint | Body |
 |---|---|---|
-| `POST /intel/fingerprint` | `{ lead_id\|domain\|email, tech_fingerprint{}, pagespeed?{} }` | B1 |
-| `POST /intel/reviews` | `{ lead_id\|domain\|email, review_stats{}, complaint_tags[], hook }` | B3 |
-| `POST /intel/enrichment` | `{ lead_id\|company_domain\|email, contacts:[{ name, title, email, email_status, linkedin_url, phone }] }` | B2/B4 |
-| `POST /events` · `GET /events?lead_id=&type=` | `{ lead_id?, type, payload?, source? }` · type ∈ sourced\|verified\|sent\|bounce\|open\|click\|reply\|unsub\|meeting\|won\|lost\|… | B/D/F, learning loop |
-| `POST /mailboxes/health` · `GET /mailboxes` | `{ address, inbox_placement_pct?, bounce_rate?, dnsbl_listings?[], seed_results?{}, daily_cap?, warmup_stage? }` (health score auto-computed; a non-empty `dnsbl_listings` fires an alert) | E |
-| `POST /audits` · `GET /audits` | `{ lead_id?, slug, score?, issues?[], quick_wins?[], pdf_url?, page_url? }` (upsert by `slug`) | C |
-| `POST /intent` | `{ slug, ip_hash?, ua? }` (increments views; fires `lead.hot` on the 3rd) | C3 |
+| POST | `/outreach/leads/ingest` | `{ name, company, email?, phone?, source?, category?, notes? }` — idempotent by email; accepts a lead with **any one** of name/company/email/phone; long fields are truncated, not rejected |
+| POST | `/outreach/webhooks/reply` | `{ from_email, subject?, body_preview? }` — use for **WhatsApp** replies (email replies are now auto-detected by the CRM) |
 
-**🟡 Still to ADD (need `apiKeyAuth` — request from Dessouky when you reach that module):**
-| Endpoint | Body | Feeds |
+**Lead intelligence** — match a lead with any one of `lead_id`, `domain`, or `email`. Each call also auto-appends an `events` row.
+| Method | Endpoint | Body |
 |---|---|---|
-| `POST /webhooks/cal` | Cal.com booking passthrough | F |
-| `POST /ops/freeze` | `{ reason }` — circuit breaker halts all sends | G |
+| POST | `/intel/fingerprint` | `{ lead_id\|domain\|email, tech_fingerprint{}, pagespeed?{} }` |
+| POST | `/intel/reviews` | `{ lead_id\|domain\|email, review_stats{}, complaint_tags[], hook }` |
+| POST | `/intel/enrichment` | `{ lead_id\|company_domain\|email, contacts:[{ name, title, email, email_status, linkedin_url, phone }] }` |
 
-**📤 CRM → you (outbound webhooks). Subscribe your n8n webhook URL via the CRM webhooks UI.
-Live events: `lead.created`, `lead.replied`, `outreach.sent`, and now `lead.hot`.**
-| Event | Payload | Status |
+**Events, mailboxes, audits**
+| Method | Endpoint | Body / notes |
 |---|---|---|
-| `lead.hot` | `{ kind, slug?, views?, lead_id?, address?, listings? }` — audit-intent (3+ views) **or** a mailbox blacklisting | 🟢 LIVE |
-| `outreach.send.channel` | `{ contact_id, channel:whatsapp\|linkedin\|call, market, message?, task_hint?, lead }` | 🟡 to add (D) |
-| `demo.booked` | `{ contact_id, brief }` | 🟡 to add (F) |
+| POST | `/events` | `{ lead_id?, type, payload?, source? }` · type ∈ sourced, verified, sent, bounce, open, click, reply, unsub, meeting, won, lost |
+| GET | `/events?lead_id=&type=` | read the activity feed |
+| POST | `/mailboxes/health` | `{ address, inbox_placement_pct?, bounce_rate?, dnsbl_listings?[], seed_results?{}, daily_cap?, warmup_stage? }` — health score is computed for you; a non-empty `dnsbl_listings` auto-fires an alert |
+| GET | `/mailboxes` | current mailbox health |
+| POST | `/audits` | `{ lead_id?, slug, score?, issues?[], quick_wins?[], pdf_url?, page_url? }` — upsert by `slug` |
+| GET | `/audits` | list audits + view counts |
+| POST | `/intent` | `{ slug, ip_hash?, ua? }` — pixel hit; the CRM counts views and fires `lead.hot` on the 3rd |
 
-> **One rule:** produces **data** → you `POST` it to the CRM. performs an **action**
-> (WhatsApp, PDF, LinkedIn) → the CRM triggers **you** via an outbound webhook.
+**Read-only metrics**
+`GET /outreach/analytics` · `GET /outreach/analytics/sequence/:id`
 
----
+**Not built yet** (ask when you reach W9/W10): `POST /webhooks/cal`, `POST /ops/freeze`.
 
-## SECTION A — FOUNDATION (do now, before the 2-week rule kicks in)
+### 3.2 CRM → n8n webhooks (the CRM calls *you*)
 
-> **▶ THIS WEEK — 3 deliverables, IN THIS ORDER. Do nothing from Sections B–G yet.**
-> 1. **A3 first** (error backbone) — so everything after it is observable.
-> 2. **A1** (kill the sheet) — migrate leads into the CRM.
-> 3. **A4** (nightly backup) — the lead DB is now the company asset.
-> A2 only if you actually queue inside n8n. Report to Dessouky when all 3 gates pass.
+Subscribe your n8n webhook URLs in the CRM's **Settings → Webhooks** UI.
 
-### A3. Error backbone — DO THIS FIRST
-- **Outcome:** no workflow can ever fail silently again.
-- [ ] Build one reusable **Error Workflow**; attach it to every workflow you own.
-- [ ] On failure → WhatsApp alert to ops group with: workflow name, failed node, error
-      message, payload sample. Also append a row to your own `n8n_errors` Postgres table.
-- **DoD:** force a failure in a throwaway workflow → WhatsApp arrives within 1 min + row logged.
-
-### A1. Kill the Google Sheet
-- **Outcome:** every sheet lead lives in the CRM; the sheet is read-only history.
-- [ ] Export sheet → CSV.
-- [ ] Workflow: CSV → map to `{ name, company, email, phone, source, category, notes }` →
-      `POST /outreach/leads/ingest` (20 rows/batch, 1s delay, attach the A3 error handler).
-- [ ] Rejects → a `migration-errors` sheet for manual fix + re-run (ingest is idempotent by
-      email, so re-running is safe).
-- **DoD:** CRM `leads` count = sheet count − rejects; you spot-check 10 rows by hand.
-
-### A4. Nightly backup
-- **Outcome:** losing the server never loses the lead database.
-- [ ] `pg_dump` the CRM DB nightly → Hetzner storage box, 14-day retention, A3 error handler attached.
-- **DoD:** restore last night's dump into a scratch DB and it opens clean.
-
-### A2. Redis namespacing (only if you queue inside n8n)
-- **Outcome:** your keys never collide with the CRM's.
-- [ ] Confirm Redis reachable from n8n; prefix all your keys `n8n:*`.
-- **DoD:** a `n8n:test` key set + read from an n8n Redis node.
-
----
-
-## SECTION B — MODULE 2: LEAD INTELLIGENCE (after 2-week rule)
-
-> **Outcome:** every A/B lead arrives at the sequencer already researched — tech gaps,
-> a verified email, and a review-based hook — with **zero paid credits** on the bulk.
-> **Gate to start:** v1 has sent for 2 full weeks **AND** Dessouky has delivered the
-> Scrapling service URL (see B0). You **orchestrate + fetch via the service**; the CRM stores + scores.
-
-### B0. ⏳ Scrapling service — PROVIDED BY DESSOUKY (you don't build this)
-- **Dessouky sets up** a small internal Scrapling HTTP service and gives you:
-  a **base URL**, an **API key** (store as an n8n Header Auth credential `Scrapling`), and
-  these endpoints, each returning clean JSON:
-  `GET /fingerprint?url=` · `GET /reviews?url=` · `GET /contacts?url=` · `GET /page?url=`.
-- **Your side = one n8n HTTP Request node per call.** No Python, no browser, no service to run.
-  Example: `HTTP Request → GET {SCRAPLING_URL}/fingerprint?url={{ $json.domain }}`
-  with header `X-API-Key: {{creds}}` → then `POST /intel/fingerprint` to the CRM.
-- **Blocker:** if you've reached Week 6 and don't have the service URL yet, ping Dessouky —
-  do not rebuild scraping with raw n8n HTTP nodes (they can't render CSR sites or bypass Cloudflare).
-
-### B1. Tech Fingerprinting (via the Scrapling service)
-- [ ] Input: a domain (from a CRM webhook or a poll of A/B-tier leads).
-- [ ] `GET {SCRAPLING_URL}/fingerprint?url=` → chat widget (Tawk/Intercom/WhatsApp
-      btn/none), booking (Calendly/custom/none), CMS/framework (WordPress/Wix/custom React +
-      **CSR-only** flag), analytics (GA4/Meta pixel/none), SSL, mobile viewport, Arabic support.
-- [ ] Also call **Google PageSpeed Insights API** (free key) for the performance score.
-- [ ] `POST /intel/fingerprint` with the assembled `tech_fingerprint` JSON.
-- [ ] **DoD:** 100 leads fingerprinted; each stored JSON has ≥6 signals; CSR-only sites
-      flagged correctly (this is the audit's headline finding — it must be reliable).
-
-### B2. Waterfall Email Enrichment (the "free Clay")
-- [ ] Build a cascade that stops at first **verified** hit:
-  1. Email scraped from the site via Scrapling `GET /contacts?url=` (contact/about pages).
-  2. Pattern guesses `{first}@`, `{first}.{last}@`, `info@` → **SMTP-verify each** (self-hosted
-     verifier; RCPT-TO check, no send — Scrapling scrapes, it does **not** verify deliverability).
-  3. Hunter.io free credits — **A-tier only** (25/mo cap; track usage).
-  4. Apollo credit — **A-tier GCC/EU with title match only**.
-- [ ] Record which source won + verification status.
-- [ ] `POST /intel/enrichment` with contacts + `email_status` (verified|risky|invalid).
-- [ ] **DoD:** ≥60% of a 100-lead batch get a **verified** email with **zero paid credits**
-      (paid sources only for the A-tier remainder).
-
-### B3. Review Mining (Arabic + English)
-- [ ] For Maps-sourced leads: pull top ~20 reviews (Scrapling `GET /reviews?url=`, browser
-      fetcher for paginated/JS review widgets).
-- [ ] Send to Claude (via your AI node) with a fixed prompt → return structured complaint tags
-      from a **closed set**: `slow_response, phone_unanswered, booking_chaos, billing_dispute, staff_overload`
-      + a 1-line paraphrased icebreaker hook.
-- [ ] `POST /intel/reviews` with `review_stats` + `complaint_tags` + the hook.
-- [ ] **Acceptance:** 50 Maps leads tagged; tags come only from the closed set; hooks read naturally.
-
-### B4. Decision-Maker Triangulation (GCC/EU companies only)
-- [ ] Scrape `/team` + `/about` pages via Scrapling `GET /contacts?url=` → candidate names/titles.
-- [ ] Cross-check via **public** search-engine queries for LinkedIn public profiles (no login).
-- [ ] Feed the best owner/ops-lead candidate into B2's waterfall.
-- [ ] **Acceptance:** for 20 GCC/EU companies, a plausible decision-maker identified for ≥12.
-
----
-
-## SECTION C — MODULE 3: AUTO-AUDIT + LANDING PAGES + INTENT
-
-> **Outcome:** each A-tier lead gets a personalized audit PDF + a live landing page at
-> `audits.seekersai.co/{slug}`, and a 3rd view fires a "call today" alert.
-> You own rendering, hosting, and the pixel; the CRM owns the content + hot-lead logic.
-
-### C1. Audit PDF renderer
-- [ ] Webhook receives `{ contact, score, issues[], quick_wins[], language, brand }` from the CRM.
-- [ ] Render a branded 1-page PDF with the existing docx/Playwright pipeline.
-- [ ] Upload to `audits.seekersai.co/{slug}.pdf`.
-- [ ] `POST /audits` back with `pdf_url`.
-- [ ] **Acceptance:** 10 real audit PDFs generated, on-brand, correct language.
-
-### C2. Dynamic per-lead landing page
-- [ ] Generate static HTML per lead (company name in H1, score gauge, Cal.com embed).
-- [ ] Push to an Nginx-served folder → `audits.seekersai.co/{slug}`.
-- [ ] `POST /audits` with `page_url`.
-- [ ] **Acceptance:** 10 pages live, each personalized, Cal.com embed works.
-
-### C3. First-party intent pixel
-- [ ] Add a 1×1 pixel (our domain only) to each audit page → on load `POST /intent { slug }`.
-- [ ] (The CRM counts views and fires `lead.hot` on the 3rd — you just report the hit.)
-- [ ] **Acceptance:** load a page 3× → CRM fires `lead.hot` → WhatsApp alert lands (C wiring below).
-
----
-
-## SECTION D — MODULE 4: CHANNEL EXECUTION (email stays in the CRM)
-
-> **Outcome:** when the CRM says "WhatsApp this Egypt lead" or "LinkedIn-touch this GCC
-> lead," it happens — and the result is logged back so the CRM's one state machine stays
-> in sync. You execute non-email channels only; the CRM decides the path and sends all email.
-
-### D1. WhatsApp (WABA) sender
-- [ ] Subscribe an n8n webhook to `outreach.send.channel` where `channel="whatsapp"`.
-- [ ] Send the approved WABA **template** message to `lead.phone`.
-- [ ] `POST /events { contact_id, type:"sent", payload:{ channel:"whatsapp", template } }`.
-- [ ] On inbound WhatsApp reply → `POST /outreach/webhooks/reply` (so the CRM pauses the sequence).
-- [ ] **Acceptance:** an Egypt lead flows email→WhatsApp→(reply pauses it) end-to-end.
-
-### D2. LinkedIn touch (semi-automatic — human-in-loop)
-- [ ] On `channel="linkedin"`: create a **task card** (the CRM already models tasks; it will
-      create the card and include a pre-written comment/DM in `task_hint`). Your job is only to
-      surface it to Gomaa's daily batch (e.g. a WhatsApp digest at 9am of that day's LinkedIn tasks).
-- [ ] After Gomaa acts, mark done → `POST /events { type:"sent", payload:{ channel:"linkedin" } }`.
-- [ ] **Acceptance:** LinkedIn tasks appear in the morning digest; marking done logs an event.
-
-### D3. Call task prep
-- [ ] On `channel="call"`: the CRM will attach AI talking points. Deliver them to Gomaa
-      (WhatsApp) as a call card. Log outcome back via `POST /events`.
-- [ ] **Acceptance:** a call card with talking points arrives before the due time.
-
-### D4. Holiday / send-window calendar (data you maintain, CRM consumes)
-- [ ] Maintain a shared calendar table (GCC Fri–Sat, Egypt Fri–Sat, EU Sat–Sun, Ramadan
-      window shift to 22:00–01:00 for EG/GCC, EU August throttle). Provide it to the CRM
-      (a JSON the CRM reads, or a `GET` you host). **The CRM's scheduler checks it before every send.**
-- [ ] **Acceptance:** during a blackout window the CRM defers sends (verify with Dessouky).
-
----
-
-## SECTION E — MODULE 6: DELIVERABILITY OPS (you run the outside checks; CRM stores/scores)
-
-> **Outcome:** we can *prove* ≥80% inbox placement per mailbox and catch a blacklisting or
-> auth failure the day it happens — measured, not guessed. You run the external checks and
-> `POST /mailboxes/health`; the CRM scores + displays.
-
-### E1. Seed-list inbox-placement test (weekly)
-- [ ] Each mailbox emails a seed list (our own Gmail/Outlook/Yahoo accounts).
-- [ ] n8n checks via IMAP which folder each landed in → compute inbox-placement %.
-- [ ] `POST /mailboxes/health { address, inbox_placement_pct, seed_results }`.
-- [ ] **Acceptance:** weekly run posts a placement % per box; ≥80% target visible on CRM dashboard.
-
-### E2. Blacklist (DNSBL) monitor (daily)
-- [ ] Free DNS queries against major DNSBLs for each sending domain + IP.
-- [ ] `POST /mailboxes/health { address, dnsbl_listings }`; WhatsApp alert on any new listing.
-- [ ] **Acceptance:** a known-listed test IP triggers an alert.
-
-### E3. DMARC aggregate report ingestion (weekly)
-- [ ] Parse aggregate DMARC XML from the reporting mailbox → surface auth/spoofing failures.
-- [ ] `POST /events type="dmarc"` summary (or a dedicated endpoint if Dessouky adds one).
-- [ ] **Acceptance:** one week of reports parsed; failures listed.
-
-### E4. Bounce processing
-- [ ] On hard bounce → `POST /outreach/webhooks/reply`-style bounce (Dessouky to confirm the
-      bounce endpoint) so the CRM invalidates the contact; if `{first}.{last}@` bounces across a
-      domain, record the pattern as bad so B2 stops guessing it there.
-- [ ] **Acceptance:** a hard bounce marks the contact invalid in the CRM.
-
-### E5. Mailbox provisioning + warm-up SOP
-- [ ] Document the SOP: spin a new box, 14-day warm-up, hot-swap when health is unrecoverable.
-- [ ] **Acceptance:** SOP written; one spare box warmed and ready.
-
----
-
-## SECTION F — MODULE 7: MEETING INTELLIGENCE (rendering + delivery only)
-
-> **Outcome:** every booked demo lands a 1-page prep brief in the WhatsApp group 12h
-> before the call, and every outcome (won/lost + reason) is logged. You forward the
-> booking, render + deliver the brief, and capture the outcome; the CRM writes the content.
-
-- [ ] Forward the **Cal.com** booking webhook → `POST /webhooks/cal` (CRM assembles the brief data
-      + AI-writes it).
-- [ ] On `demo.booked` webhook from the CRM (brief content attached): render the 1-page **demo brief**
-      PDF + calendar attachment → deliver to the WhatsApp group **12h before** the call.
-- [ ] Post-call: a WhatsApp voice-note bot → transcribe → `POST /events type="won"|"lost"` + reason.
-- [ ] **Acceptance:** a real booking produces a brief in the group before the call; an outcome
-      voice-note logs a won/lost event.
-
----
-
-## SECTION G — MODULE 8: RELIABILITY (infra you own end-to-end)
-
-> **Outcome:** the machine runs unattended — retries transient failures, freezes itself on
-> danger (bounce spike / quota), and shouts on WhatsApp the moment it stalls.
-
-- [ ] **Dead-letter queue:** failed sends/API calls → `n8n:queue:retry` (Redis) with exponential
-      backoff (3 attempts) → then a `dead_letter` table for manual review.
-- [ ] **Circuit breakers:** Google API quota near limit → pause sourcing; bounce spike >5%/hour →
-      tell the CRM to freeze sends (call a CRM `POST /ops/freeze`, Dessouky to add) + alert.
-- [ ] **Heartbeat:** if a workflow that should run hourly processes 0 items for 6 business hours →
-      "machine is down" alert.
-- [ ] (Error workflow + backups already done in Section A.)
-
----
-
-## SECRETS / ACCOUNTS TO GATHER (store all in n8n credentials, never in workflow JSON)
-
-- [ ] `AUTOMATION_API_KEY` (from Dessouky) — the CRM API key.
-- [ ] **Scrapling service** base URL + API key (from Dessouky, delivered before Week 6).
-- [ ] Firecrawl API key (already have).
-- [ ] Google PageSpeed Insights API key (free).
-- [ ] Hunter.io account (free tier).
-- [ ] Apollo access (MCP/API) — A-tier only.
-- [ ] WhatsApp Business API (WABA) credentials + approved templates.
-- [ ] Cal.com webhook signing secret.
-- [ ] Seed-list mailbox IMAP credentials (Gmail/Outlook/Yahoo test accounts).
-- [ ] Hetzner storage box credentials (for `pg_dump`).
-- [ ] The ops WhatsApp group/bot endpoint for alerts.
-
----
-
-## BUILD ORDER (maps to NEWPLAN weeks 5–9)
-
-| Week | You build | Acceptance gate |
+| Event | Fires when | Status |
 |---|---|---|
-| **Now** | Section A (kill sheet, error backbone, backups) | Sheet migrated; forced-failure alerts; restore test passes |
-| 5 | Wire outbound webhooks with the CRM; Module 8 DLQ + circuit breakers | Double-run a send workflow → no double-send (idempotency proven) |
-| 6 | Module 2 (B1–B4) — *needs Dessouky's Scrapling service URL first (B0)* | 100 leads enriched; ≥60% verified email, no paid credits |
-| 7 | Module 3 (C1–C3) | 10 audit pages live; `lead.hot` fires on 3rd view |
-| 8 | Module 4 (D1–D4) + Module 6 (E1–E5) | Egypt lead email→WhatsApp→call end-to-end; seed test ≥80% inbox |
-| 9 | Module 7 (F) | First demo brief auto-delivered before a real call |
+| `lead.created` | a lead is ingested | 🟢 live |
+| `lead.replied` | **someone replies to an email** (now auto-detected by the CRM) | 🟢 live |
+| `outreach.sent` | an outreach email goes out | 🟢 live |
+| `lead.hot` | 3+ audit-page views, **or** a mailbox gets blacklisted | 🟢 live |
+| `outreach.send.channel` | CRM wants a WhatsApp/LinkedIn/call action | 🟡 to add (W7) |
+| `demo.booked` | a demo is booked | 🟡 to add (W10) |
 
-**Gate:** don't start Week 6 until v1.0 has sent for 2 full weeks.
+### 3.3 Other URLs and services
+
+| Service | URL / detail |
+|---|---|
+| n8n | `https://n8n.srv1131703.hstgr.cloud` |
+| Existing scrape router webhook | `/webhook/3f8ea5dc-2c42-4ec8-ada8-f1f1c6ec713e` |
+| Overpass API (free, no key) | `https://overpass-api.de/api/interpreter` |
+| Google PageSpeed Insights | `https://www.googleapis.com/pagespeedonline/v5/runPagespeed` (free key) |
+| Scrapling service | ⏳ Dessouky will send base URL + API key |
+| Audit hosting | `audits.seekersai.co` |
+
+### 3.4 Credentials to set up in n8n (never paste keys into workflow JSON)
+
+- [ ] `Seekers CRM API Key` — Header Auth, `X-API-Key` *(get from Dessouky)*
+- [ ] `Scrapling` — Header Auth *(coming from Dessouky)*
+- [ ] Firecrawl API key *(you already have)*
+- [ ] Google PageSpeed API key *(free — create)*
+- [ ] Hunter.io *(free tier, 25/mo)*
+- [ ] Apollo *(A-tier leads only)*
+- [ ] WhatsApp Business API + approved templates
+- [ ] Seed-list mailbox IMAP logins (Gmail / Outlook / Yahoo test accounts)
+- [ ] Hetzner storage box *(for backups)*
+- [ ] Cal.com webhook secret
+- [ ] Ops WhatsApp group / bot endpoint for alerts
 
 ---
 
-## WHAT YOU DO **NOT** BUILD (owned by the CRM — don't duplicate)
+## 4. STEP BY STEP — how to actually build it
 
-- ❌ **The Scrapling scraper service — Dessouky sets it up; you just call it over HTTP.**
-- ❌ NocoDB / any admin grid — the CRM is the admin UI.
-- ❌ A second sequencer / send scheduler — the CRM schedules and sends email.
-- ❌ ICP scoring, A/B winner math, objection library, ICP recalibration — CRM (data + AI).
-- ❌ Storing leads/contacts/events as the source of truth — you POST, the CRM stores.
-- ❌ Hot-lead threshold logic — you report pixel hits; the CRM decides "hot".
+### ▶ Step 1 — W1: Error Handler *(do this before anything else)*
+1. New workflow → **Error Trigger** node.
+2. Add a **WhatsApp** node → message: workflow name, failed node, error message, first 200 chars of payload.
+3. Add a **Postgres** node → insert into your own `n8n_errors` table (`workflow, node, error, payload, created_at`).
+4. In **every** other workflow: Settings → *Error Workflow* → select this one.
+5. ✅ **Done when:** you deliberately break a throwaway workflow and the WhatsApp arrives within a minute.
 
-If something isn't clearly "reach the outside world" or "render/deliver," it's probably the
-CRM's job — ask Dessouky before building it.
+### ▶ Step 2 — W8: Alerts *(the highest-value one — do it early)*
+1. New workflow → **Webhook** node (POST), copy its URL.
+2. In the CRM → Settings → Webhooks → add a subscription for `lead.replied` pointing at that URL.
+3. **Switch** node on the event type → branch for `lead.replied`, `lead.hot`.
+4. Each branch → **WhatsApp** node. For a reply: *"📬 REPLY — {{lead name}} ({{company}}) just replied: {{preview}}"*. For hot: *"🔥 {{lead name}} opened their audit {{views}}× — call today."*
+5. Repeat the subscription for `lead.hot`.
+6. ✅ **Done when:** you reply to a test outreach email from another address and get a WhatsApp within ~3 minutes.
+
+### ▶ Step 3 — W2: Kill the Google Sheet
+1. Export the sheet to CSV.
+2. New workflow → manual trigger → **Read CSV** → **Split In Batches** (20).
+3. **Set** node → map to `{ name, company, email, phone, source, category, notes }`.
+4. **HTTP Request** → POST `https://agency.seekersai.org/api/v1/outreach/leads/ingest`, credential `Seekers CRM API Key`, `neverError: true`.
+5. **Wait** 1s per batch. Route failures to a `migration-errors` sheet.
+6. Attach the W1 error workflow.
+7. ✅ **Done when:** CRM lead count = sheet rows − rejects, and you've eyeballed 10 rows. Re-running is safe (ingest is idempotent).
+
+### ▶ Step 4 — W3: Nightly Backup
+1. New workflow → **Cron** 03:00 daily.
+2. **Execute Command** → `pg_dump` the CRM DB to a timestamped file.
+3. Upload to the Hetzner storage box; delete anything older than 14 days.
+4. ✅ **Done when:** you restore last night's dump into a scratch database and it opens clean.
+
+### ▶ Step 5 — W4: OSM Lead Sourcing
+1. Download `seekers-osm-leads.json` (Dessouky is preparing it) and **import** it into n8n.
+2. Confirm the `Seekers CRM API Key` credential is attached to the ingest node.
+3. Activate it and POST a test: `{ "area": "Cairo", "category": "dentist", "limit": 50 }`.
+4. Check the CRM CRM page for leads with source `openstreetmap`.
+5. ✅ **Done when:** 50 real Cairo dentists land in the CRM, most with a phone number.
+6. ⚠️ Overpass is a free shared service — keep a delay between calls and don't hammer it.
+
+### ▶ Steps 6+ — gated work
+W5 (enrichment) starts when Dessouky sends the Scrapling URL **and** v1 has been sending
+for two full weeks. Then W6 → W7 → W9 → W10 in that order. Full acceptance criteria for
+each are in the table in §2 and in NEWPLAN.md.
+
+---
+
+## 5. THE SEQUENCING RULE (from NEWPLAN — this is not optional)
+
+> **Do not start W5 or later until v1.0 has been sending for two full weeks.**
+
+Reason: right now there are ~18 leads enrolled and **zero replies**. Enriching 18 leads
+proves nothing. Volume first, then intelligence — data from the simple version tells us
+where the complexity actually pays. Building enrichment now is procrastination in disguise.
+
+**What that means practically:** W1, W2, W3, W4, W8 now. Everything else waits.
+
+---
+
+## 6. DO **NOT** BUILD THESE (the CRM owns them)
+
+- ❌ **An email reply watcher** — the CRM polls the inbox itself now.
+- ❌ **The Scrapling service** — Dessouky hosts it; you just call it over HTTP.
+- ❌ **A second sequencer or send scheduler** — the CRM schedules and sends all email.
+- ❌ **NocoDB or any admin grid** — the CRM is the admin UI.
+- ❌ **ICP scoring, A/B winner maths, the objection library** — CRM + AI.
+- ❌ **Storing leads/events as the source of truth** — you POST, the CRM stores.
+- ❌ **Hot-lead threshold logic** — you report pixel hits, the CRM decides what's hot.
+
+If a task isn't clearly *"reach the outside world"* or *"render and deliver something"*,
+it's probably the CRM's job. Ask before you build it.

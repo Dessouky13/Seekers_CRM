@@ -7,7 +7,7 @@ import { z } from "zod";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { leads, events, mailboxes, audits } from "../db/schema";
-import { apiKeyAuth, jwtOrApiKey } from "../middleware/automation-auth";
+import { apiKeyAuth, adminOrApiKey } from "../middleware/automation-auth";
 import { fireEventAsync } from "../services/webhooks";
 import type { AppEnv } from "../types";
 
@@ -106,6 +106,95 @@ intel.post("/enrichment", apiKeyAuth, async (c) => {
   return c.json({ lead_id: leadId, ok: true, contacts: b.contacts.length });
 });
 
+// ── Read side (CRM Outbound page) ─────────────────────────
+// "Has intel" = anything the outbound machine wrote back onto the lead.
+const HAS_INTEL = sql`(
+  ${leads.techFingerprint} IS NOT NULL
+  OR ${leads.reviewStats}   IS NOT NULL
+  OR ${leads.signals}       IS NOT NULL
+  OR ${leads.icpScore}      IS NOT NULL
+  OR (${leads.complaintTags} IS NOT NULL AND cardinality(${leads.complaintTags}) > 0)
+)`;
+
+// GET /intel/leads — leads carrying outbound intelligence.
+//   ?limit  (default 50, max 200) / ?offset
+//   ?enriched=true   → only leads WITH a tech fingerprint
+//   ?enriched=false  → the enrichment worklist: every lead still MISSING one
+//   (omitted)        → every lead that has any intel at all
+intel.get("/leads", adminOrApiKey, async (c) => {
+  const q      = c.req.query();
+  const limit  = Math.min(200, Math.max(1, Number(q.limit) || 50));
+  const offset = Math.max(0, Number(q.offset) || 0);
+
+  const where =
+    q.enriched === "true"  ? sql`${leads.techFingerprint} IS NOT NULL` :
+    q.enriched === "false" ? sql`${leads.techFingerprint} IS NULL`     :
+    HAS_INTEL;
+
+  // Total is counted over the same predicate — never derived from the page.
+  const [{ total }] = await db
+    .select({ total: sql<number>`CAST(COUNT(*) AS int)` })
+    .from(leads)
+    .where(where);
+
+  const rows = await db.select({
+    id:              leads.id,
+    name:            leads.name,
+    company:         leads.company,
+    domain:          leads.domain,
+    category:        leads.category,
+    stage:           leads.stage,
+    icpScore:        leads.icpScore,
+    techFingerprint: leads.techFingerprint,
+    reviewStats:     leads.reviewStats,
+    complaintTags:   leads.complaintTags,
+    updatedAt:       leads.updatedAt,
+  })
+    .from(leads)
+    .where(where)
+    .orderBy(sql`${leads.icpScore} DESC NULLS LAST`, desc(leads.updatedAt))
+    .limit(limit)
+    .offset(offset);
+
+  return c.json({ data: rows, total: Number(total ?? 0), limit, offset });
+});
+
+// GET /intel/summary — header tiles for the Outbound page.
+intel.get("/summary", adminOrApiKey, async (c) => {
+  const [agg] = await db.select({
+    total:           sql<number>`CAST(COUNT(*) AS int)`,
+    enriched:        sql<number>`CAST(COUNT(*) FILTER (WHERE ${leads.techFingerprint} IS NOT NULL) AS int)`,
+    with_intel:      sql<number>`CAST(COUNT(*) FILTER (WHERE ${HAS_INTEL}) AS int)`,
+    with_complaints: sql<number>`CAST(COUNT(*) FILTER (WHERE ${leads.complaintTags} IS NOT NULL AND cardinality(${leads.complaintTags}) > 0) AS int)`,
+    scored:          sql<number>`CAST(COUNT(${leads.icpScore}) AS int)`,
+    avg_icp_score:   sql<number | null>`ROUND(AVG(${leads.icpScore}))`,
+  }).from(leads);
+
+  const tagRows = await db.execute(sql`
+    SELECT tag, CAST(COUNT(*) AS int) AS count
+    FROM leads, UNNEST(complaint_tags) AS tag
+    WHERE complaint_tags IS NOT NULL
+    GROUP BY tag
+    ORDER BY count DESC, tag ASC
+    LIMIT 12
+  `);
+
+  const total    = Number(agg?.total ?? 0);
+  const enriched = Number(agg?.enriched ?? 0);
+
+  return c.json({
+    total_leads:     total,
+    enriched:        enriched,
+    not_enriched:    total - enriched,
+    with_intel:      Number(agg?.with_intel ?? 0),
+    scored:          Number(agg?.scored ?? 0),
+    avg_icp_score:   agg?.avg_icp_score != null ? Number(agg.avg_icp_score) : null,
+    with_complaints: Number(agg?.with_complaints ?? 0),
+    by_tag: (tagRows.rows as { tag: string; count: number }[])
+      .map((r) => ({ tag: r.tag, count: Number(r.count) })),
+  });
+});
+
 // ══════════════════════════════════════════════════════════
 // /events — append-only fact log
 // ══════════════════════════════════════════════════════════
@@ -125,7 +214,7 @@ eventsRouter.post("/", apiKeyAuth, async (c) => {
   return c.json({ id: row.id, ok: true }, 201);
 });
 
-eventsRouter.get("/", jwtOrApiKey, async (c) => {
+eventsRouter.get("/", adminOrApiKey, async (c) => {
   const q = c.req.query();
   const conds = [];
   if (q.lead_id) conds.push(eq(events.leadId, q.lead_id));
@@ -189,7 +278,7 @@ mailboxesRouter.post("/health", apiKeyAuth, async (c) => {
   return c.json({ ok: true, health_score: row.healthScore });
 });
 
-mailboxesRouter.get("/", jwtOrApiKey, async (c) => {
+mailboxesRouter.get("/", adminOrApiKey, async (c) => {
   const rows = await db.select().from(mailboxes).orderBy(desc(mailboxes.healthScore));
   return c.json(rows);
 });
@@ -226,7 +315,7 @@ auditsRouter.post("/", apiKeyAuth, async (c) => {
   return c.json({ id: row.id, slug: row.slug, ok: true }, 201);
 });
 
-auditsRouter.get("/", jwtOrApiKey, async (c) => {
+auditsRouter.get("/", adminOrApiKey, async (c) => {
   const rows = await db.select().from(audits).orderBy(desc(audits.views)).limit(200);
   return c.json(rows);
 });

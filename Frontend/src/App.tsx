@@ -11,6 +11,7 @@ import Tasks from "./pages/Tasks";
 import CRM from "./pages/CRM";
 import Clients from "./pages/Clients";
 import Outreach from "./pages/Outreach";
+import Outbound from "./pages/Outbound";
 import Login from "./pages/Login";
 import Goals from "./pages/Goals";
 import Notes from "./pages/Notes";
@@ -49,6 +50,7 @@ const App = () => (
                     <Route path="/clients"  element={<AdminOnly><Clients /></AdminOnly>} />
                     <Route path="/crm"      element={<CRM />} />
                     <Route path="/outreach" element={<Outreach />} />
+                    <Route path="/outbound" element={<AdminOnly><Outbound /></AdminOnly>} />
                     <Route path="/goals"    element={<AdminOnly><Goals /></AdminOnly>} />
                     <Route path="/notes"    element={<Notes />} />
                     <Route path="/vault"    element={<AdminOnly><Vault /></AdminOnly>} />

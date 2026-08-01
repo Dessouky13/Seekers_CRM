@@ -1,4 +1,4 @@
-import { UsersRound, LayoutDashboard, DollarSign, CheckSquare, Users, Target, StickyNote, Settings, ChevronLeft, Building2, Lock, Send } from "lucide-react";
+import { UsersRound, LayoutDashboard, DollarSign, CheckSquare, Users, Target, StickyNote, Settings, ChevronLeft, Building2, Lock, Send, Radar } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import {
@@ -22,6 +22,7 @@ const navItems = [
   { title: "Clients", url: "/clients", icon: Building2 },
   { title: "CRM", url: "/crm", icon: Users, memberOk: true },
   { title: "Outreach", url: "/outreach", icon: Send, memberOk: true },
+  { title: "Outbound", url: "/outbound", icon: Radar },
   { title: "Goals", url: "/goals", icon: Target },
   { title: "Notes", url: "/notes", icon: StickyNote, memberOk: true },
   { title: "Vault", url: "/vault", icon: Lock },
