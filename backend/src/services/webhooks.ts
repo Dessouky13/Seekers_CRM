@@ -12,6 +12,7 @@ export const WEBHOOK_EVENTS = [
   "lead.stage_changed",
   "lead.replied",
   "lead.assigned",
+  "lead.hot",
   "enrollment.started",
   "enrollment.paused",
   "enrollment.completed",

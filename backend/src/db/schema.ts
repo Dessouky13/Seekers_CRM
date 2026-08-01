@@ -1,6 +1,6 @@
 import {
   pgTable, uuid, text, numeric, boolean,
-  timestamp, date, integer, index,
+  timestamp, date, integer, index, jsonb,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -205,6 +205,14 @@ export const leads = pgTable("leads", {
   assigneeId:   uuid("assignee_id").references(() => profiles.id, { onDelete: "set null" }),
   lastActivity: date("last_activity"),
   notes:        text("notes"),
+  // ── v2 Lead Intelligence (populated by n8n via /intel/* ingest) ──
+  domain:          text("domain"),                        // company website domain, for matching
+  emailStatus:     text("email_status"),                  // verified | risky | invalid | unknown
+  icpScore:        integer("icp_score"),                  // 0-100, computed server-side
+  techFingerprint: jsonb("tech_fingerprint"),             // chat widget, booking, CMS, pagespeed…
+  reviewStats:     jsonb("review_stats"),                 // rating, count, source
+  complaintTags:   text("complaint_tags").array(),        // slow_response, booking_chaos, …
+  signals:         jsonb("signals"),                      // catch-all: enrichment contacts, hooks…
   createdAt:    timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt:    timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
@@ -212,6 +220,57 @@ export const leads = pgTable("leads", {
   categoryIdx: index("idx_leads_category").on(t.category),
   nameIdx:     index("idx_leads_name").on(t.name),
   companyIdx:  index("idx_leads_company").on(t.company),
+  domainIdx:   index("idx_leads_domain").on(t.domain),
+}));
+
+// ── Events (append-only fact log — the learning-loop training data) ──
+// Written by n8n (via /events) and by the CRM itself. Never updated/deleted.
+export const events = pgTable("events", {
+  id:        uuid("id").primaryKey().defaultRandom(),
+  leadId:    uuid("lead_id").references(() => leads.id, { onDelete: "set null" }),
+  type:      text("type").notNull(),   // sourced|verified|sent|bounce|open|click|reply|unsub|meeting|won|lost|fingerprinted|enriched|reviewed|audit_view|error…
+  payload:   jsonb("payload"),
+  source:    text("source"),           // "n8n", "crm", workflow name…
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  leadIdx: index("idx_events_lead").on(t.leadId),
+  typeIdx: index("idx_events_type").on(t.type, t.createdAt),
+}));
+
+// ── Mailboxes (deliverability ops — health signals pushed by n8n) ──
+export const mailboxes = pgTable("mailboxes", {
+  id:                uuid("id").primaryKey().defaultRandom(),
+  address:           text("address").notNull().unique(),
+  dailyCap:          integer("daily_cap").notNull().default(0),
+  sentToday:         integer("sent_today").notNull().default(0),
+  healthScore:       integer("health_score"),                    // 0-100, computed
+  warmupStage:       text("warmup_stage"),                       // warmup | active | recovery
+  inboxPlacementPct: numeric("inbox_placement_pct", { precision: 5, scale: 2 }),
+  bounceRate:        numeric("bounce_rate", { precision: 5, scale: 2 }),
+  dnsblListings:     jsonb("dnsbl_listings"),
+  seedResults:       jsonb("seed_results"),
+  lastCheckedAt:     timestamp("last_checked_at", { withTimezone: true }),
+  createdAt:         timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:         timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ── Audits (per-lead audit lead-magnet + intent tracking) ──
+export const audits = pgTable("audits", {
+  id:        uuid("id").primaryKey().defaultRandom(),
+  leadId:    uuid("lead_id").references(() => leads.id, { onDelete: "set null" }),
+  slug:      text("slug").notNull().unique(),
+  score:     integer("score"),
+  issues:    jsonb("issues"),
+  quickWins: jsonb("quick_wins"),
+  pdfUrl:    text("pdf_url"),
+  pageUrl:   text("page_url"),
+  views:     integer("views").notNull().default(0),
+  hotFired:  boolean("hot_fired").notNull().default(false),   // lead.hot already alerted?
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  slugIdx: index("idx_audits_slug").on(t.slug),
+  leadIdx: index("idx_audits_lead").on(t.leadId),
 }));
 
 // ── Lead Activities ───────────────────────────────────────

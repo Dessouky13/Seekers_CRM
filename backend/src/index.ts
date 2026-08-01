@@ -20,6 +20,10 @@ import vaultRouter         from "./routes/vault";
 import agentsRouter        from "./routes/agents";
 import outreachRouter      from "./routes/outreach";
 import webhooksRouter      from "./routes/webhooks";
+import {
+  intel as intelRouter, eventsRouter, mailboxesRouter,
+  auditsRouter, intentRouter,
+} from "./routes/automation";
 import { db } from "./db/client";
 import { tasks } from "./db/schema";
 import { runStaleLeadNotificationSweep } from "./services/notifications";
@@ -77,6 +81,13 @@ api.route("/vault",         vaultRouter);
 api.route("/agents",        agentsRouter);
 api.route("/outreach",      outreachRouter);
 api.route("/webhooks",      webhooksRouter);
+
+// v2 Outbound Machine — automation ingest (API-key auth; for n8n)
+api.route("/intel",      intelRouter);
+api.route("/events",     eventsRouter);
+api.route("/mailboxes",  mailboxesRouter);
+api.route("/audits",     auditsRouter);
+api.route("/intent",     intentRouter);
 
 app.route("/api/v1", api);
 
