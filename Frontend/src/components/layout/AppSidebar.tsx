@@ -1,4 +1,4 @@
-import { UsersRound, LayoutDashboard, DollarSign, CheckSquare, Users, Target, StickyNote, Settings, ChevronLeft, Building2, Lock, Send, Radar } from "lucide-react";
+import { UsersRound, LayoutDashboard, DollarSign, CheckSquare, Users, Target, StickyNote, Settings, ChevronLeft, Building2, Lock, Send, Radar, Sun } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import {
@@ -16,7 +16,9 @@ import { useCurrentUser } from "@/hooks/useAuth";
 // backend/src/index.ts) — hiding it here is convenience, not the security
 // boundary.
 const navItems = [
-  { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  // Today is everyone's home — the ranked queue of what actually needs them.
+  { title: "Today", url: "/", icon: Sun, memberOk: true },
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Finance", url: "/finance", icon: DollarSign },
   { title: "Tasks", url: "/tasks", icon: CheckSquare, memberOk: true },
   { title: "Clients", url: "/clients", icon: Building2 },

@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SeekersBackground } from "@/components/SeekersBackground";
 import { isAuthenticated } from "@/lib/auth";
+import Today from "./pages/Today";
 import Dashboard from "./pages/Dashboard";
 import Finance from "./pages/Finance";
 import Tasks from "./pages/Tasks";
@@ -43,8 +44,12 @@ const App = () => (
               <RequireAuth>
                 <AppLayout>
                   <Routes>
-                    {/* Members land on CRM; the admin dashboard shows company financials */}
-                    <Route path="/"         element={<AdminOnly fallback="/crm"><Dashboard /></AdminOnly>} />
+                    {/* Everyone lands on Today — the ranked "what needs you now"
+                        queue. Members previously got bounced off / to /crm, so
+                        they had nowhere that answered that question. The admin
+                        financial dashboard moved to /dashboard. */}
+                    <Route path="/"          element={<Today />} />
+                    <Route path="/dashboard" element={<AdminOnly><Dashboard /></AdminOnly>} />
                     <Route path="/finance"  element={<AdminOnly><Finance /></AdminOnly>} />
                     <Route path="/tasks"    element={<Tasks />} />
                     <Route path="/clients"  element={<AdminOnly><Clients /></AdminOnly>} />

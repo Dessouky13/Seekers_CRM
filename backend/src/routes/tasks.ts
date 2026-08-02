@@ -1,5 +1,6 @@
 // Sprint 2 — Tasks & Projects endpoints
 import { Hono } from "hono";
+import { z } from "zod";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import { tasks, subtasks, projects, profiles, clients } from "../db/schema";
@@ -253,6 +254,47 @@ tasksRouter.delete("/:id", authMiddleware, async (c) => {
 
   if (!deleted) return c.json({ error: "Task not found" }, 404);
   return new Response(null, { status: 204 });
+});
+
+// POST /tasks/bulk-delete — delete a ticked selection in one call.
+//
+// Hard delete, cascading to subtasks. Members can only ever remove their own
+// tasks: rather than rejecting the whole batch when one id isn't theirs, the
+// delete itself is scoped by assignee, so a member simply cannot touch someone
+// else's row even by guessing ids. The response reports the gap so the UI can
+// say "3 of 5 deleted" instead of silently doing less than asked.
+const bulkDeleteTasksSchema = z.object({
+  ids:     z.array(z.string().uuid()).min(1).max(500),
+  dry_run: z.boolean().optional(),
+});
+
+tasksRouter.post("/bulk-delete", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const body = bulkDeleteTasksSchema.parse(await c.req.json());
+
+  const scope = isAdmin(user)
+    ? inArray(tasks.id, body.ids)
+    : and(inArray(tasks.id, body.ids), eq(tasks.assigneeId, user.id))!;
+
+  if (body.dry_run) {
+    const rows = await db
+      .select({ id: tasks.id, title: tasks.title, status: tasks.status })
+      .from(tasks)
+      .where(scope);
+    return c.json({
+      deleted:      0,
+      would_delete: rows.length,
+      skipped:      body.ids.length - rows.length,
+      preview:      rows.slice(0, 50),
+    });
+  }
+
+  const deleted = await db.delete(tasks).where(scope).returning({ id: tasks.id });
+
+  return c.json({
+    deleted: deleted.length,
+    skipped: body.ids.length - deleted.length,
+  });
 });
 
 // ── Subtasks ──────────────────────────────────────────────

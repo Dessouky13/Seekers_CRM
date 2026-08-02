@@ -23,6 +23,13 @@ export const WEBHOOK_EVENTS = [
   "client.created",
   "client.stage_changed",
   "agent.run_completed",
+  // ── Daily Loop ──
+  // The CRM decides what matters and fires; n8n turns these into WhatsApp
+  // messages. Same ranked worklist the Today screen renders, so the message
+  // and the screen can never disagree.
+  "worklist.digest",   // per-person morning "here are your N"
+  "worklist.urgent",   // a single action that shouldn't wait for the digest
+  "supply.starving",   // runway below threshold — sourcing needs to top up
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number] | "*";
 

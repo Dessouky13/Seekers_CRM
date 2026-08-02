@@ -26,7 +26,7 @@ import { useCurrentUser } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import {
   useLeads, useLeadDetail, useCreateLead, useUpdateLead, useDeleteLead,
-  useAddLeadActivity, useLeadCategories, usePipelineSummary,
+  useAddLeadActivity, useLeadCategories, usePipelineSummary, useBulkDeleteLeads,
 } from "@/hooks/useCRM";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useUsers } from "@/hooks/useTasks";
@@ -422,6 +422,42 @@ export default function CRM() {
   };
   const clearSelection = () => setSelectedIds(new Set());
 
+  // ── Bulk delete ──
+  // Irreversible and cascades to activities/enrolments/sends, so the flow is
+  // always: dry-run for an exact count → explicit confirm → delete.
+  const bulkDelete = useBulkDeleteLeads();
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [deleteCount,    setDeleteCount]    = useState<number | null>(null);
+
+  const openBulkDelete = () => {
+    setDeleteCount(null);
+    setBulkDeleteOpen(true);
+    bulkDelete.mutate(
+      { ids: Array.from(selectedIds), dryRun: true },
+      {
+        onSuccess: (res) => setDeleteCount(res.would_delete ?? 0),
+        onError:   (err) => { toast.error(err.message); setBulkDeleteOpen(false); },
+      },
+    );
+  };
+
+  const confirmBulkDelete = () => {
+    const count = selectedIds.size;
+    bulkDelete.mutate(
+      { ids: Array.from(selectedIds) },
+      {
+        onSuccess: (res) => {
+          toast.success(`Deleted ${res.deleted} lead${res.deleted === 1 ? "" : "s"}`);
+          setBulkDeleteOpen(false);
+          clearSelection();
+          if (selectedId && !leads.some((l) => l.id === selectedId)) setSelectedId(null);
+        },
+        onError: (err) => toast.error(err.message),
+      },
+    );
+    return count;
+  };
+
   const handleBulkEnroll = (sequenceId: string) => {
     if (selectedIds.size === 0) return;
     bulkEnroll.mutate(
@@ -798,6 +834,19 @@ export default function CRM() {
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+            {currentUser?.role === "admin" && (
+              <Button
+                size="sm"
+                variant="destructive"
+                className="gap-1.5 h-8"
+                disabled={bulkDelete.isPending}
+                onClick={openBulkDelete}
+              >
+                {bulkDelete.isPending
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Deleting…</>
+                  : <><Trash2 className="h-3.5 w-3.5" /> Delete</>}
+              </Button>
+            )}
             <button
               onClick={clearSelection}
               className="text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -807,6 +856,52 @@ export default function CRM() {
           </div>
         </div>
       )}
+
+      {/* Bulk delete confirmation. Deliberately states the blast radius in full:
+          this cascades and there is no undo. */}
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {deleteCount ?? selectedIds.size} lead{(deleteCount ?? selectedIds.size) === 1 ? "" : "s"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                {deleteCount === null ? (
+                  <span className="flex items-center gap-2 text-sm">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking exactly what would be removed…
+                  </span>
+                ) : (
+                  <>
+                    <p>
+                      This permanently removes {deleteCount} lead{deleteCount === 1 ? "" : "s"} along with
+                      their activity timeline, outreach enrolments and send history.
+                    </p>
+                    <p className="font-medium text-destructive">This cannot be undone.</p>
+                    {deleteCount !== selectedIds.size && (
+                      <p className="text-xs">
+                        Note: you selected {selectedIds.size}, but {deleteCount} still exist.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDelete.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); confirmBulkDelete(); }}
+              disabled={deleteCount === null || deleteCount === 0 || bulkDelete.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {bulkDelete.isPending
+                ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Deleting…</>
+                : `Delete ${deleteCount ?? ""}`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

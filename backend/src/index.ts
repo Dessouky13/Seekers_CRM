@@ -20,6 +20,7 @@ import vaultRouter         from "./routes/vault";
 import agentsRouter        from "./routes/agents";
 import outreachRouter      from "./routes/outreach";
 import webhooksRouter      from "./routes/webhooks";
+import worklistRouter      from "./routes/worklist";
 import {
   intel as intelRouter, eventsRouter, mailboxesRouter,
   auditsRouter, intentRouter,
@@ -29,6 +30,7 @@ import { tasks } from "./db/schema";
 import { runStaleLeadNotificationSweep } from "./services/notifications";
 import { processDueSends } from "./services/outreach";
 import { pollInbox } from "./services/inbox";
+import { maybeSendDailyDigest } from "./services/digest";
 import type { AppEnv } from "./types";
 
 const app = new Hono<AppEnv>();
@@ -82,6 +84,10 @@ api.route("/vault",         vaultRouter);
 api.route("/agents",        agentsRouter);
 api.route("/outreach",      outreachRouter);
 api.route("/webhooks",      webhooksRouter);
+// Not in ADMIN_ONLY_MODULES on purpose — the whole point is that a member
+// lands somewhere that tells them what to do. Rows are scoped per-user inside
+// the service; only /worklist/pipeline-health is admin-gated, at the route.
+api.route("/worklist",      worklistRouter);
 
 // v2 Outbound Machine — automation ingest (API-key auth; for n8n)
 api.route("/intel",      intelRouter);
@@ -179,6 +185,22 @@ setInterval(async () => {
     console.error("[outreach] sweep failed", error);
   }
 }, Math.max(1, outreachSweepMinutes) * 60_000);
+
+// ── Daily Loop: morning digest of each person's worklist ────────────
+// Ticks often, fires once per Cairo day at DIGEST_HOUR. The CRM decides what
+// matters; n8n subscribes to `worklist.digest` and delivers it over WhatsApp.
+// Disabled unless DIGEST_ENABLED=true so nobody gets surprise messages.
+if (process.env.DIGEST_ENABLED === "true") {
+  const digestCheckMinutes = Number(process.env.DIGEST_CHECK_MINUTES ?? 15);
+  setInterval(async () => {
+    try {
+      await maybeSendDailyDigest();
+    } catch (error) {
+      console.error("[digest] sweep failed", error);
+    }
+  }, Math.max(1, digestCheckMinutes) * 60_000);
+  console.log(`[digest] enabled — fires at ${process.env.DIGEST_HOUR ?? 9}:00 Africa/Cairo`);
+}
 
 // ── Inbox poller: read INBOX replies/bounces every N minutes ────────
 // Runs tighter than the outreach sweep so a reply pauses the sequence before

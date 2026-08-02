@@ -1,0 +1,173 @@
+// Worklist — database side.
+//
+// Collects the six sources of "something needs a human" and hands them to the
+// pure ranker in worklist-ranking.ts. Keeping the SQL here and the scoring
+// there is what lets the scoring be tested without a database.
+import { sql } from "drizzle-orm";
+import { db } from "../db/client";
+import { leads } from "../db/schema";
+import { isAdmin } from "../middleware/auth";
+import { rankWorklist, type WorklistInputs, type WorklistAction } from "./worklist-ranking";
+
+export * from "./worklist-ranking";
+
+const STALE_DAYS  = Number(process.env.WORKLIST_STALE_DAYS ?? 7);
+const HOT_VIEWS   = Number(process.env.WORKLIST_HOT_VIEWS ?? 3);
+const ACTIVE_ONLY = sql`${leads.stage} NOT IN ('closed_won','closed_lost')`;
+
+/**
+ * Collect everything the ranker needs for one user.
+ *
+ * Members only ever see their own leads and tasks — the same server-side
+ * scoping the rest of the API uses, so dropping a query param can't widen it.
+ * Two of the six sources (blocked sequences, unassigned leads) are
+ * company-level problems and are admin-only.
+ */
+export async function fetchWorklist(
+  user: { id: string; role?: string },
+): Promise<WorklistInputs> {
+  const admin = isAdmin(user);
+  const mine  = admin ? sql`TRUE` : sql`l.assignee_id = ${user.id}`;
+  const empty = Promise.resolve({ rows: [] as any[] });
+
+  const [replies, hotLeads, blocked, dueTasks, staleLeads, unassigned] = await Promise.all([
+    // A reply needs a human until a human actually does something about it.
+    // "Something" = any activity logged BY A PERSON (created_by IS NOT NULL —
+    // the sequencer and the inbox poller both write with a null author) after
+    // the reply landed. That makes the queue self-clearing through normal use
+    // instead of needing its own "mark as done" button to fall out of sync.
+    db.execute(sql`
+      SELECT l.id, l.name, l.company, l.deal_value, e.completed_at AS replied_at,
+             (SELECT a.description FROM lead_activities a
+               WHERE a.lead_id = l.id AND a.type = 'email'
+               ORDER BY a.created_at DESC LIMIT 1) AS preview
+        FROM outreach_enrollments e
+        JOIN leads l ON l.id = e.lead_id
+       WHERE e.status = 'replied'
+         AND e.completed_at IS NOT NULL
+         AND l.stage NOT IN ('closed_won','closed_lost')
+         AND ${mine}
+         AND NOT EXISTS (
+           SELECT 1 FROM lead_activities a
+            WHERE a.lead_id = l.id
+              AND a.created_by IS NOT NULL
+              AND a.created_at > e.completed_at)
+       ORDER BY e.completed_at DESC
+       LIMIT 50`),
+
+    db.execute(sql`
+      SELECT l.id, l.name, l.company, l.deal_value,
+             au.views, au.slug, au.updated_at AS last_view_at
+        FROM audits au
+        JOIN leads l ON l.id = au.lead_id
+       WHERE au.views >= ${HOT_VIEWS}
+         AND l.stage NOT IN ('closed_won','closed_lost')
+         AND ${mine}
+       ORDER BY au.views DESC
+       LIMIT 50`),
+
+    admin
+      ? db.execute(sql`
+          SELECT MIN(e.id::text) AS enrollment_id, s.name AS sequence_name,
+                 MIN(e.paused_reason) AS reason, COUNT(*)::int AS lead_count,
+                 MIN(e.enrolled_at) AS since
+            FROM outreach_enrollments e
+            LEFT JOIN outreach_sequences s ON s.id = e.sequence_id
+           WHERE e.status IN ('paused','failed')
+             AND e.paused_reason IS NOT NULL
+             AND e.paused_reason <> 'cancelled'
+           GROUP BY s.name, e.paused_reason
+           ORDER BY COUNT(*) DESC
+           LIMIT 20`)
+      : empty,
+
+    admin
+      ? db.execute(sql`
+          SELECT t.id, t.title, t.due_date, t.priority, p.name AS project_name
+            FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
+           WHERE t.status <> 'done' AND t.due_date IS NOT NULL
+             AND t.due_date <= CURRENT_DATE
+           ORDER BY t.due_date ASC LIMIT 50`)
+      : db.execute(sql`
+          SELECT t.id, t.title, t.due_date, t.priority, p.name AS project_name
+            FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
+           WHERE t.status <> 'done' AND t.due_date IS NOT NULL
+             AND t.due_date <= CURRENT_DATE
+             AND t.assignee_id = ${user.id}
+           ORDER BY t.due_date ASC LIMIT 50`),
+
+    // Ownerless leads are deliberately excluded here — they come back as
+    // `unassigned_lead` instead. A lead with no owner isn't a follow-up
+    // problem, it's an ownership problem, and "chase this" is the wrong
+    // instruction when there is nobody to do the chasing. Keeping the two
+    // sets disjoint also means the deduper never has to choose between them.
+    db.execute(sql`
+      SELECT l.id, l.name, l.company, l.deal_value, l.stage, l.last_activity
+        FROM leads l
+       WHERE l.stage NOT IN ('closed_won','closed_lost')
+         AND l.assignee_id IS NOT NULL
+         AND ${mine}
+         AND (l.last_activity IS NULL
+              OR l.last_activity < CURRENT_DATE - (${STALE_DAYS} || ' days')::interval)
+       ORDER BY l.deal_value DESC NULLS LAST
+       LIMIT 50`),
+
+    admin
+      ? db.execute(sql`
+          SELECT l.id, l.name, l.company, l.deal_value, l.created_at
+            FROM leads l
+           WHERE l.assignee_id IS NULL
+             AND l.stage NOT IN ('closed_won','closed_lost')
+           ORDER BY l.created_at DESC LIMIT 50`)
+      : empty,
+  ]);
+
+  const num  = (v: unknown) => Number(v ?? 0);
+  const date = (v: unknown) => (v instanceof Date ? v : new Date(String(v)));
+
+  return {
+    now: new Date(),
+    replies: (replies.rows as any[]).map((r) => ({
+      leadId: r.id, name: r.name, company: r.company,
+      dealValue: num(r.deal_value), repliedAt: date(r.replied_at),
+      preview: cleanPreview(r.preview),
+    })),
+    hotLeads: (hotLeads.rows as any[]).map((r) => ({
+      leadId: r.id, name: r.name, company: r.company, dealValue: num(r.deal_value),
+      views: num(r.views), slug: r.slug, lastViewAt: date(r.last_view_at),
+    })),
+    blocked: (blocked.rows as any[]).map((r) => ({
+      enrollmentId: r.enrollment_id, sequenceName: r.sequence_name,
+      reason: r.reason, leadCount: num(r.lead_count), since: date(r.since),
+    })),
+    dueTasks: (dueTasks.rows as any[]).map((r) => ({
+      taskId: r.id, title: r.title, dueDate: String(r.due_date).slice(0, 10),
+      priority: r.priority, projectName: r.project_name,
+    })),
+    staleLeads: (staleLeads.rows as any[]).map((r) => ({
+      leadId: r.id, name: r.name, company: r.company, dealValue: num(r.deal_value),
+      stage: r.stage, lastActivity: r.last_activity ? date(r.last_activity) : null,
+    })),
+    unassigned: (unassigned.rows as any[]).map((r) => ({
+      leadId: r.id, name: r.name, company: r.company,
+      dealValue: num(r.deal_value), createdAt: date(r.created_at),
+    })),
+  };
+}
+
+/** Strip our own markers and collapse the reply to one short line. */
+function cleanPreview(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  return raw
+    .replace(/^\[Reply received\]\s*/i, "")
+    .replace(/^\[Sequence\]\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240) || null;
+}
+
+export async function getWorklist(
+  user: { id: string; role?: string },
+): Promise<WorklistAction[]> {
+  return rankWorklist(await fetchWorklist(user));
+}

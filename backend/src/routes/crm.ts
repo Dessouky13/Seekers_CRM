@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { eq, and, not, inArray, ilike, or, sql, gte, desc } from "drizzle-orm";
 import { db } from "../db/client";
-import { leads, leadActivities, profiles } from "../db/schema";
+import { leads, leadActivities, profiles, events } from "../db/schema";
 import { authMiddleware, adminOnly, forcedAssigneeId, canAccessOwned, isAdmin } from "../middleware/auth";
 import {
   createLeadSchema, updateLeadSchema, createLeadActivitySchema,
@@ -207,6 +207,9 @@ crm.patch("/leads/:id", authMiddleware, async (c) => {
 // Returns: { deleted: number, preview: { id, name, company, source }[] (first 20) }
 // Cascades to lead_activities + outreach_enrollments + outreach_sends via FK ON DELETE CASCADE.
 const bulkDeleteSchema = z.object({
+  // Explicit selection from the UI (tick boxes). Capped — a runaway client
+  // should not be able to ask for the whole table in one call.
+  ids:            z.array(z.string().uuid()).max(1000).optional(),
   keep_sources:   z.array(z.string()).optional(),
   delete_sources: z.array(z.string()).optional(),
   dry_run:        z.boolean().optional(),
@@ -216,9 +219,49 @@ const bulkDeleteSchema = z.object({
 crm.post("/leads/bulk-delete", authMiddleware, adminOnly, async (c) => {
   const body = bulkDeleteSchema.parse(await c.req.json());
 
-  // Build the predicate. At least one of keep_sources / delete_sources is required.
+  // ── Selection mode: delete exactly the ticked rows ──
+  // This is a hard delete that cascades to activities, enrollments and sends.
+  // There is no undo, so the contract is: you always get an exact count and a
+  // preview first (dry_run), and every execution is written to the events log.
+  if (body.ids && body.ids.length > 0) {
+    const rows = await db
+      .select({ id: leads.id, name: leads.name, company: leads.company, source: leads.source })
+      .from(leads)
+      .where(inArray(leads.id, body.ids));
+
+    if (body.dry_run) {
+      return c.json({ deleted: 0, would_delete: rows.length, preview: rows.slice(0, 50) });
+    }
+
+    const deleted = await db
+      .delete(leads)
+      .where(inArray(leads.id, body.ids))
+      .returning({ id: leads.id, name: leads.name, company: leads.company });
+
+    // Audit trail. The rows themselves are gone; this at least records who
+    // removed what and when, which is the minimum after the task-cleanup
+    // incident showed how invisible silent deletion is.
+    if (deleted.length > 0) {
+      await db.insert(events).values({
+        leadId: null,
+        type:   "leads_bulk_deleted",
+        source: "crm",
+        payload: {
+          by:      c.get("user").id,
+          count:   deleted.length,
+          mode:    "selection",
+          deleted: deleted.slice(0, 200),
+        },
+      });
+    }
+
+    return c.json({ deleted: deleted.length, mode: "selection" });
+  }
+
+  // ── Filter mode: delete by source ──
+  // At least one of keep_sources / delete_sources is required.
   if (!body.keep_sources && !body.delete_sources) {
-    return c.json({ error: "Provide keep_sources OR delete_sources" }, 400);
+    return c.json({ error: "Provide ids, keep_sources, or delete_sources" }, 400);
   }
 
   const conditions = [];
@@ -263,6 +306,21 @@ crm.post("/leads/bulk-delete", authMiddleware, adminOnly, async (c) => {
 
   // Execute
   const deleted = await db.delete(leads).where(where).returning({ id: leads.id });
+
+  if (deleted.length > 0) {
+    await db.insert(events).values({
+      leadId: null,
+      type:   "leads_bulk_deleted",
+      source: "crm",
+      payload: {
+        by:    c.get("user").id,
+        count: deleted.length,
+        mode:  "source_filter",
+        keep_sources:   body.keep_sources   ?? null,
+        delete_sources: body.delete_sources ?? null,
+      },
+    });
+  }
 
   return c.json({
     deleted:   deleted.length,

@@ -92,6 +92,37 @@ export function useDeleteLead() {
   });
 }
 
+export interface BulkDeleteResult {
+  deleted:       number;
+  would_delete?: number;
+  preview?:      { id: string; name: string; company: string; source: string | null }[];
+}
+
+/**
+ * Bulk-delete leads by explicit selection. Admin only, server-enforced.
+ *
+ * Deletion cascades to activities, enrolments and sends and cannot be undone,
+ * so the UI always runs `dry_run` first to show an exact count before asking
+ * for confirmation. Every real execution is recorded in the events log.
+ */
+export function useBulkDeleteLeads() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, dryRun }: { ids: string[]; dryRun?: boolean }) =>
+      apiFetch<BulkDeleteResult>("/crm/leads/bulk-delete", {
+        method: "POST",
+        body: JSON.stringify({ ids, confirm: "DELETE_LEADS", dry_run: !!dryRun }),
+      }),
+    onSuccess: (_res, vars) => {
+      if (vars.dryRun) return;               // preview must not disturb the list
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["pipeline-summary"] });
+      qc.invalidateQueries({ queryKey: ["lead-categories"] });
+      qc.invalidateQueries({ queryKey: ["worklist"] });
+    },
+  });
+}
+
 export function useAddLeadActivity() {
   const qc = useQueryClient();
   return useMutation({
