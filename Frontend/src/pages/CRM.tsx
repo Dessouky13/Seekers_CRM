@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { ScrapeLeadsDialog } from "@/components/modules/ScrapeLeadsDialog";
-import { PipelineStats } from "@/components/modules/crm/PipelineStats";
+import { PipelineStats, PipelineStatsSkeleton } from "@/components/modules/crm/PipelineStats";
+import { LeadsPageSkeleton } from "@/components/modules/crm/LeadsPageSkeleton";
 import { CreateLeadDialog } from "@/components/modules/crm/CreateLeadDialog";
 import { LeadViewTabs, type LeadView } from "@/components/modules/crm/LeadViewTabs";
 import { LeadFilterBar } from "@/components/modules/crm/LeadFilterBar";
@@ -31,7 +32,7 @@ export default function CRM() {
   const debouncedSearch = useDebouncedValue(search.trim(), 350);
 
   const bulkEnroll = useBulkEnroll();
-  const { data: sequencesList = [] } = useSequences();
+  const { data: sequencesList = [], isLoading: sequencesLoading } = useSequences();
   const enrollableSequences = sequencesList.filter((s) => s.isActive && s.step_count > 0);
 
   const { data: rawLeads = [], isLoading } = useLeads({
@@ -42,7 +43,7 @@ export default function CRM() {
   });
 
   // Pipeline-summary: accurate totals across ALL leads regardless of current filter
-  const { data: pipeline = [] } = usePipelineSummary();
+  const { data: pipeline = [], isLoading: pipelineLoading } = usePipelineSummary();
   const { data: users    = [] } = useUsers();
   const { data: categories = [] } = useLeadCategories();
   const createLead = useCreateLead();
@@ -155,7 +156,7 @@ export default function CRM() {
   const activeFilterCount = (catFilter ? 1 : 0) + (stageFilter ? 1 : 0);
 
   if (isLoading) {
-    return <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">Loading leads…</div>;
+    return <LeadsPageSkeleton view={view} />;
   }
 
   return (
@@ -167,7 +168,7 @@ export default function CRM() {
             <span className="text-lg">📋</span>
             <h1 className="text-2xl font-bold text-foreground tracking-tight">Leads</h1>
           </div>
-          <PipelineStats pipeline={pipeline} />
+          {pipelineLoading ? <PipelineStatsSkeleton /> : <PipelineStats pipeline={pipeline} />}
         </div>
         <div className="flex items-center gap-2">
           {currentUser?.role === "admin" && <ScrapeLeadsDialog />}
@@ -229,6 +230,7 @@ export default function CRM() {
         <BulkActionBar
           selectedCount={selectedIds.size}
           sequences={enrollableSequences}
+          isLoadingSequences={sequencesLoading}
           onEnroll={handleBulkEnroll}
           isEnrolling={bulkEnroll.isPending}
           canDelete={currentUser?.role === "admin"}

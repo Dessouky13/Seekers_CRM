@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AgentPanel } from "@/components/modules/AgentPanel";
 import { LeadOutreachPanel } from "@/components/modules/LeadOutreachPanel";
 import { toast } from "sonner";
@@ -120,7 +121,7 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
             )}
           </SheetHeader>
 
-          {isLoading && <p className="text-sm text-muted-foreground mt-6">Loading…</p>}
+          {isLoading && <LeadDetailSkeleton />}
 
           {/* View mode */}
           {lead && !editMode && (
@@ -322,5 +323,47 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+// Mirrors the view-mode layout: the label/value field rows, the notes block and
+// the first few activity timeline entries.
+function LeadDetailSkeleton() {
+  return (
+    <div className="mt-6 space-y-6">
+      <div className="space-y-3 text-sm">
+        {[
+          "w-20", "w-32", "w-24", "w-16", "w-20", "w-24", "w-20", "w-24",
+        ].map((valueWidth, i) => (
+          <div key={i} className="flex justify-between items-center">
+            <Skeleton className="h-3.5 w-20" />
+            <Skeleton className={`h-3.5 ${valueWidth}`} />
+          </div>
+        ))}
+      </div>
+
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Notes</p>
+        <div className="bg-muted/40 rounded-lg p-3 space-y-2">
+          <Skeleton className="h-3.5 w-full" />
+          <Skeleton className="h-3.5 w-4/5" />
+        </div>
+      </div>
+
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Activity Timeline</p>
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex gap-3">
+              <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
+              <div className="space-y-1.5 flex-1">
+                <Skeleton className="h-3.5 w-3/4" />
+                <Skeleton className="h-3 w-28" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }

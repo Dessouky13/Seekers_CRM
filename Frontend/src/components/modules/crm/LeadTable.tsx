@@ -4,9 +4,21 @@
 
 import { ChevronRight } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { LEAD_STAGES, CATEGORY_CHIP, SOURCE_CHIP, fmt } from "./constants";
 import type { ApiLead } from "@/lib/types";
+
+const TABLE_COLUMNS = [
+  { label: "Name",        cls: "w-[20%]" },
+  { label: "Company",     cls: "w-[16%]" },
+  { label: "Stage",       cls: "w-[13%]" },
+  { label: "Niche",       cls: "w-[11%]" },
+  { label: "Deal Value",  cls: "w-[10%] text-right" },
+  { label: "Source",      cls: "w-[8%]" },
+  { label: "Last Activity", cls: "w-[10%]" },
+  { label: "Assigned",    cls: "w-[8%]" },
+];
 
 export function LeadTable({
   leads, onSelect, selectedIds, toggleOne, toggleAll,
@@ -33,16 +45,7 @@ export function LeadTable({
                   aria-label="Select all visible rows"
                 />
               </th>
-              {[
-                { label: "Name",        cls: "w-[20%]" },
-                { label: "Company",     cls: "w-[16%]" },
-                { label: "Stage",       cls: "w-[13%]" },
-                { label: "Niche",       cls: "w-[11%]" },
-                { label: "Deal Value",  cls: "w-[10%] text-right" },
-                { label: "Source",      cls: "w-[8%]" },
-                { label: "Last Activity", cls: "w-[10%]" },
-                { label: "Assigned",    cls: "w-[8%]" },
-              ].map((h) => (
+              {TABLE_COLUMNS.map((h) => (
                 <th
                   key={h.label}
                   className={cn(
@@ -110,6 +113,53 @@ export function LeadTable({
                 </tr>
               );
             })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// Same frame, same column widths and the real header labels — only the cell
+// values are placeholders, so rows don't shift when the data lands.
+export function LeadTableSkeleton({ rows = 8 }: { rows?: number }) {
+  return (
+    <div className="border border-border/60 rounded-lg overflow-x-auto bg-card/30">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[640px]">
+          <thead>
+            <tr className="border-b border-border/60 bg-muted/20">
+              <th className="w-[36px] px-3 py-2">
+                <Skeleton className="h-4 w-4 rounded-sm" />
+              </th>
+              {TABLE_COLUMNS.map((h) => (
+                <th
+                  key={h.label}
+                  className={cn(
+                    "px-3 py-2 text-[11px] font-medium text-muted-foreground uppercase tracking-wider",
+                    h.cls,
+                    h.cls.includes("text-right") ? "text-right" : "text-left",
+                  )}
+                >
+                  {h.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: rows }).map((_, i) => (
+              <tr key={i} className="border-b border-border/30 last:border-b-0">
+                <td className="px-3 py-2.5 align-middle"><Skeleton className="h-4 w-4 rounded-sm" /></td>
+                <td className="px-3 py-2.5 align-middle"><Skeleton className="h-3.5 w-32" /></td>
+                <td className="px-3 py-2.5"><Skeleton className="h-3.5 w-24" /></td>
+                <td className="px-3 py-2.5"><Skeleton className="h-[18px] w-20 rounded" /></td>
+                <td className="px-3 py-2.5"><Skeleton className="h-[17px] w-16 rounded" /></td>
+                <td className="px-3 py-2.5"><Skeleton className="h-3.5 w-16 ml-auto" /></td>
+                <td className="px-3 py-2.5"><Skeleton className="h-[17px] w-14 rounded" /></td>
+                <td className="px-3 py-2.5"><Skeleton className="h-3.5 w-20" /></td>
+                <td className="px-3 py-2.5"><Skeleton className="h-3.5 w-16" /></td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

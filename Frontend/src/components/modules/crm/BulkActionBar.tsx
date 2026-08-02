@@ -3,6 +3,7 @@
 
 import { Send, Trash2, ChevronDown as ChevronDownIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
   DropdownMenuLabel, DropdownMenuSeparator,
@@ -10,17 +11,18 @@ import {
 import type { Sequence } from "@/hooks/useOutreach";
 
 export function BulkActionBar({
-  selectedCount, sequences, onEnroll, isEnrolling,
+  selectedCount, sequences, isLoadingSequences, onEnroll, isEnrolling,
   canDelete, isDeleting, onDelete, onClear,
 }: {
-  selectedCount: number;
-  sequences:     Sequence[];
-  onEnroll:      (sequenceId: string) => void;
-  isEnrolling:   boolean;
-  canDelete:     boolean;
-  isDeleting:    boolean;
-  onDelete:      () => void;
-  onClear:       () => void;
+  selectedCount:      number;
+  sequences:          Sequence[];
+  isLoadingSequences: boolean;
+  onEnroll:           (sequenceId: string) => void;
+  isEnrolling:        boolean;
+  canDelete:          boolean;
+  isDeleting:         boolean;
+  onDelete:           () => void;
+  onClear:            () => void;
 }) {
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
@@ -31,7 +33,9 @@ export function BulkActionBar({
         <span className="text-border">·</span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" className="gap-1.5 h-8" disabled={isEnrolling || sequences.length === 0}>
+            {/* Enabled while sequences load so the menu can show its loading
+                state instead of the misleading "no sequences" message. */}
+            <Button size="sm" className="gap-1.5 h-8" disabled={isEnrolling || (!isLoadingSequences && sequences.length === 0)}>
               {isEnrolling ? (
                 <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Enrolling…</>
               ) : (
@@ -40,7 +44,20 @@ export function BulkActionBar({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-72">
-            {sequences.length === 0 ? (
+            {isLoadingSequences ? (
+              <>
+                <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Active sequences
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex flex-col items-start gap-1.5 px-2 py-2">
+                    <Skeleton className="h-3.5 w-40" />
+                    <Skeleton className="h-2.5 w-24" />
+                  </div>
+                ))}
+              </>
+            ) : sequences.length === 0 ? (
               <div className="px-2 py-3 text-xs text-muted-foreground">
                 No active sequences. Create one in <strong>Outreach</strong>.
               </div>

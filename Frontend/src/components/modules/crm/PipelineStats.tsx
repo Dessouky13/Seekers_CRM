@@ -2,6 +2,7 @@
 // counts and conversion rate. Totals come from /crm/pipeline-summary so they
 // cover ALL leads, not the currently filtered page of rows.
 
+import { Skeleton } from "@/components/ui/skeleton";
 import { fmt } from "./constants";
 import type { PipelineStageRow } from "@/hooks/useCRM";
 
@@ -24,6 +25,24 @@ export function PipelineStats({ pipeline }: { pipeline: PipelineStageRow[] }) {
       <span><span className="text-rose-400 font-semibold tabular-nums">{lostCount}</span> lost</span>
       <span className="text-border">·</span>
       <span><span className="text-primary font-semibold tabular-nums">{convRate}%</span> conv</span>
+    </div>
+  );
+}
+
+// Same row rhythm as the real stat line — separators stay, numbers become bars,
+// so the header doesn't flash misleading zeros while the summary loads.
+export function PipelineStatsSkeleton() {
+  return (
+    <div className="flex items-center gap-4 text-[12px] text-muted-foreground">
+      <Skeleton className="h-3.5 w-16" />
+      <span className="text-border">·</span>
+      <Skeleton className="h-3.5 w-32" />
+      <span className="text-border">·</span>
+      <Skeleton className="h-3.5 w-12" />
+      <span className="text-border">·</span>
+      <Skeleton className="h-3.5 w-12" />
+      <span className="text-border">·</span>
+      <Skeleton className="h-3.5 w-14" />
     </div>
   );
 }

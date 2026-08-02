@@ -1,6 +1,7 @@
 // Single lead card used by the kanban board: name/company, category + source
 // chips, deal value and the "no activity in 2+ days" staleness flag.
 
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { CATEGORY_CHIP, SOURCE_CHIP, fmt } from "./constants";
 import type { ApiLead } from "@/lib/types";
@@ -46,6 +47,26 @@ export function LeadCard({ lead, onSelect }: { lead: ApiLead; onSelect: (id: str
           )}
           <span className="text-[10px] text-muted-foreground">{lead.lastActivity ?? "—"}</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Placeholder with the same box, padding and three-band layout as a real card.
+export function LeadCardSkeleton() {
+  return (
+    <div className="rounded-md border border-border/60 bg-card px-3 py-2.5 space-y-2">
+      <div className="space-y-1.5">
+        <Skeleton className="h-3.5 w-28" />
+        <Skeleton className="h-3 w-20" />
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        <Skeleton className="h-4 w-16 rounded" />
+        <Skeleton className="h-4 w-12 rounded" />
+      </div>
+      <div className="flex items-center justify-between pt-1 border-t border-border/40">
+        <Skeleton className="h-3.5 w-16" />
+        <Skeleton className="h-3 w-14" />
       </div>
     </div>
   );
