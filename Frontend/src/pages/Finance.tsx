@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { StatCardSkeleton, TableSkeleton } from "@/components/ui/skeletons";
 import { toast } from "sonner";
 import {
   useTransactions, useFinanceSummary, useCategories,
@@ -29,14 +31,60 @@ const fmt = (n: number) =>
 
 const EGP_CATEGORIES = ["Client Setup Fee", "Client Recurring Fee", "Other Income", "Salary", "Tools", "Marketing", "Other"];
 
-function CategorySummary({ transactions, catLabel, icon: Icon, colorClass }: {
+const CATEGORY_COLUMNS = ["Date", "Description", "Client", "Amount"];
+
+const TRANSACTION_COLUMNS = ["Date", "Type", "Amount", "Categories", "Tool", "Client", "Held by", "Notes", ""];
+
+/** Small icon + label + total tile. Only the total is data, so only it loads. */
+function MiniStat({ icon: Icon, iconBg, iconColor, label, value, loading }: {
+  icon: React.ElementType;
+  iconBg: string;
+  iconColor: string;
+  label: string;
+  value: string;
+  loading?: boolean;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
+      <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", iconBg)}>
+        <Icon className={cn("h-4 w-4", iconColor)} />
+      </div>
+      <div>
+        <p className="text-xs text-muted-foreground">{label}</p>
+        {loading
+          ? <Skeleton className="mt-1 h-6 w-24" />
+          : <p className="text-lg font-semibold text-foreground">{value}</p>}
+      </div>
+    </div>
+  );
+}
+
+function CategorySummary({ transactions, catLabel, icon: Icon, colorClass, loading }: {
   transactions: ApiTransaction[];
   catLabel: string;
   icon: React.ElementType;
   colorClass: string;
+  loading?: boolean;
 }) {
   const rows = transactions.filter((t) => t.category === catLabel);
   const total = rows.reduce((s, t) => s + Number(t.amount), 0);
+
+  // An empty `transactions` array means "still fetching" just as often as it
+  // means "nothing here" — the two used to collapse into the same empty state,
+  // which read as a false negative on every page load.
+  if (loading) return (
+    <div className="space-y-1">
+      <div className={cn("flex items-center justify-between px-4 py-3 rounded-lg mb-3", colorClass + "/10 border border-current/10")}>
+        <div className="flex items-center gap-2">
+          <Icon className={cn("h-4 w-4", colorClass)} />
+          <span className="text-sm font-semibold">{catLabel}</span>
+        </div>
+        <Skeleton className="h-5 w-24" />
+      </div>
+      <TableSkeleton columns={CATEGORY_COLUMNS} rows={5} />
+    </div>
+  );
+
   if (rows.length === 0) return (
     <div className="flex flex-col items-center justify-center h-24 text-muted-foreground text-sm">
       No {catLabel.toLowerCase()} entries yet.
@@ -55,7 +103,7 @@ function CategorySummary({ transactions, catLabel, icon: Icon, colorClass }: {
         <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b border-border bg-muted/30">
-              {["Date", "Description", "Client", "Amount"].map((h) => (
+              {CATEGORY_COLUMNS.map((h) => (
                 <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
               ))}
             </tr>
@@ -94,7 +142,7 @@ export default function Finance() {
   const [section,    setSection]    = useState("overview");
 
   // All transactions for category breakdowns (no filter)
-  const { data: allTxRes }  = useTransactions({ limit: 2000 });
+  const { data: allTxRes, isLoading: loadingAllTx } = useTransactions({ limit: 2000 });
   const allTransactions = allTxRes?.data ?? [];
 
   const { data: txRes, isLoading } = useTransactions({
@@ -104,8 +152,8 @@ export default function Finance() {
     to:       toDate   || undefined,
     limit:    500,
   });
-  const { data: summary } = useFinanceSummary({ 
-    from: fromDate || undefined, 
+  const { data: summary, isLoading: loadingSummary } = useFinanceSummary({
+    from: fromDate || undefined,
     to: toDate || undefined,
     mode: dateMode,
   });
@@ -302,67 +350,52 @@ export default function Finance() {
         <TabsContent value="cash"    className="mt-4"><CashPositionsPanel /></TabsContent>
 
         <TabsContent value="overview" className="mt-4 space-y-6">
-      {/* KPI cards */}
+      {/* KPI cards — placeheld rather than showing EGP 0 before the numbers land */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard 
-          title="Total Income" 
-          value={fmt(income)} 
-          icon={TrendingUp} 
-          changeType="positive" 
-          change={dateMode === "cumulative" && toDate ? `Until ${toDate}` : "All time"} 
-        />
-        <StatCard 
-          title="Total Expenses" 
-          value={fmt(expenses)} 
-          icon={TrendingDown} 
-          changeType="negative" 
-          change={dateMode === "cumulative" && toDate ? `Until ${toDate}` : "All time"} 
-        />
-        <StatCard 
-          title="Net Profit" 
-          value={fmt(profit)} 
-          icon={DollarSign} 
-          changeType="positive" 
-          change={`${margin}% margin`} 
-        />
-        <StatCard 
-          title="Salaries Paid" 
-          value={fmt(totalSalary)} 
-          icon={Users} 
-          changeType="negative" 
-          change="All time" 
-        />
+        {(loadingSummary || loadingAllTx) ? (
+          Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
+        ) : (
+          <>
+            <StatCard
+              title="Total Income"
+              value={fmt(income)}
+              icon={TrendingUp}
+              changeType="positive"
+              change={dateMode === "cumulative" && toDate ? `Until ${toDate}` : "All time"}
+            />
+            <StatCard
+              title="Total Expenses"
+              value={fmt(expenses)}
+              icon={TrendingDown}
+              changeType="negative"
+              change={dateMode === "cumulative" && toDate ? `Until ${toDate}` : "All time"}
+            />
+            <StatCard
+              title="Net Profit"
+              value={fmt(profit)}
+              icon={DollarSign}
+              changeType="positive"
+              change={`${margin}% margin`}
+            />
+            <StatCard
+              title="Salaries Paid"
+              value={fmt(totalSalary)}
+              icon={Users}
+              changeType="negative"
+              change="All time"
+            />
+          </>
+        )}
       </div>
 
-      {/* Category summary row */}
+      {/* Category summary row — icons/labels are static, only the totals load */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/10">
-            <Wrench className="h-4 w-4 text-blue-500" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Tools Spend</p>
-            <p className="text-lg font-semibold text-foreground">{fmt(totalTools)}</p>
-          </div>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-green-500/10">
-            <RefreshCcw className="h-4 w-4 text-green-500" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Client Recurring</p>
-            <p className="text-lg font-semibold text-foreground">{fmt(totalRecurring)}</p>
-          </div>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10">
-            <Zap className="h-4 w-4 text-violet-500" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Setup Fees</p>
-            <p className="text-lg font-semibold text-foreground">{fmt(totalSetup)}</p>
-          </div>
-        </div>
+        <MiniStat icon={Wrench}    iconBg="bg-blue-500/10"   iconColor="text-blue-500"
+                  label="Tools Spend"      value={fmt(totalTools)}     loading={loadingAllTx} />
+        <MiniStat icon={RefreshCcw} iconBg="bg-green-500/10"  iconColor="text-green-500"
+                  label="Client Recurring" value={fmt(totalRecurring)} loading={loadingAllTx} />
+        <MiniStat icon={Zap}        iconBg="bg-violet-500/10" iconColor="text-violet-500"
+                  label="Setup Fees"       value={fmt(totalSetup)}     loading={loadingAllTx} />
       </div>
 
       {/* Tabs */}
@@ -455,14 +488,14 @@ export default function Finance() {
           </div>
 
           {isLoading ? (
-            <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">Loading…</div>
+            <TableSkeleton columns={TRANSACTION_COLUMNS} rows={8} />
           ) : (
             <div className="rounded-xl border border-border overflow-x-auto">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[640px]">
                   <thead>
                     <tr className="border-b border-border bg-muted/30">
-                      {["Date", "Type", "Amount", "Categories", "Tool", "Client", "Held by", "Notes", ""].map((h) => (
+                      {TRANSACTION_COLUMNS.map((h) => (
                         <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
                       ))}
                     </tr>
@@ -531,22 +564,22 @@ export default function Finance() {
 
         {/* ── SALARIES ── */}
         <TabsContent value="salary">
-          <CategorySummary transactions={allTransactions} catLabel="Salary" icon={Users} colorClass="text-orange-500" />
+          <CategorySummary transactions={allTransactions} catLabel="Salary" icon={Users} colorClass="text-orange-500" loading={loadingAllTx} />
         </TabsContent>
 
         {/* ── TOOLS ── */}
         <TabsContent value="tools">
-          <CategorySummary transactions={allTransactions} catLabel="Tools" icon={Wrench} colorClass="text-blue-500" />
+          <CategorySummary transactions={allTransactions} catLabel="Tools" icon={Wrench} colorClass="text-blue-500" loading={loadingAllTx} />
         </TabsContent>
 
         {/* ── CLIENT RECURRING ── */}
         <TabsContent value="recurring">
-          <CategorySummary transactions={allTransactions} catLabel="Client Recurring Fee" icon={RefreshCcw} colorClass="text-green-600" />
+          <CategorySummary transactions={allTransactions} catLabel="Client Recurring Fee" icon={RefreshCcw} colorClass="text-green-600" loading={loadingAllTx} />
         </TabsContent>
 
         {/* ── SETUP FEES ── */}
         <TabsContent value="setup">
-          <CategorySummary transactions={allTransactions} catLabel="Client Setup Fee" icon={Zap} colorClass="text-violet-600" />
+          <CategorySummary transactions={allTransactions} catLabel="Client Setup Fee" icon={Zap} colorClass="text-violet-600" loading={loadingAllTx} />
         </TabsContent>
       </Tabs>
         </TabsContent>

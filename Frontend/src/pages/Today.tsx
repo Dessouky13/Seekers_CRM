@@ -2,11 +2,12 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   MessageSquareReply, Flame, AlertTriangle, CheckSquare,
-  Clock, UserPlus, ArrowRight, CheckCircle2, Loader2, TrendingDown,
+  Clock, UserPlus, ArrowRight, CheckCircle2, TrendingDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useCurrentUser } from "@/hooks/useAuth";
 import {
   useWorklist, usePipelineHealth,
@@ -116,7 +117,25 @@ function QueueRow({ action, onGo, active }: {
 
 /** Admin-only supply strip. Runway is the number that owns "not enough leads". */
 function SupplyStrip() {
-  const { data, isError } = usePipelineHealth();
+  const { data, isError, isLoading } = usePipelineHealth();
+
+  // Its own query, so it gets its own placeholder rather than riding on the
+  // worklist's loading flag — whichever resolves first shows first.
+  if (isLoading) {
+    return (
+      <Card className="overflow-hidden border-border/70">
+        <div className="grid grid-cols-2 gap-px bg-border/40 sm:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="bg-card px-4 py-3">
+              <Skeleton className="h-7 w-12" />
+              <Skeleton className="mt-1 h-3 w-16" />
+            </div>
+          ))}
+        </div>
+      </Card>
+    );
+  }
+
   if (isError || !data) return null;
 
   const stats = [
@@ -151,6 +170,38 @@ function SupplyStrip() {
   );
 }
 
+/** Mirrors FocusCard: badge row, title, subtitle, reason, two buttons. */
+function FocusCardSkeleton() {
+  return (
+    <Card className="p-6 border-border/70">
+      <div className="flex items-start justify-between gap-4">
+        <Skeleton className="h-5 w-28 rounded-full" />
+        <Skeleton className="h-4 w-12 shrink-0" />
+      </div>
+      <Skeleton className="mt-4 h-8 w-3/4" />
+      <Skeleton className="mt-2 h-5 w-1/2" />
+      <Skeleton className="mt-3 h-5 w-2/3" />
+      <div className="mt-5 flex gap-2">
+        <Skeleton className="h-10 w-36" />
+        <Skeleton className="h-10 w-28" />
+      </div>
+    </Card>
+  );
+}
+
+/** Mirrors QueueRow: dot, two stacked lines. */
+function QueueRowSkeleton() {
+  return (
+    <div className="flex w-full items-center gap-3 border-b border-border/40 px-4 py-2.5 last:border-0">
+      <Skeleton className="h-1.5 w-1.5 shrink-0 rounded-full" />
+      <div className="min-w-0 flex-1 space-y-1">
+        <Skeleton className="h-5 w-1/2" />
+        <Skeleton className="h-4 w-2/3" />
+      </div>
+    </div>
+  );
+}
+
 export default function Today() {
   const user = useCurrentUser();
   const navigate = useNavigate();
@@ -162,13 +213,32 @@ export default function Today() {
   const firstName = user?.name?.split(" ")[0] ?? "there";
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const isAdmin = user?.role === "admin";
 
   const go = (a: WorklistAction) => navigate(a.deepLink);
 
   if (isLoading) {
     return (
-      <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Working out what needs you…
+      <div className="mx-auto max-w-3xl space-y-5 py-2">
+        {/* The greeting comes from the cached user, not the queue, so it renders
+            for real — only the counts underneath are placeheld. */}
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">{greeting}, {firstName}</h1>
+          <Skeleton className="mt-1.5 h-4 w-56" />
+        </div>
+
+        {isAdmin && <SupplyStrip />}
+
+        <FocusCardSkeleton />
+
+        <div>
+          <p className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Up next
+          </p>
+          <Card className="overflow-hidden">
+            {Array.from({ length: 5 }).map((_, i) => <QueueRowSkeleton key={i} />)}
+          </Card>
+        </div>
       </div>
     );
   }
@@ -198,7 +268,6 @@ export default function Today() {
   const live = all.filter((a) => !skipped.includes(a.id));
   const focus = live[0];
   const queue = live.slice(1, 8);
-  const isAdmin = user?.role === "admin";
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 py-2">

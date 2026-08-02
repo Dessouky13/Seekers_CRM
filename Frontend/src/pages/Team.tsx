@@ -1,12 +1,13 @@
 import { useState } from "react";
 import {
   UserPlus, Shield, User as UserIcon, Trash2, Target, CheckSquare,
-  Send, AlertTriangle, Clock, ChevronRight, Loader2, Eye, EyeOff,
+  Send, AlertTriangle, Clock, ChevronRight, Eye, EyeOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogTrigger,
 } from "@/components/ui/dialog";
@@ -72,8 +73,8 @@ export default function Team() {
     });
   };
 
-  if (isLoading) return <p className="text-sm text-muted-foreground text-center py-16">Loading team…</p>;
-
+  // The page chrome (title, Add Member, the access legend copy) is static, so it
+  // renders straight away and only the counts and member cards are placeheld.
   const admins  = members.filter((m) => m.role === "admin");
   const staff   = members.filter((m) => m.role !== "admin");
 
@@ -99,7 +100,9 @@ export default function Team() {
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-center gap-2 mb-1.5">
             <Shield className="h-3.5 w-3.5 text-primary" />
-            <p className="text-xs font-semibold uppercase tracking-wider text-primary">Admin — {admins.length}</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1">
+              Admin — {isLoading ? <Skeleton className="h-3 w-4" /> : admins.length}
+            </p>
           </div>
           <p className="text-[11px] text-muted-foreground">
             Everything: finance, clients, vault, goals, all leads &amp; tasks, sequence editing and analytics.
@@ -108,7 +111,9 @@ export default function Team() {
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-center gap-2 mb-1.5">
             <UserIcon className="h-3.5 w-3.5 text-info" />
-            <p className="text-xs font-semibold uppercase tracking-wider text-info">Member — {staff.length}</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-info flex items-center gap-1">
+              Member — {isLoading ? <Skeleton className="h-3 w-4" /> : staff.length}
+            </p>
           </div>
           <p className="text-[11px] text-muted-foreground">
             Only leads &amp; tasks assigned to them, their own notes, and outreach on their own leads.
@@ -119,20 +124,55 @@ export default function Team() {
 
       {/* Member cards */}
       <div className="space-y-3">
-        {members.map((m) => (
-          <MemberCard
-            key={m.id}
-            m={m}
-            isSelf={m.id === me?.id}
-            onOpen={() => setDrillId(m.id)}
-            onToggleRole={() => toggleRole(m)}
-            onDelete={() => handleDelete(m)}
-            busy={updateRole.isPending || deleteMember.isPending}
-          />
-        ))}
+        {isLoading
+          ? Array.from({ length: 4 }).map((_, i) => <MemberCardSkeleton key={i} />)
+          : members.map((m) => (
+            <MemberCard
+              key={m.id}
+              m={m}
+              isSelf={m.id === me?.id}
+              onOpen={() => setDrillId(m.id)}
+              onToggleRole={() => toggleRole(m)}
+              onDelete={() => handleDelete(m)}
+              busy={updateRole.isPending || deleteMember.isPending}
+            />
+          ))}
       </div>
 
       <MemberWorkDialog userId={drillId} onClose={() => setDrillId(null)} />
+    </div>
+  );
+}
+
+/** Mirrors MemberCard: avatar + identity header, then the 4-column stat strip. */
+function MemberCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 border-b border-border">
+        <Skeleton className="h-9 w-9 shrink-0 rounded-full" />
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-3.5 w-56" />
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Skeleton className="h-7 w-24" />
+          <Skeleton className="h-7 w-20" />
+          <Skeleton className="h-7 w-7" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-border/60">
+        {["Leads", "Tasks", "Outreach", "Activity"].map((label) => (
+          <div key={label} className="px-4 py-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Skeleton className="h-3 w-3 rounded-sm" />
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+            </div>
+            <Skeleton className="h-5 w-16" />
+            <Skeleton className="mt-1 h-3 w-24" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -327,6 +367,67 @@ function AddMemberDialog({ onDone }: { onDone: () => void }) {
 }
 
 // ─── Drill-in: what this person is working on ─────────────
+/** Mirrors the drill-in body: header, leads table, task rows, activity cards. */
+function MemberWorkSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="space-y-1.5">
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="h-3.5 w-56" />
+      </div>
+
+      <Section title="Leads">
+        <div className="rounded-lg border border-border overflow-x-auto">
+          <table className="w-full text-xs min-w-[640px]">
+            <thead>
+              <tr className="border-b border-border bg-muted/30">
+                {["Lead", "Company", "Stage", "Value", "Last activity"].map((h) => (
+                  <th key={h} className="text-left px-3 py-1.5 font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 5 }).map((_, r) => (
+                <tr key={r} className="border-b border-border/40">
+                  {["w-24", "w-28", "w-14", "w-20", "w-20"].map((w) => (
+                    <td key={w} className="px-3 py-1.5"><Skeleton className={cn("h-3.5", w)} /></td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      <Section title="Tasks">
+        <div className="space-y-1">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-1.5">
+              <Skeleton className="h-4 flex-1" />
+              <Skeleton className="h-4 w-16 shrink-0" />
+              <Skeleton className="h-3 w-16 shrink-0" />
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Recent activity">
+        <div className="space-y-1.5">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="rounded-md border border-border/60 bg-muted/10 px-3 py-2 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <Skeleton className="h-3.5 w-40" />
+                <Skeleton className="h-3 w-12 shrink-0" />
+              </div>
+              <Skeleton className="h-3.5 w-full" />
+            </div>
+          ))}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
 function MemberWorkDialog({ userId, onClose }: { userId: string | null; onClose: () => void }) {
   const { data, isLoading } = useMemberWork(userId);
 
@@ -334,9 +435,7 @@ function MemberWorkDialog({ userId, onClose }: { userId: string | null; onClose:
     <Dialog open={!!userId} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
         {isLoading || !data ? (
-          <div className="py-16 text-center text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin mx-auto" />
-          </div>
+          <MemberWorkSkeleton />
         ) : (
           <>
             <DialogHeader>

@@ -5,12 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TableSkeleton } from "@/components/ui/skeletons";
 import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, API_BASE } from "@/lib/api";
 import { getStoredToken } from "@/lib/auth";
 import { cn } from "@/lib/utils";
-import type { ApiApiKbDocument } from "@/lib/types";
+import type { ApiKbDocument } from "@/lib/types";
 
 interface RagResult {
   answer: string;
@@ -28,6 +30,8 @@ const statusBadge = {
   ready:      "bg-success/15 text-success",
   error:      "bg-destructive/15 text-destructive",
 };
+
+const DOCUMENT_COLUMNS = ["Title", "Type", "Size", "Status", "Uploaded", ""];
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -158,9 +162,11 @@ export default function Knowledge() {
 
       {/* Document list */}
       <div>
-        <h2 className="text-sm font-semibold text-foreground mb-3">Documents ({documents.length})</h2>
+        <h2 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-1">
+          Documents ({isLoading ? <Skeleton className="h-3.5 w-3" /> : documents.length})
+        </h2>
         {isLoading ? (
-          <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">Loading…</div>
+          <TableSkeleton columns={DOCUMENT_COLUMNS} rows={6} />
         ) : documents.length === 0 ? (
           <div className="rounded-xl border border-border bg-card p-12 text-center">
             <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
@@ -171,7 +177,7 @@ export default function Knowledge() {
             <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
-                  {["Title", "Type", "Size", "Status", "Uploaded", ""].map((h) => (
+                  {DOCUMENT_COLUMNS.map((h) => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>

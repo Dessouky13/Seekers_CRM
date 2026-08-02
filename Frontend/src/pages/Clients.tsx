@@ -11,6 +11,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { StatCard } from "@/components/modules/StatCard";
+import { Skeleton } from "@/components/ui/skeleton";
+import { StatCardSkeleton } from "@/components/ui/skeletons";
 import { toast } from "sonner";
 import { useClients, useClientDetail, useCreateClient, useUpdateClient, useDeleteClient } from "@/hooks/useClients";
 import { AgentPanel } from "@/components/modules/AgentPanel";
@@ -31,6 +33,42 @@ const priorityColors: Record<string, string> = {
   high:     "bg-warning/15 text-warning",
   critical: "bg-destructive/15 text-destructive",
 };
+
+/** Mirrors the detail sheet: title row, label/value rows, then the task list. */
+function ClientDetailSkeleton() {
+  return (
+    <div className="pt-2">
+      <div className="flex items-center gap-2">
+        <Skeleton className="h-6 w-40" />
+        <Skeleton className="h-4 w-16 rounded-full" />
+      </div>
+
+      <div className="mt-6 space-y-3">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex justify-between">
+            <Skeleton className="h-5 w-24" />
+            <Skeleton className="h-5 w-28" />
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Tasks</p>
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="rounded-lg bg-muted/40 p-3 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="h-4 w-14 rounded" />
+              </div>
+              <Skeleton className="h-4 w-32" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ClientDetailSheet({ clientId, onClose }: { clientId: string | null; onClose: () => void }) {
   const navigate = useNavigate();
@@ -57,7 +95,7 @@ function ClientDetailSheet({ clientId, onClose }: { clientId: string | null; onC
     <>
       <Sheet open={!!clientId} onOpenChange={(o) => { if (!o) { onClose(); setEditMode(false); } }}>
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-          {isLoading && <p className="text-sm text-muted-foreground p-6">Loading…</p>}
+          {isLoading && <ClientDetailSkeleton />}
           {detail && (
             <>
               <SheetHeader className="flex flex-row items-center justify-between pr-0">
@@ -292,6 +330,28 @@ function ClientDetailSheet({ clientId, onClose }: { clientId: string | null; onC
   );
 }
 
+/** Mirrors a client card: name/company + status pill, meta row, project footer. */
+function ClientCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 space-y-3">
+      <div className="flex items-start justify-between">
+        <div className="space-y-1.5">
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-4 w-24" />
+        </div>
+        <Skeleton className="h-4 w-16 rounded-full" />
+      </div>
+      <div className="flex items-center gap-4">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-4 w-24" />
+      </div>
+      <div className="pt-1 border-t border-border/50">
+        <Skeleton className="h-4 w-20" />
+      </div>
+    </div>
+  );
+}
+
 export default function Clients() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch]             = useState("");
@@ -365,16 +425,26 @@ export default function Clients() {
         </Dialog>
       </div>
 
-      {/* Summary */}
+      {/* Summary — these are derived from the client list, so they wait on it too */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard title="Total Clients" value={String(clients.length)} icon={Building2} />
-        <StatCard
-          title="Active Clients"
-          value={String(activeCount)}
-          change={clients.length ? `${Math.round((activeCount / clients.length) * 100)}% of total` : "0%"}
-          changeType="positive"
-        />
-        <StatCard title="Total Revenue" value={fmt(totalRevenue)} changeType="positive" change="Lifetime" />
+        {isLoading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton withIcon={false} />
+            <StatCardSkeleton withIcon={false} />
+          </>
+        ) : (
+          <>
+            <StatCard title="Total Clients" value={String(clients.length)} icon={Building2} />
+            <StatCard
+              title="Active Clients"
+              value={String(activeCount)}
+              change={clients.length ? `${Math.round((activeCount / clients.length) * 100)}% of total` : "0%"}
+              changeType="positive"
+            />
+            <StatCard title="Total Revenue" value={fmt(totalRevenue)} changeType="positive" change="Lifetime" />
+          </>
+        )}
       </div>
 
       {/* Filters */}
@@ -401,7 +471,9 @@ export default function Clients() {
 
       {/* Client cards grid */}
       {isLoading ? (
-        <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">Loading clients…</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 6 }).map((_, i) => <ClientCardSkeleton key={i} />)}
+        </div>
       ) : clients.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center animate-fade-in">
           <p className="text-muted-foreground">No clients found. Add your first client above.</p>

@@ -5,11 +5,42 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { useGoals, useCreateGoal, useUpdateGoal, useDeleteGoal } from "@/hooks/useGoals";
 import { useCurrentUser } from "@/hooks/useAuth";
 import type { ApiGoal } from "@/lib/types";
+
+/** Mirrors a goal card: title block, progress readout, bar, stepper controls. */
+function GoalCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+      <div className="flex items-start justify-between">
+        <div className="space-y-1.5">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-4 w-20" />
+        </div>
+        <div className="flex items-center gap-1">
+          <Skeleton className="h-5 w-5" />
+          <Skeleton className="h-5 w-5" />
+        </div>
+      </div>
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-5 w-10" />
+        </div>
+        <Skeleton className="h-2 w-full rounded-full" />
+        <div className="flex items-center gap-2 mt-2">
+          <Skeleton className="h-7 w-7 rounded-md" />
+          <Skeleton className="h-7 w-20 rounded-md" />
+          <Skeleton className="h-7 w-7 rounded-md" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Goals() {
   const [isOpen, setIsOpen]       = useState(false);
@@ -62,10 +93,6 @@ export default function Goals() {
   const openEdit = (g: ApiGoal) => { setEditGoal(g); setIsOpen(true); };
   const openAdd  = () => { setEditGoal(null); setIsOpen(true); };
 
-  if (isLoading) {
-    return <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">Loading goals…</div>;
-  }
-
   return (
     <div className="space-y-6 max-w-4xl">
       <div className="flex items-center justify-between">
@@ -99,7 +126,13 @@ export default function Goals() {
         </Dialog>
       </div>
 
-      {goals.length === 0 ? (
+      {/* Loading and "no goals yet" used to share one branch, so a slow request
+          looked like an empty board. They are separate states now. */}
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => <GoalCardSkeleton key={i} />)}
+        </div>
+      ) : goals.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center animate-fade-in">
           <Target className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
           <p className="text-muted-foreground">No goals yet. Add your first goal above.</p>

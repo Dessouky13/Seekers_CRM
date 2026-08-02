@@ -4,6 +4,8 @@ import {
   Database, Target,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TableSkeleton } from "@/components/ui/skeletons";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -269,6 +271,20 @@ function KpiCard({ icon: Icon, label, value, hint }: {
   );
 }
 
+/** Mirrors KpiCard: label + icon row, big number, optional hint line. */
+function KpiCardSkeleton({ withHint = false }: { withHint?: boolean }) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="flex items-center justify-between mb-1.5">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-3.5 w-3.5 rounded" />
+      </div>
+      <Skeleton className="h-8 w-16" />
+      {withHint && <Skeleton className="mt-1 h-3 w-24" />}
+    </div>
+  );
+}
+
 function EmptyState({ icon: Icon, title, hint }: { icon: typeof Mail; title: string; hint: string }) {
   return (
     <div className="rounded-xl border border-border bg-card p-12 text-center">
@@ -347,6 +363,8 @@ export default function Outbound() {
 // ── Pipeline ──────────────────────────────────────────────
 type LeadFilter = "all" | "enriched" | "missing";
 
+const INTEL_LEAD_COLUMNS = ["Lead", "Niche", "Stage", "ICP", "Intel", "Updated"];
+
 function PipelineTab() {
   const [filter, setFilter] = useState<LeadFilter>("all");
   const { data: summary, isLoading: loadingSummary } = useIntelSummary();
@@ -360,14 +378,25 @@ function PipelineTab() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard icon={Database} label="Total leads"   value={loadingSummary ? "…" : summary?.total_leads ?? 0} />
-        <KpiCard icon={Sparkles} label="Enriched"      value={loadingSummary ? "…" : summary?.enriched ?? 0}
-                 hint="has a tech fingerprint" />
-        <KpiCard icon={AlertTriangle} label="Not enriched" value={loadingSummary ? "…" : summary?.not_enriched ?? 0}
-                 hint="waiting on the scraper" />
-        <KpiCard icon={Target} label="Avg ICP score"
-                 value={loadingSummary ? "…" : summary?.avg_icp_score ?? "—"}
-                 hint={summary ? `${summary.scored} lead${summary.scored === 1 ? "" : "s"} scored` : undefined} />
+        {loadingSummary ? (
+          <>
+            <KpiCardSkeleton />
+            <KpiCardSkeleton withHint />
+            <KpiCardSkeleton withHint />
+            <KpiCardSkeleton withHint />
+          </>
+        ) : (
+          <>
+            <KpiCard icon={Database} label="Total leads"   value={summary?.total_leads ?? 0} />
+            <KpiCard icon={Sparkles} label="Enriched"      value={summary?.enriched ?? 0}
+                     hint="has a tech fingerprint" />
+            <KpiCard icon={AlertTriangle} label="Not enriched" value={summary?.not_enriched ?? 0}
+                     hint="waiting on the scraper" />
+            <KpiCard icon={Target} label="Avg ICP score"
+                     value={summary?.avg_icp_score ?? "—"}
+                     hint={summary ? `${summary.scored} lead${summary.scored === 1 ? "" : "s"} scored` : undefined} />
+          </>
+        )}
       </div>
 
       {summary && summary.by_tag.length > 0 && (
@@ -400,7 +429,7 @@ function PipelineTab() {
       </div>
 
       {loadingLeads ? (
-        <p className="text-sm text-muted-foreground text-center py-8">Loading…</p>
+        <TableSkeleton columns={INTEL_LEAD_COLUMNS} rows={8} />
       ) : leads.length === 0 ? (
         <EmptyState
           icon={Radar}
@@ -412,7 +441,7 @@ function PipelineTab() {
           <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-border bg-muted/30">
-                {["Lead", "Niche", "Stage", "ICP", "Intel", "Updated"].map((h) => (
+                {INTEL_LEAD_COLUMNS.map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
@@ -442,12 +471,41 @@ function PipelineTab() {
 }
 
 // ── Intelligence ──────────────────────────────────────────
+/** Mirrors an intel card: company/name line, domain line, ICP pill, chip row. */
+function IntelCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-2.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <Skeleton className="h-5 w-2/5" />
+          <Skeleton className="mt-1 h-3.5 w-1/4" />
+        </div>
+        <Skeleton className="h-5 w-9 shrink-0 rounded-md" />
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {["w-24", "w-28", "w-20", "w-32"].map((w) => (
+          <Skeleton key={w} className={cn("h-5 rounded-full", w)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function IntelligenceTab() {
   const { data: leadsRes, isLoading } = useIntelLeads({ limit: 200, enriched: true });
   const [selected, setSelected] = useState<IntelLead | null>(null);
   const leads = leadsRes?.data ?? [];
 
-  if (isLoading) return <p className="text-sm text-muted-foreground text-center py-12">Loading intelligence…</p>;
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-4 w-72" />
+        <div className="space-y-2">
+          {Array.from({ length: 6 }).map((_, i) => <IntelCardSkeleton key={i} />)}
+        </div>
+      </div>
+    );
+  }
 
   if (leads.length === 0) {
     return (
@@ -564,10 +622,45 @@ function healthTone(score: number | null): { text: string; bar: string; label: s
   return              { text: "text-destructive", bar: "bg-destructive", label: "Critical" };
 }
 
+/** Mirrors MailboxCard: address block, score, health bar, 3 metric tiles. */
+function MailboxCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <Skeleton className="h-5 w-2/3" />
+          <Skeleton className="mt-1 h-3.5 w-1/2" />
+        </div>
+        <div className="shrink-0 flex flex-col items-end gap-1">
+          <Skeleton className="h-8 w-10" />
+          <Skeleton className="h-3 w-14" />
+        </div>
+      </div>
+
+      <Skeleton className="h-1.5 w-full rounded-full" />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+        {["Inbox", "Bounce", "Sent today"].map((label) => (
+          <div key={label} className="rounded-lg border border-border bg-muted/10 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+            <Skeleton className="mt-1 h-5 w-12" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DeliverabilityTab() {
   const { data: mailboxes = [], isLoading } = useMailboxes();
 
-  if (isLoading) return <p className="text-sm text-muted-foreground text-center py-12">Loading mailboxes…</p>;
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => <MailboxCardSkeleton key={i} />)}
+      </div>
+    );
+  }
 
   if (mailboxes.length === 0) {
     return (
@@ -680,7 +773,25 @@ function payloadSummary(payload: Record<string, unknown> | null): string | null 
 function ActivityTab() {
   const { data: events = [], isLoading } = useEvents({ limit: 200 });
 
-  if (isLoading) return <p className="text-sm text-muted-foreground text-center py-12">Loading activity…</p>;
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-4 w-56" />
+        <div className="rounded-xl border border-border bg-card divide-y divide-border/50">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="flex items-start gap-3 px-4 py-2.5">
+              <Skeleton className="h-4 w-16 shrink-0 mt-0.5 rounded-md" />
+              <div className="flex-1 min-w-0 space-y-1">
+                <Skeleton className="h-4 w-3/5" />
+                <Skeleton className="h-3 w-2/5" />
+              </div>
+              <Skeleton className="h-3 w-12 shrink-0 mt-0.5" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (events.length === 0) {
     return (

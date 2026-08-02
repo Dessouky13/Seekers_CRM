@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { TableSkeleton, type SkeletonColumn } from "@/components/ui/skeletons";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -23,6 +24,16 @@ interface VaultEntry {
   notes: string | null;
   createdAt: string;
 }
+
+// Same responsive column visibility as the real table, so nothing reflows when
+// the entries land.
+const VAULT_COLUMNS: SkeletonColumn[] = [
+  { label: "Title" },
+  { label: "Username", className: "hidden sm:table-cell" },
+  { label: "Password" },
+  { label: "Category", className: "hidden md:table-cell" },
+  { className: "w-20" },
+];
 
 function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
@@ -233,7 +244,7 @@ export default function Vault() {
 
       {/* Entries table */}
       {isLoading ? (
-        <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">Loading vault…</div>
+        <TableSkeleton columns={VAULT_COLUMNS} rows={7} className="bg-card" />
       ) : filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border p-16 text-center">
           <Lock className="h-8 w-8 text-muted-foreground/40 mx-auto mb-3" />

@@ -21,12 +21,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
-import { useCurrentUser } from "@/hooks/useAuth";
+import { useCurrentUser, useCurrentProfile } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import type { ApiUser } from "@/lib/types";
 
 export default function Settings() {
   const currentUser = useCurrentUser();
+  // Full profile — the localStorage copy lacks title/phone/signature.
+  const { data: profile } = useCurrentProfile();
   const [inviteOpen,  setInviteOpen]  = useState(false);
   const [createOpen,  setCreateOpen]  = useState(false);
   const qc = useQueryClient();
@@ -123,7 +125,7 @@ export default function Settings() {
       </div>
 
       {/* Email signature */}
-      {currentUser && <SignatureEditor user={currentUser} />}
+      {profile && <SignatureEditor user={profile} />}
 
       {/* Outbound Webhooks */}
       {isAdmin && <WebhooksPanel />}
