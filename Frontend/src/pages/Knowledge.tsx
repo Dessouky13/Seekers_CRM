@@ -167,8 +167,8 @@ export default function Knowledge() {
             <p className="text-muted-foreground">No documents yet. Upload a PDF or text file above.</p>
           </div>
         ) : (
-          <div className="rounded-xl border border-border overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="rounded-xl border border-border overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
                   {["Title", "Type", "Size", "Status", "Uploaded", ""].map((h) => (

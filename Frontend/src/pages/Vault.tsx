@@ -64,7 +64,7 @@ function EntryForm({
 }) {
   return (
     <div className="space-y-4 pt-1">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="col-span-2">
           <Label>Title</Label>
           <Input name="title" defaultValue={initial?.title} required placeholder="e.g. Gmail, Vercel, Cloudflare" className="mt-1" />
@@ -240,8 +240,8 @@ export default function Vault() {
           <p className="text-sm text-muted-foreground">No entries yet. Add your first password above.</p>
         </div>
       ) : (
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="rounded-xl border border-border bg-card overflow-x-auto">
+          <table className="w-full text-sm min-w-[640px]">
             <thead className="border-b border-border bg-muted/30">
               <tr>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Title</th>

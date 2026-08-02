@@ -51,8 +51,8 @@ function CategorySummary({ transactions, catLabel, icon: Icon, colorClass }: {
         </div>
         <span className={cn("font-bold tabular-nums", colorClass)}>{fmt(total)}</span>
       </div>
-      <div className="rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="rounded-xl border border-border overflow-x-auto">
+        <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b border-border bg-muted/30">
               {["Date", "Description", "Client", "Amount"].map((h) => (
@@ -200,7 +200,7 @@ export default function Finance() {
           <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>{editTx ? "Edit" : "Add"} Transaction</DialogTitle></DialogHeader>
             <form onSubmit={handleSave} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label>Type</Label>
                   <select
@@ -457,9 +457,9 @@ export default function Finance() {
           {isLoading ? (
             <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">Loading…</div>
           ) : (
-            <div className="rounded-xl border border-border overflow-hidden">
+            <div className="rounded-xl border border-border overflow-x-auto">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm min-w-[640px]">
                   <thead>
                     <tr className="border-b border-border bg-muted/30">
                       {["Date", "Type", "Amount", "Categories", "Tool", "Client", "Held by", "Notes", ""].map((h) => (

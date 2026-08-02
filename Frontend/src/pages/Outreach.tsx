@@ -365,13 +365,13 @@ function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onBack: ()
                     )}
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => { setEditingStep(step); setStepDialogOpen(true); }}>
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 max-sm:h-10 max-sm:w-10" onClick={() => { setEditingStep(step); setStepDialogOpen(true); }}>
                       <Pencil className="h-3 w-3" />
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-6 w-6 p-0 text-destructive"
+                      className="h-6 w-6 p-0 max-sm:h-10 max-sm:w-10 text-destructive"
                       onClick={() => {
                         if (!confirm("Delete this step?")) return;
                         deleteStep.mutate({ sequenceId, stepId: step.id }, {
@@ -398,7 +398,7 @@ function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onBack: ()
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>{editingStep ? "Edit Step" : "Add Step"}</DialogTitle></DialogHeader>
           <form onSubmit={handleAddStep} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label>Day offset</Label>
                 <Input name="day_offset" type="number" min="0" max="365" defaultValue={editingStep?.dayOffset ?? 0} required className="mt-1" />
@@ -488,8 +488,8 @@ function EnrollmentsList() {
           <p className="text-sm text-muted-foreground">No enrollments match this filter.</p>
         </div>
       ) : (
-        <div className="rounded-xl border border-border overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="rounded-xl border border-border overflow-x-auto">
+          <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 {["Lead", "Sequence", "Step", "Next send", "Status", ""].map((h) => (
@@ -623,41 +623,43 @@ function AnalyticsTab() {
         {data.per_sequence.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-12 italic">No sequences yet.</p>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/30">
-                {["Sequence", "Niche", "Enrolled", "Active", "Replied", "Completed", "Sends", "Reply Rate", ""].map((h) => (
-                  <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.per_sequence.map((s) => (
-                <tr
-                  key={s.sequence_id}
-                  onClick={() => setDrillSeqId(s.sequence_id)}
-                  className="border-b border-border/50 hover:bg-primary/5 transition-colors cursor-pointer"
-                >
-                  <td className="px-4 py-2.5">
-                    <span className="text-foreground font-medium">{s.sequence_name}</span>
-                    {!s.is_active && <Badge variant="outline" className="ml-2 text-[9px]">INACTIVE</Badge>}
-                  </td>
-                  <td className="px-4 py-2.5 text-muted-foreground text-xs">{s.category ?? "—"}</td>
-                  <td className="px-4 py-2.5 tabular-nums">{s.enrolled}</td>
-                  <td className="px-4 py-2.5 tabular-nums text-success">{s.active}</td>
-                  <td className="px-4 py-2.5 tabular-nums text-primary">{s.replied}</td>
-                  <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{s.completed}</td>
-                  <td className="px-4 py-2.5 tabular-nums">{s.sends}</td>
-                  <td className="px-4 py-2.5 tabular-nums font-semibold">
-                    <span className={cn(s.reply_rate >= 10 ? "text-success" : "text-muted-foreground")}>{s.reply_rate}%</span>
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <BarChart3 className="h-3.5 w-3.5 text-muted-foreground inline-block" />
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  {["Sequence", "Niche", "Enrolled", "Active", "Replied", "Completed", "Sends", "Reply Rate", ""].map((h) => (
+                    <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.per_sequence.map((s) => (
+                  <tr
+                    key={s.sequence_id}
+                    onClick={() => setDrillSeqId(s.sequence_id)}
+                    className="border-b border-border/50 hover:bg-primary/5 transition-colors cursor-pointer"
+                  >
+                    <td className="px-4 py-2.5">
+                      <span className="text-foreground font-medium">{s.sequence_name}</span>
+                      {!s.is_active && <Badge variant="outline" className="ml-2 text-[9px]">INACTIVE</Badge>}
+                    </td>
+                    <td className="px-4 py-2.5 text-muted-foreground text-xs">{s.category ?? "—"}</td>
+                    <td className="px-4 py-2.5 tabular-nums">{s.enrolled}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-success">{s.active}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-primary">{s.replied}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{s.completed}</td>
+                    <td className="px-4 py-2.5 tabular-nums">{s.sends}</td>
+                    <td className="px-4 py-2.5 tabular-nums font-semibold">
+                      <span className={cn(s.reply_rate >= 10 ? "text-success" : "text-muted-foreground")}>{s.reply_rate}%</span>
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <BarChart3 className="h-3.5 w-3.5 text-muted-foreground inline-block" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -674,7 +676,7 @@ function AnalyticsTab() {
           <p className="text-sm text-muted-foreground text-center py-12 italic">No leads with niche tagged yet.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
                   {["Niche", "Leads", "Enrolled", "Replied", "Sends", "Pipeline", "Reply Rate"].map((h) => (
@@ -716,28 +718,30 @@ function AnalyticsTab() {
           {data.by_source.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-12 italic">No source data yet.</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/30">
-                  {["Source", "Leads", "Enrolled", "Replied", "Reply Rate"].map((h) => (
-                    <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {data.by_source.map((s) => (
-                  <tr key={s.source} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                    <td className="px-4 py-2.5 text-foreground font-medium">{s.source}</td>
-                    <td className="px-4 py-2.5 tabular-nums">{s.leads_total}</td>
-                    <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{s.enrolled}</td>
-                    <td className="px-4 py-2.5 tabular-nums text-primary font-semibold">{s.replied}</td>
-                    <td className="px-4 py-2.5 tabular-nums font-semibold">
-                      <span className={cn(s.reply_rate >= 10 ? "text-success" : "text-muted-foreground")}>{s.reply_rate}%</span>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[640px]">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    {["Source", "Leads", "Enrolled", "Replied", "Reply Rate"].map((h) => (
+                      <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {data.by_source.map((s) => (
+                    <tr key={s.source} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                      <td className="px-4 py-2.5 text-foreground font-medium">{s.source}</td>
+                      <td className="px-4 py-2.5 tabular-nums">{s.leads_total}</td>
+                      <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{s.enrolled}</td>
+                      <td className="px-4 py-2.5 tabular-nums text-primary font-semibold">{s.replied}</td>
+                      <td className="px-4 py-2.5 tabular-nums font-semibold">
+                        <span className={cn(s.reply_rate >= 10 ? "text-success" : "text-muted-foreground")}>{s.reply_rate}%</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
@@ -831,7 +835,7 @@ function SequenceAnalyticsDialog({ sequenceId, onClose }: { sequenceId: string |
               <MiniStat label="Failed"    value={data.totals.failed}    tone={data.totals.failed > 0 ? "danger" : undefined} />
               <MiniStat label="Sends"     value={data.totals.sends} />
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="rounded-lg border border-border bg-muted/10 px-4 py-2.5">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Reply rate</p>
                 <p className={cn("text-xl font-semibold tabular-nums", data.totals.reply_rate >= 10 ? "text-success" : "text-foreground")}>

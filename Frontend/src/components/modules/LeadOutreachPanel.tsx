@@ -133,17 +133,17 @@ export function LeadOutreachPanel({ leadId, category }: Props) {
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
                 {e.status === "active" && (
-                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => pauseE.mutate(e.id, { onSuccess: () => toast.success("Paused") })}>
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0 max-sm:h-10 max-sm:w-10" onClick={() => pauseE.mutate(e.id, { onSuccess: () => toast.success("Paused") })}>
                     <Pause className="h-3 w-3" />
                   </Button>
                 )}
                 {e.status === "paused" && (
-                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => resumeE.mutate(e.id, { onSuccess: () => toast.success("Resumed") })}>
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0 max-sm:h-10 max-sm:w-10" onClick={() => resumeE.mutate(e.id, { onSuccess: () => toast.success("Resumed") })}>
                     <Play className="h-3 w-3" />
                   </Button>
                 )}
                 {(e.status === "active" || e.status === "paused") && (
-                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => cancelE.mutate(e.id, { onSuccess: () => toast.success("Cancelled") })}>
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0 max-sm:h-10 max-sm:w-10 text-destructive" onClick={() => cancelE.mutate(e.id, { onSuccess: () => toast.success("Cancelled") })}>
                     <X className="h-3 w-3" />
                   </Button>
                 )}

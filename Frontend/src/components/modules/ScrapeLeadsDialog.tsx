@@ -167,7 +167,7 @@ function GoogleMapsForm({
         <Input name="location" required placeholder="e.g. Dubai, UAE — or Cairo, Egypt" className="mt-1" />
         <p className="text-[10px] text-muted-foreground mt-1">City + country. Be specific.</p>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label>Max results</Label>
           <Input name="max_results" type="number" min="1" max="2000" defaultValue="100" className="mt-1" />
@@ -234,7 +234,7 @@ function LinkedInForm({
         <Input name="industry" placeholder="e.g. Marketing & Advertising, SaaS, Real Estate" className="mt-1" />
         <p className="text-[10px] text-muted-foreground mt-1">Use LinkedIn's industry names. Leave blank for any.</p>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label>Company size</Label>
           <Select value={companySize} onValueChange={setCompanySize}>
@@ -303,7 +303,7 @@ function FirecrawlForm({
           Plain English. Firecrawl searches the open web, then extracts company info from each result page.
         </p>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label>Max results</Label>
           <Input name="max_results" type="number" min="1" max="50" defaultValue="10" className="mt-1" />

@@ -180,7 +180,7 @@ function MemberCard({ m, isSelf, onOpen, onToggleRole, onDelete, busy }: {
                 {isAdmin ? "Restrict" : "Promote"}
               </Button>
               <Button
-                size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive"
+                size="sm" variant="ghost" className="h-7 w-7 p-0 max-sm:h-10 max-sm:w-10 text-destructive"
                 onClick={onDelete} disabled={busy}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -267,7 +267,7 @@ function AddMemberDialog({ onDone }: { onDone: () => void }) {
     <DialogContent>
       <DialogHeader><DialogTitle>Add team member</DialogTitle></DialogHeader>
       <form onSubmit={submit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div><Label>Name</Label><Input name="name" required className="mt-1" placeholder="e.g. Mostafa" /></div>
           <div><Label>Email</Label><Input name="email" type="email" required className="mt-1" placeholder="name@seekersai.org" /></div>
         </div>
@@ -281,7 +281,7 @@ function AddMemberDialog({ onDone }: { onDone: () => void }) {
 
         <div>
           <Label>Access level</Label>
-          <div className="grid grid-cols-2 gap-2 mt-1.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1.5">
             <button
               type="button" onClick={() => setRole("member")}
               className={cn(
@@ -346,8 +346,8 @@ function MemberWorkDialog({ userId, onClose }: { userId: string | null; onClose:
 
             <Section title={`Leads (${data.leads.length})`}>
               {data.leads.length === 0 ? <Empty>No leads assigned yet.</Empty> : (
-                <div className="rounded-lg border border-border overflow-hidden">
-                  <table className="w-full text-xs">
+                <div className="rounded-lg border border-border overflow-x-auto">
+                  <table className="w-full text-xs min-w-[640px]">
                     <thead>
                       <tr className="border-b border-border bg-muted/30">
                         {["Lead", "Company", "Stage", "Value", "Last activity"].map((h) => (

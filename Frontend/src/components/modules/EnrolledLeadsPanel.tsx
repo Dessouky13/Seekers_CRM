@@ -118,7 +118,7 @@ export function EnrolledLeadsPanel({ sequenceId, sequenceName }: Props) {
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-7 w-7 p-0 text-destructive shrink-0"
+                  className="h-7 w-7 p-0 max-sm:h-10 max-sm:w-10 text-destructive shrink-0"
                   onClick={() => handleRemove(e.id, e.lead_name ?? "this lead")}
                   disabled={deleteEnrollment.isPending}
                   title="Remove from sequence"

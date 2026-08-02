@@ -112,7 +112,7 @@ function ClientDetailSheet({ clientId, onClose }: { clientId: string | null; onC
                   );
                 }}
               >
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div><Label>Name</Label><Input name="name" defaultValue={detail.name} required className="mt-1" /></div>
                   <div><Label>Company</Label><Input name="company" defaultValue={detail.company} required className="mt-1" /></div>
                   <div><Label>Email</Label><Input name="email" type="email" defaultValue={detail.email ?? ""} className="mt-1" /></div>
@@ -338,7 +338,7 @@ export default function Clients() {
           <DialogContent>
             <DialogHeader><DialogTitle>Add Client</DialogTitle></DialogHeader>
             <form onSubmit={handleAdd} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div><Label>Name</Label><Input name="name" required className="mt-1" /></div>
                 <div><Label>Company</Label><Input name="company" required className="mt-1" /></div>
                 <div><Label>Email</Label><Input name="email" type="email" className="mt-1" /></div>

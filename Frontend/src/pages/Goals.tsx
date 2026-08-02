@@ -82,7 +82,7 @@ export default function Goals() {
             <form onSubmit={handleSave} className="space-y-4">
               <div><Label>Title</Label><Input name="title" required defaultValue={editGoal?.title} className="mt-1" /></div>
               <div><Label>Description</Label><Textarea name="description" rows={2} defaultValue={editGoal?.description ?? undefined} className="mt-1" /></div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div><Label>Target</Label><Input name="target" type="number" step="any" required defaultValue={editGoal ? Number(editGoal.target) : undefined} className="mt-1" /></div>
                 <div><Label>Current</Label><Input name="current" type="number" step="any" defaultValue={editGoal ? Number(editGoal.current) : 0} className="mt-1" /></div>
                 <div><Label>Unit</Label><Input name="unit" placeholder="e.g. $, %, leads" defaultValue={editGoal?.unit ?? undefined} className="mt-1" /></div>

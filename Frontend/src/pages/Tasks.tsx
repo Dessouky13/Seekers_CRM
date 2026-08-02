@@ -259,7 +259,7 @@ export default function Tasks() {
               <form onSubmit={handleAdd} className="space-y-4">
                 <div><Label>Title</Label><Input name="title" required className="mt-1" /></div>
                 <div><Label>Description</Label><Textarea name="description" rows={2} className="mt-1" /></div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <Label>Assignee</Label>
                     <select name="assignee_id" className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
@@ -316,8 +316,8 @@ export default function Tasks() {
           getItemId={(t) => t.id}
         />
       ) : (
-        <div className="rounded-xl border border-border overflow-hidden animate-fade-in">
-          <table className="w-full text-sm">
+        <div className="rounded-xl border border-border overflow-x-auto animate-fade-in">
+          <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 {["Title", "Project", "Client", "Priority", "Assignee", "Due", "Status"].map((h) => (
@@ -377,7 +377,7 @@ export default function Tasks() {
                 {detailTask.description && (
                   <p className="text-sm text-muted-foreground">{detailTask.description}</p>
                 )}
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                   <div><span className="text-muted-foreground">Assignee:</span>{" "}<span>{detailTask.assignee_name ?? "Unassigned"}</span></div>
                   <div>
                     <span className="text-muted-foreground">Priority:</span>
@@ -447,7 +447,7 @@ export default function Tasks() {
               >
                 <div><Label>Title</Label><Input name="title" defaultValue={detailTask.title} required className="mt-1" /></div>
                 <div><Label>Description</Label><Textarea name="description" defaultValue={detailTask.description ?? ""} rows={2} className="mt-1" /></div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <Label>Assignee</Label>
                     <select name="assignee_id" defaultValue={detailTask.assigneeId ?? ""} className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">

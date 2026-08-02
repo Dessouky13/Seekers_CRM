@@ -276,7 +276,7 @@ function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; onClose: 
                 );
               }}
             >
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div><Label>Name</Label><Input name="name" defaultValue={lead.name} required className="mt-1" /></div>
                 <div><Label>Company</Label><Input name="company" defaultValue={lead.company} required className="mt-1" /></div>
                 <div><Label>Email</Label><Input name="email" type="email" defaultValue={lead.email ?? ""} className="mt-1" /></div>
@@ -605,7 +605,7 @@ export default function CRM() {
           <DialogContent className="max-w-lg">
             <DialogHeader><DialogTitle>Add Lead</DialogTitle></DialogHeader>
             <form onSubmit={handleAdd} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div><Label>Name</Label><Input name="name" required className="mt-1" /></div>
                 <div><Label>Company</Label><Input name="company" required className="mt-1" /></div>
                 <div><Label>Email</Label><Input name="email" type="email" className="mt-1" /></div>
@@ -934,9 +934,9 @@ function NotionTable({
   const someSelected = selectedIds.size > 0 && !allSelected;
 
   return (
-    <div className="border border-border/60 rounded-lg overflow-hidden bg-card/30">
+    <div className="border border-border/60 rounded-lg overflow-x-auto bg-card/30">
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b border-border/60 bg-muted/20">
               <th className="w-[36px] px-3 py-2">

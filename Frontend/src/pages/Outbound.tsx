@@ -408,8 +408,8 @@ function PipelineTab() {
           hint="Enrichment runs via n8n once configured — it posts to /intel/fingerprint, /intel/reviews and /intel/enrichment with the automation API key. Every lead it touches appears here with an ICP score."
         />
       ) : (
-        <div className="rounded-xl border border-border overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="rounded-xl border border-border overflow-x-auto">
+          <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 {["Lead", "Niche", "Stage", "ICP", "Intel", "Updated"].map((h) => (
@@ -613,7 +613,7 @@ function MailboxCard({ mailbox: mb }: { mailbox: Mailbox }) {
         <div className={cn("h-full transition-all", tone.bar)} style={{ width: `${Math.max(0, Math.min(100, mb.healthScore ?? 0))}%` }} />
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
         <div className="rounded-lg border border-border bg-muted/10 px-3 py-2">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Inbox</p>
           <p className="text-sm font-semibold tabular-nums text-foreground">{placement != null ? `${placement}%` : "—"}</p>

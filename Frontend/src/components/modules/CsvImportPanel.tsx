@@ -149,7 +149,7 @@ export function CsvImportPanel() {
           <CheckCircle2 className="h-5 w-5 text-success" />
           <h3 className="text-sm font-semibold">Import complete</h3>
         </div>
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="rounded-lg bg-card border border-border p-3">
             <p className="text-xs text-muted-foreground">Total rows</p>
             <p className="text-xl font-semibold tabular-nums">{result.total}</p>

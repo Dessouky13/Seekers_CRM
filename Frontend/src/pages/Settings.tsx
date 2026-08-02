@@ -326,7 +326,7 @@ function SignatureEditor({ user }: { user: ApiUser }) {
 
       {editing ? (
         <>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label>Title / Role</Label>
               <Input
@@ -500,7 +500,7 @@ function WebhookRow({ hook, onEdit }: { hook: WebhookSubscription; onEdit: () =>
             {test.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
           </Button>
           <Button
-            size="sm" variant="ghost" className="h-7 w-7 p-0"
+            size="sm" variant="ghost" className="h-7 w-7 p-0 max-sm:h-10 max-sm:w-10"
             onClick={() => update.mutate({ id: hook.id, is_active: !hook.isActive }, {
               onSuccess: () => toast.success(hook.isActive ? "Webhook paused" : "Webhook activated"),
               onError:   (err) => toast.error(err.message),
@@ -509,11 +509,11 @@ function WebhookRow({ hook, onEdit }: { hook: WebhookSubscription; onEdit: () =>
           >
             <Power className={cn("h-3.5 w-3.5", hook.isActive ? "text-success" : "text-muted-foreground")} />
           </Button>
-          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={onEdit}>
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 max-sm:h-10 max-sm:w-10" onClick={onEdit}>
             <Pencil className="h-3.5 w-3.5" />
           </Button>
           <Button
-            size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive"
+            size="sm" variant="ghost" className="h-7 w-7 p-0 max-sm:h-10 max-sm:w-10 text-destructive"
             onClick={() => {
               if (!confirm(`Delete webhook "${hook.name}"?`)) return;
               del.mutate(hook.id, {
