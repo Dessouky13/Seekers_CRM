@@ -191,19 +191,22 @@ tasksRouter.patch("/:id", authMiddleware, async (c) => {
     return c.json({ error: "Forbidden", message: "You cannot reassign tasks" }, 403);
   }
 
-  const updateData: Record<string, unknown> = {
-    ...body,
-    assigneeId: (body as any).assignee_id ?? undefined,
-    projectId:  (body as any).project_id  ?? undefined,
-    clientId:   (body as any).client_id   ?? undefined,
-    dueDate:    (body as any).due_date     ?? undefined,
-    updatedAt:  new Date(),
-  };
-  // Remove camelCase aliases not in schema
-  delete updateData.assignee_id;
-  delete updateData.project_id;
-  delete updateData.client_id;
-  delete updateData.due_date;
+  // Map snake_case request fields onto columns, distinguishing "not sent"
+  // (leave alone) from an explicit null (clear it). `x ?? undefined` collapsed
+  // both cases to undefined, so a task's assignee, project, client or due date
+  // could never be removed once set.
+  const raw = body as Record<string, unknown>;
+  const sent = (k: string) => Object.prototype.hasOwnProperty.call(raw, k);
+
+  const updateData: Record<string, unknown> = { updatedAt: new Date() };
+  if (sent("title"))       updateData.title       = raw.title;
+  if (sent("description")) updateData.description = raw.description ?? null;
+  if (sent("priority"))    updateData.priority    = raw.priority;
+  if (sent("status"))      updateData.status      = raw.status;
+  if (sent("assignee_id")) updateData.assigneeId  = raw.assignee_id ?? null;
+  if (sent("project_id"))  updateData.projectId   = raw.project_id  ?? null;
+  if (sent("client_id"))   updateData.clientId    = raw.client_id   ?? null;
+  if (sent("due_date"))    updateData.dueDate     = raw.due_date    ?? null;
 
   // Track completedAt: set when entering "done", clear when leaving "done"
   if (body.status === "done") updateData.completedAt = new Date();
@@ -282,8 +285,13 @@ tasksRouter.post("/:id/subtasks", authMiddleware, async (c) => {
 });
 
 // PATCH /tasks/:id/subtasks/:subId — toggle done
+//
+// Every subtask query below is scoped by BOTH ids. Authorising `:id` and then
+// mutating by `:subId` alone let anyone who owned a single task edit or delete
+// the subtasks of ANY task by passing a foreign subtask id.
 tasksRouter.patch("/:id/subtasks/:subId", authMiddleware, async (c) => {
-  if (!(await mayTouchTask(c.get("user"), c.req.param("id")))) {
+  const taskId = c.req.param("id");
+  if (!(await mayTouchTask(c.get("user"), taskId))) {
     return c.json({ error: "Subtask not found" }, 404);
   }
   const subId = c.req.param("subId");
@@ -292,7 +300,7 @@ tasksRouter.patch("/:id/subtasks/:subId", authMiddleware, async (c) => {
   const [current] = await db
     .select()
     .from(subtasks)
-    .where(eq(subtasks.id, subId))
+    .where(and(eq(subtasks.id, subId), eq(subtasks.taskId, taskId)))
     .limit(1);
 
   if (!current) return c.json({ error: "Subtask not found" }, 404);
@@ -302,7 +310,7 @@ tasksRouter.patch("/:id/subtasks/:subId", authMiddleware, async (c) => {
   const [updated] = await db
     .update(subtasks)
     .set({ done: newDone })
-    .where(eq(subtasks.id, subId))
+    .where(and(eq(subtasks.id, subId), eq(subtasks.taskId, taskId)))
     .returning();
 
   return c.json(updated);
@@ -310,12 +318,16 @@ tasksRouter.patch("/:id/subtasks/:subId", authMiddleware, async (c) => {
 
 // DELETE /tasks/:id/subtasks/:subId
 tasksRouter.delete("/:id/subtasks/:subId", authMiddleware, async (c) => {
-  if (!(await mayTouchTask(c.get("user"), c.req.param("id")))) {
+  const taskId = c.req.param("id");
+  if (!(await mayTouchTask(c.get("user"), taskId))) {
     return c.json({ error: "Subtask not found" }, 404);
   }
   const [deleted] = await db
     .delete(subtasks)
-    .where(eq(subtasks.id, c.req.param("subId")))
+    .where(and(
+      eq(subtasks.id,     c.req.param("subId")),
+      eq(subtasks.taskId, taskId),
+    ))
     .returning({ id: subtasks.id });
 
   if (!deleted) return c.json({ error: "Subtask not found" }, 404);

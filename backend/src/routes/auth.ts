@@ -33,10 +33,13 @@ const auth = new Hono<AppEnv>();
 auth.post("/login", async (c) => {
   const body = loginSchema.parse(await c.req.json());
 
+  // Case-insensitive lookup. New rows are always stored lowercase, but any
+  // profile created before that (notably via a mixed-case team invite) would
+  // otherwise be permanently unable to sign in.
   const [profile] = await db
     .select()
     .from(profiles)
-    .where(eq(profiles.email, body.email.toLowerCase()))
+    .where(sql`LOWER(${profiles.email}) = ${body.email}`)
     .limit(1);
 
   // Constant-time check: always run compare even on miss to prevent timing attacks
@@ -111,11 +114,16 @@ auth.post("/accept-invite", async (c) => {
     return c.json({ error: "Invite has expired" }, 400);
   }
 
-  // Check email not already registered
+  // Normalise here too, not just on the invite: rows created before the invite
+  // schema lowercased its input still carry the original casing, and login
+  // always looks the address up lowercased.
+  const inviteEmail = invite.email.trim().toLowerCase();
+
+  // Check email not already registered (case-insensitive)
   const [existingUser] = await db
     .select({ id: profiles.id })
     .from(profiles)
-    .where(eq(profiles.email, invite.email))
+    .where(sql`LOWER(${profiles.email}) = ${inviteEmail}`)
     .limit(1);
 
   if (existingUser) {
@@ -127,7 +135,7 @@ auth.post("/accept-invite", async (c) => {
     .insert(profiles)
     .values({
       name:     body.name,
-      email:    invite.email,
+      email:    inviteEmail,
       password,
       role:     invite.role,
     })
@@ -189,7 +197,7 @@ auth.post("/password-reset", async (c) => {
   const [profile] = await db
     .select()
     .from(profiles)
-    .where(eq(profiles.email, body.email.toLowerCase()))
+    .where(sql`LOWER(${profiles.email}) = ${body.email}`)
     .limit(1);
 
   // Always respond 200 to prevent email enumeration

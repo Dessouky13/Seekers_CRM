@@ -41,3 +41,6 @@ backend/uploads
 tmp
 temp
 .temp
+
+# Superpowers brainstorming mockups (local only)
+.superpowers/

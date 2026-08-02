@@ -318,8 +318,10 @@ export const kbChunks = pgTable("kb_chunks", {
   id:         uuid("id").primaryKey().defaultRandom(),
   documentId: uuid("document_id").notNull().references(() => kbDocuments.id, { onDelete: "cascade" }),
   content:    text("content").notNull(),
-  // NOTE: On VPS (Linux), change this to: vector("embedding", { dimensions: 1536 })
-  // Requires: CREATE EXTENSION vector; (pgvector — not available as prebuilt on Windows)
+  // Requires: CREATE EXTENSION vector;  (pgvector)
+  // pgvector has no prebuilt Windows binary, so a local dev DB will not have
+  // the extension and `db:push` will fail on this column — Knowledge Base is a
+  // VPS-only feature locally. Everything else works without it.
   embedding:  vector("embedding", { dimensions: 1536 }),
   chunkIndex: integer("chunk_index").notNull(),
   createdAt:  timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -458,7 +460,12 @@ export const outreachEnrollments = pgTable("outreach_enrollments", {
 }, (t) => ({
   leadIdx:     index("idx_enrollments_lead").on(t.leadId),
   statusIdx:   index("idx_enrollments_status").on(t.status, t.nextSendAt),
-  uniqueIdx:   index("idx_enrollments_unique").on(t.leadId, t.sequenceId),     // prevent dupes
+  // Lookup index, NOT a uniqueness constraint — and it must stay that way.
+  // enrollLead() deliberately allows re-enrolling a lead in the same sequence
+  // once the previous run is completed/failed/replied, which means several rows
+  // legitimately share (lead_id, sequence_id). Only ACTIVE/PAUSED duplicates are
+  // blocked, and that check lives in the service layer.
+  leadSequenceIdx: index("idx_enrollments_unique").on(t.leadId, t.sequenceId),
 }));
 
 // ── Outreach Sends (audit log of every email sent) ───────

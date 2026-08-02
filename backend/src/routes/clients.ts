@@ -136,9 +136,23 @@ clientsRouter.patch("/:id", authMiddleware, async (c) => {
   const id   = c.req.param("id");
   const body = updateClientSchema.parse(await c.req.json());
 
+  // Build the patch from the fields that were ACTUALLY sent. Spreading the
+  // parsed body and coercing `email: body.email || null` unconditionally meant
+  // any partial update (e.g. `{ status: "active" }`) also emitted
+  // `email = NULL` and silently wiped the client's address — drizzle drops
+  // `undefined` but keeps an explicit `null`.
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (body.name     !== undefined) patch.name     = body.name;
+  if (body.company  !== undefined) patch.company  = body.company;
+  if (body.email    !== undefined) patch.email    = body.email || null;   // "" clears it
+  if (body.phone    !== undefined) patch.phone    = body.phone || null;
+  if (body.status   !== undefined) patch.status   = body.status;
+  if (body.industry !== undefined) patch.industry = body.industry || null;
+  if (body.notes    !== undefined) patch.notes    = body.notes ?? null;
+
   const [updated] = await db
     .update(clients)
-    .set({ ...body, email: body.email || null, updatedAt: new Date() })
+    .set(patch as any)
     .where(eq(clients.id, id))
     .returning();
 

@@ -7,7 +7,7 @@ import {
   outreachEnrollments, outreachSends,
 } from "../db/schema";
 import { authMiddleware, adminOnly } from "../middleware/auth";
-import { updateProfileSchema, inviteUserSchema } from "../utils/validators";
+import { updateProfileSchema, inviteUserSchema, emailInput } from "../utils/validators";
 import { sendInviteEmail } from "../services/email";
 import { toSafeProfile, hashPassword } from "../services/auth";
 import { randomUUID } from "crypto";
@@ -240,10 +240,21 @@ users.delete("/:id", authMiddleware, adminOnly, async (c) => {
 
 // POST /users/invite — admin only
 users.post("/invite", authMiddleware, adminOnly, async (c) => {
-  const body      = inviteUserSchema.parse(await c.req.json());
+  const body      = inviteUserSchema.parse(await c.req.json());   // email is lowercased by the schema
   const inviter   = c.get("user");
   const token     = randomUUID();
   const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+
+  // Inviting someone who already has an account produces a token that can only
+  // ever 409 at accept time — fail fast with a message the admin can act on.
+  const [alreadyMember] = await db
+    .select({ id: profiles.id })
+    .from(profiles)
+    .where(sql`LOWER(${profiles.email}) = ${body.email}`)
+    .limit(1);
+  if (alreadyMember) {
+    return c.json({ error: "That email already belongs to a team member" }, 409);
+  }
 
   await db.insert(teamInvites).values({
     email:     body.email,
@@ -256,32 +267,55 @@ users.post("/invite", authMiddleware, adminOnly, async (c) => {
   const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:8080";
   const inviteUrl   = `${frontendUrl}/accept-invite?token=${token}`;
 
-  await sendInviteEmail(body.email, inviteUrl, body.role);
+  // The invite row is already committed and valid at this point. Letting an SMTP
+  // failure bubble up returned a 500, so the admin assumed nothing happened and
+  // re-invited — piling up duplicate tokens for an invite that was live all
+  // along. Report the delivery outcome instead and hand back the link so the
+  // invite can always be passed along by hand (matches /auth/password-reset).
+  let emailed = true;
+  let emailError: string | null = null;
+  try {
+    await sendInviteEmail(body.email, inviteUrl, body.role);
+  } catch (err) {
+    emailed = false;
+    emailError = (err as Error).message;
+    console.error("[users/invite] invite created but email failed:", emailError);
+  }
 
-  return c.json({ message: "Invite sent" }, 200);
+  return c.json({
+    message: emailed
+      ? "Invite sent"
+      : "Invite created, but the email could not be delivered — share the link manually.",
+    emailed,
+    email_error: emailError,
+    invite_url:  inviteUrl,
+    expires_at:  expiresAt.toISOString(),
+  }, 200);
 });
 
 // POST /users/create — admin only, create user directly with password
 users.post("/create", authMiddleware, adminOnly, async (c) => {
   const schema = z.object({
     name:     z.string().min(1),
-    email:    z.string().email(),
+    email:    emailInput,                      // trimmed + lowercased before validation
     password: z.string().min(6),
     role:     z.enum(["admin", "member"]).default("member"),
   });
   const body = schema.parse(await c.req.json());
 
+  // Case-insensitive so "Bob@x.com" can't shadow an existing "bob@x.com" row
+  // created before emails were normalised.
   const [existing] = await db
     .select({ id: profiles.id })
     .from(profiles)
-    .where(eq(profiles.email, body.email.toLowerCase()))
+    .where(sql`LOWER(${profiles.email}) = ${body.email}`)
     .limit(1);
   if (existing) return c.json({ error: "Email already in use" }, 409);
 
   const password = await hashPassword(body.password);
   const [created] = await db
     .insert(profiles)
-    .values({ name: body.name, email: body.email.toLowerCase(), password, role: body.role })
+    .values({ name: body.name, email: body.email, password, role: body.role })
     .returning();
 
   return c.json(toSafeProfile(created), 201);

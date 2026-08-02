@@ -212,7 +212,9 @@ function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; onClose: 
                   <p className="text-sm text-muted-foreground">No activities yet.</p>
                 ) : (
                   <div className="space-y-3">
-                    {[...(lead.activities ?? [])].reverse().map((a) => {
+                    {/* The API now returns activities newest-first (ordered by
+                        date then created_at); reversing here would undo that. */}
+                    {(lead.activities ?? []).map((a) => {
                       const Icon = activityIcons[a.type] ?? FileText;
                       return (
                         <div key={a.id} className="flex gap-3">

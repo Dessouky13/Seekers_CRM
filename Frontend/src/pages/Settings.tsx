@@ -38,9 +38,28 @@ export default function Settings() {
 
   const inviteUser = useMutation({
     mutationFn: (body: { email: string; role: string }) =>
-      apiFetch("/users/invite", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => { setInviteOpen(false); toast.success("Invite sent successfully"); },
-    onError:   (err) => toast.error(err.message),
+      apiFetch<{ emailed: boolean; invite_url: string }>(
+        "/users/invite", { method: "POST", body: JSON.stringify(body) },
+      ),
+    // The invite is valid whether or not the email went out. When SMTP fails,
+    // say so and offer the link rather than reporting a flat success the admin
+    // can't act on.
+    onSuccess: (res) => {
+      setInviteOpen(false);
+      if (res?.emailed === false) {
+        toast.warning("Invite created, but the email didn't send", {
+          description: "Copy the link and send it yourself.",
+          duration: 15000,
+          action: {
+            label: "Copy link",
+            onClick: () => navigator.clipboard.writeText(res.invite_url),
+          },
+        });
+      } else {
+        toast.success("Invite sent successfully");
+      }
+    },
+    onError: (err) => toast.error(err.message),
   });
 
   const createUser = useMutation({

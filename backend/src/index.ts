@@ -121,8 +121,14 @@ setInterval(async () => {
 }, Math.max(1, staleLeadSweepMinutes) * 60_000);
 
 // ── Task auto-cleanup: delete tasks completed > N days ago ────────────
+//
+// OPT-IN. This is a hard DELETE that also cascades to subtasks — there is no
+// archive, no undo and nothing in the UI that warns a task will disappear.
+// It used to default to 30 days, so simply starting the API silently destroyed
+// finished work (observed: a boot removed 2 completed tasks). Retention now
+// only runs when TASK_AUTO_DELETE_DAYS is explicitly set to a positive number.
 async function runTaskCleanupSweep(retentionDays: number) {
-  if (retentionDays <= 0) return 0;
+  if (!Number.isFinite(retentionDays) || retentionDays <= 0) return 0;
   const deleted = await db
     .delete(tasks)
     .where(and(
@@ -135,22 +141,31 @@ async function runTaskCleanupSweep(retentionDays: number) {
 }
 
 const taskCleanupMinutes = Number(process.env.TASK_CLEANUP_SWEEP_MINUTES ?? 60);
-const taskRetentionDays  = Number(process.env.TASK_AUTO_DELETE_DAYS ?? 30);
-setInterval(async () => {
-  try {
-    const count = await runTaskCleanupSweep(taskRetentionDays);
-    if (count > 0) {
-      console.log(`[tasks] auto-deleted ${count} completed tasks older than ${taskRetentionDays}d`);
-    }
-  } catch (error) {
-    console.error("[tasks] auto-cleanup sweep failed", error);
-  }
-}, Math.max(1, taskCleanupMinutes) * 60_000);
+// Unset (or <= 0) → retention disabled, completed tasks are kept forever.
+const taskRetentionDays  = Number(process.env.TASK_AUTO_DELETE_DAYS ?? 0);
 
-// Run once on boot
-runTaskCleanupSweep(taskRetentionDays).then((count) => {
-  if (count > 0) console.log(`[tasks] boot cleanup removed ${count} completed tasks`);
-}).catch((err) => console.error("[tasks] boot cleanup failed", err));
+if (taskRetentionDays > 0) {
+  console.warn(
+    `[tasks] ⚠ auto-delete ENABLED: completed tasks older than ${taskRetentionDays} days ` +
+    `will be permanently deleted (TASK_AUTO_DELETE_DAYS). This cannot be undone.`,
+  );
+
+  setInterval(async () => {
+    try {
+      const count = await runTaskCleanupSweep(taskRetentionDays);
+      if (count > 0) {
+        console.log(`[tasks] auto-deleted ${count} completed tasks older than ${taskRetentionDays}d`);
+      }
+    } catch (error) {
+      console.error("[tasks] auto-cleanup sweep failed", error);
+    }
+  }, Math.max(1, taskCleanupMinutes) * 60_000);
+
+  // Run once on boot
+  runTaskCleanupSweep(taskRetentionDays).then((count) => {
+    if (count > 0) console.log(`[tasks] boot cleanup removed ${count} completed tasks`);
+  }).catch((err) => console.error("[tasks] boot cleanup failed", err));
+}
 
 // ── Outreach scheduler: send due sequence steps every N minutes ─────
 const outreachSweepMinutes = Number(process.env.OUTREACH_SWEEP_MINUTES ?? 5);

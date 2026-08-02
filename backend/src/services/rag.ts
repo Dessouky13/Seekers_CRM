@@ -78,10 +78,14 @@ export async function processDocumentEmbedding(
     }
 
     // Insert chunks
+    // Pass the raw number[]. The `vector` custom type in schema.ts serialises it
+    // to pgvector's "[a,b,c]" literal in its toDriver hook — JSON.stringify()ing
+    // it here double-encoded the value and no longer typechecks against the
+    // vector column.
     const rows = chunks.map((content, idx) => ({
       documentId,
       content,
-      embedding: JSON.stringify(allEmbeddings[idx]), // stored as text locally; use vector type on VPS
+      embedding: allEmbeddings[idx],
       chunkIndex: idx,
     }));
 

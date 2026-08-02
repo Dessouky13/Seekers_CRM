@@ -1,7 +1,7 @@
 // Sprint 3 — CRM / Leads endpoints
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, and, not, inArray, ilike, or, sql, gte } from "drizzle-orm";
+import { eq, and, not, inArray, ilike, or, sql, gte, desc } from "drizzle-orm";
 import { db } from "../db/client";
 import { leads, leadActivities, profiles } from "../db/schema";
 import { authMiddleware, adminOnly, forcedAssigneeId, canAccessOwned, isAdmin } from "../middleware/auth";
@@ -130,11 +130,14 @@ crm.get("/leads/:id", authMiddleware, async (c) => {
     return c.json({ error: "Lead not found" }, 404);
   }
 
+  // Newest first. Ordering by `date` alone (a DATE column) left same-day
+  // entries in arbitrary order, so a freshly logged call could appear above or
+  // below the reply it followed; createdAt is the real tiebreaker.
   const activities = await db
     .select()
     .from(leadActivities)
     .where(eq(leadActivities.leadId, id))
-    .orderBy(leadActivities.date);
+    .orderBy(desc(leadActivities.date), desc(leadActivities.createdAt));
 
   return c.json({ ...row.lead, assignee_name: row.assigneeName, activities });
 });

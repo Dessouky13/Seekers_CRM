@@ -1,15 +1,27 @@
 import { z } from "zod";
 
+/**
+ * Canonical email input: trim and lowercase BEFORE validating.
+ *
+ * Order matters — zod runs string checks in chain order, so `.email()` last
+ * means "  Bob@Example.COM " is normalised to "bob@example.com" and accepted,
+ * instead of being rejected outright for the stray whitespace a phone keyboard
+ * or a copy-paste adds. Every address is stored lowercase, so normalising at
+ * the edge is what keeps login, password reset and invites agreeing on the
+ * same key.
+ */
+export const emailInput = z.string().trim().toLowerCase().email("Invalid email");
+
 // ── Auth ──────────────────────────────────────────────────
 
 export const loginSchema = z.object({
-  email:    z.string().email("Invalid email"),
+  email:    emailInput,
   password: z.string().min(1, "Password is required"),
 });
 
 export const registerSchema = z.object({
   name:     z.string().min(1, "Name is required").max(100),
-  email:    z.string().email("Invalid email"),
+  email:    emailInput,
   password: z.string().min(8, "Password must be at least 8 characters"),
   role:     z.enum(["admin", "member"]).optional(),
 });
@@ -21,7 +33,7 @@ export const acceptInviteSchema = z.object({
 });
 
 export const passwordResetRequestSchema = z.object({
-  email: z.string().email("Invalid email"),
+  email: emailInput,
 });
 
 export const passwordUpdateSchema = z.object({
@@ -46,8 +58,10 @@ export const updateProfileSchema = z.object({
   role:      z.enum(["admin", "member"]).optional(),
 });
 
+// An invite typed as "Bob@Example.com" used to create an account its owner
+// could never sign into, because login looks the address up lowercased.
 export const inviteUserSchema = z.object({
-  email: z.string().email("Invalid email"),
+  email: emailInput,
   role:  z.enum(["admin", "member"]),
 });
 
@@ -84,8 +98,16 @@ export const createTaskSchema = z.object({
   client_id:   z.string().uuid().optional(),
 });
 
+// The clearable relations accept an explicit `null` so the UI can actually
+// unassign a task / detach it from a project, client or due date. `.optional()`
+// alone made those fields write-once.
 export const updateTaskSchema = createTaskSchema.partial().extend({
-  status: z.enum(["backlog", "todo", "in_progress", "review", "done"]).optional(),
+  status:      z.enum(["backlog", "todo", "in_progress", "review", "done"]).optional(),
+  description: z.string().nullable().optional(),
+  assignee_id: z.string().uuid().nullable().optional(),
+  project_id:  z.string().uuid().nullable().optional(),
+  client_id:   z.string().uuid().nullable().optional(),
+  due_date:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD").nullable().optional(),
 });
 
 export const createSubtaskSchema = z.object({
