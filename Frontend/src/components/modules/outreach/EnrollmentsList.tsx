@@ -8,12 +8,15 @@ import { Badge } from "@/components/ui/badge";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
   useEnrollments, usePauseEnrollment, useResumeEnrollment, useCancelEnrollment,
   type EnrollmentStatus,
 } from "@/hooks/useOutreach";
 import { cn } from "@/lib/utils";
+
+const columns = ["Lead", "Sequence", "Step", "Next send", "Status", ""];
 
 const statusColors: Record<EnrollmentStatus, string> = {
   active:    "bg-success/15 text-success",
@@ -50,7 +53,7 @@ export function EnrollmentsList() {
       </div>
 
       {isLoading ? (
-        <p className="text-sm text-muted-foreground text-center py-8">Loading…</p>
+        <EnrollmentsListSkeleton />
       ) : enrollments.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center">
           <Activity className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
@@ -61,7 +64,7 @@ export function EnrollmentsList() {
           <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-border bg-muted/30">
-                {["Lead", "Sequence", "Step", "Next send", "Status", ""].map((h) => (
+                {columns.map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
@@ -106,6 +109,39 @@ export function EnrollmentsList() {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+// Real table chrome with placeholder rows, so the header and column widths
+// stay put when the enrollments land.
+function EnrollmentsListSkeleton() {
+  return (
+    <div className="rounded-xl border border-border overflow-x-auto">
+      <table className="w-full text-sm min-w-[640px]">
+        <thead>
+          <tr className="border-b border-border bg-muted/30">
+            {columns.map((h) => (
+              <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <tr key={i} className="border-b border-border/50">
+              <td className="px-4 py-3">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-44 mt-1.5" />
+              </td>
+              <td className="px-4 py-3"><Skeleton className="h-4 w-28" /></td>
+              <td className="px-4 py-3"><Skeleton className="h-4 w-6" /></td>
+              <td className="px-4 py-3"><Skeleton className="h-3 w-24" /></td>
+              <td className="px-4 py-3"><Skeleton className="h-4 w-16 rounded-full" /></td>
+              <td className="px-4 py-3"><Skeleton className="h-6 w-14" /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -18,6 +18,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
   useSequence, useUpdateSequence, useDeleteSequence,
@@ -60,7 +61,7 @@ export function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onB
   }, [stepDialogOpen, editingStep]);
 
   if (isLoading || !seq) {
-    return <div className="text-sm text-muted-foreground text-center py-12">Loading…</div>;
+    return <SequenceEditorSkeleton />;
   }
 
   const handleAddStep = (e: React.FormEvent<HTMLFormElement>) => {
@@ -283,6 +284,59 @@ export function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onB
           </form>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// Mirrors the editor above: back button + title/meta line, the row of
+// switches, and the steps card with three placeholder step rows.
+function SequenceEditorSkeleton() {
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-8 w-20" />
+          <div className="space-y-1.5">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-3 w-56" />
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <Skeleton className="h-5 w-24" />
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-8 w-8" />
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <Skeleton className="h-3 w-14" />
+          <Skeleton className="h-7 w-24" />
+        </div>
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-start gap-3 rounded-lg border border-border bg-muted/30 p-3">
+              <div className="flex flex-col items-center gap-1 shrink-0">
+                <Skeleton className="h-7 w-7 rounded-full" />
+                <Skeleton className="h-3 w-3" />
+              </div>
+              <div className="flex-1 min-w-0 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-4 w-14 rounded-full" />
+                  <Skeleton className="h-4 w-16 rounded-full" />
+                </div>
+                <Skeleton className="h-3 w-2/3" />
+                <Skeleton className="h-3 w-full" />
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Skeleton className="h-6 w-6" />
+                <Skeleton className="h-6 w-6" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

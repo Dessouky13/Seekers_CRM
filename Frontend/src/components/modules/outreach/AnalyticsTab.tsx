@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { Mail, TrendingUp, MessageCircle, Mail as MailIcon, BarChart3 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { useOutreachAnalytics } from "@/hooks/useOutreach";
 import { SequenceAnalyticsDialog } from "@/components/modules/outreach/SequenceAnalyticsDialog";
@@ -13,7 +14,7 @@ export function AnalyticsTab() {
   const { data, isLoading } = useOutreachAnalytics();
   const [drillSeqId, setDrillSeqId] = useState<string | null>(null);
 
-  if (isLoading) return <p className="text-sm text-muted-foreground text-center py-12">Loading analytics…</p>;
+  if (isLoading) return <AnalyticsTabSkeleton />;
   if (!data)     return <p className="text-sm text-muted-foreground text-center py-12">No analytics available yet.</p>;
 
   const fmtEgp = (n: number) => `EGP ${n.toLocaleString()}`;
@@ -243,6 +244,60 @@ export function AnalyticsTab() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Mirrors the analytics layout: 4-up then 3-up KPI rows, the niche callout,
+// the 30-day sends chart, and the two stacked breakdown tables.
+function AnalyticsTabSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => <KpiCardSkeleton key={i} />)}
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        {Array.from({ length: 3 }).map((_, i) => <KpiCardSkeleton key={i} />)}
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
+        <Skeleton className="h-10 w-10 rounded-full shrink-0" />
+        <div className="flex-1 space-y-1.5">
+          <Skeleton className="h-3 w-40" />
+          <Skeleton className="h-4 w-72 max-w-full" />
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-5">
+        <Skeleton className="h-3 w-36 mb-3" />
+        <Skeleton className="h-[200px] w-full" />
+      </div>
+
+      {Array.from({ length: 2 }).map((_, i) => (
+        <div key={i} className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="px-5 py-3 border-b border-border">
+            <Skeleton className="h-3 w-56" />
+          </div>
+          <div className="px-5 py-3 space-y-3">
+            {Array.from({ length: 5 }).map((_, r) => (
+              <Skeleton key={r} className="h-4 w-full" />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function KpiCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="flex items-center justify-between mb-1.5">
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-3.5 w-3.5" />
+      </div>
+      <Skeleton className="h-7 w-16" />
     </div>
   );
 }

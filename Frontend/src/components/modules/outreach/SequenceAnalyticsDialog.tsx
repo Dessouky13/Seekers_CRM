@@ -4,6 +4,7 @@
 import { Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { useSequenceAnalytics } from "@/hooks/useOutreach";
 import { cn } from "@/lib/utils";
@@ -15,7 +16,7 @@ export function SequenceAnalyticsDialog({ sequenceId, onClose }: { sequenceId: s
     <Dialog open={!!sequenceId} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
         {isLoading || !data ? (
-          <div className="py-16 text-center text-sm text-muted-foreground">Loading sequence analytics…</div>
+          <SequenceAnalyticsSkeleton />
         ) : (
           <>
             <DialogHeader>
@@ -140,6 +141,60 @@ export function SequenceAnalyticsDialog({ sequenceId, onClose }: { sequenceId: s
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Mirrors the drill-in body: title block, the six MiniStat tiles, the two
+// rate cards, the step funnel and the 30-day sends chart.
+function SequenceAnalyticsSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Skeleton className="h-5 w-56" />
+        <Skeleton className="h-3 w-32" />
+      </div>
+
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="rounded-lg border border-border bg-muted/10 px-3 py-2 space-y-1.5">
+            <Skeleton className="h-2.5 w-full" />
+            <Skeleton className="h-5 w-8 mx-auto" />
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <div key={i} className="rounded-lg border border-border bg-muted/10 px-4 py-2.5 space-y-1.5">
+            <Skeleton className="h-2.5 w-24" />
+            <Skeleton className="h-6 w-16" />
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-border space-y-1.5">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-2.5 w-80 max-w-full" />
+        </div>
+        <div className="px-4 py-3 space-y-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Skeleton className="h-3 w-40" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+              <Skeleton className="h-2.5 w-full rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-4">
+        <Skeleton className="h-3 w-36 mb-3" />
+        <Skeleton className="h-[160px] w-full" />
+      </div>
+    </div>
   );
 }
 
