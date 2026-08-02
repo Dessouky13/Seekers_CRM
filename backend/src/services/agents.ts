@@ -97,6 +97,7 @@ For marketing agencies specifically, the value prop must center on (1) new reven
 - Avoid these words in subject AND body: free, guarantee, act now, limited time, $$$, 100%, risk-free, click here, buy now, cash, winner, congratulations, no obligation.
 - No ALL CAPS, no excessive punctuation (!!!), no money symbols in the subject.
 - Subject must be 3–6 words, sentence case, no emojis, no fake "Re:" prefix.
+- The subject line must NEVER end with a question mark or an exclamation mark. Our mail provider hard-rejects those and the email is never delivered. Rephrase as a statement: not "Quick question?" but "A quick question".
 - Maximum one link in the entire email — only if it adds value (e.g. a relevant case-study page).
 
 # Sequence step logic (the system tells you which step this is in the user prompt)

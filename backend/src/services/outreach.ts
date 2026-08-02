@@ -8,6 +8,7 @@ import {
 import { sendOutreachEmail, buildDefaultSignature, buildDefaultSignatureText } from "./email";
 import { runAgent, isEmailCapableAgent } from "./agents";
 import { fireEventAsync } from "./webhooks";
+import { sanitizeSubject } from "./outreach-subject";
 
 // Mustache-lite template renderer. Supports {{name}}, {{company}}, etc.
 // Missing keys render as empty string. Whitespace inside braces is ignored.
@@ -169,6 +170,19 @@ const MAX_SEND_ATTEMPTS = 3;
 // mailbox, and spam rejections (retrying spam-flagged content only burns more
 // domain reputation). Everything else (timeouts, 4xx greylisting, network) is
 // transient.
+/**
+ * Is this a problem with OUR infrastructure rather than with the lead?
+ *
+ * These resolve without anyone touching the enrolment — a topped-up AI
+ * balance, a rate-limit window passing, a provider outage ending — so the
+ * enrolment must survive them. Anything not matched here is treated as a real
+ * failure attributable to this specific lead/send.
+ */
+function isRecoverableInfraError(msg: string): boolean {
+  return /\b(402|429|500|502|503|504)\b|requires more credit|insufficient (credit|funds|quota)|rate.?limit|quota exceeded|timeout|timed out|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed|network|temporarily unavailable|overloaded|all fallback models failed|not configured/i.test(msg);
+}
+
+
 function isPermanentSendError(msg: string): boolean {
   return /\b(550|551|553|554)\b|spam|blocked|black\s?list|no such user|mailbox (unavailable|not found|does not exist)|user unknown|address rejected|recipient (address )?rejected|invalid recipient|relay access denied/i.test(msg);
 }
@@ -194,14 +208,34 @@ export async function processDueSends(limit = 20): Promise<{ processed: number; 
       if (outcome === "failed") failed++;
       else sent++;   // "sent", "advanced" (non-email skip), "completed", "retry" all count as handled
     } catch (err: any) {
-      // Backstop: only reached for genuinely unexpected errors that occur
-      // BEFORE the send attempt (lead row vanished, DB error). Send failures
-      // are caught and retried inside processSingleSend. These pre-send errors
-      // are treated as permanent because they won't fix themselves.
+      // Backstop for errors thrown BEFORE the send — most often the AI step
+      // (runAgent) rather than SMTP, since send failures are handled inside
+      // processSingleSend.
+      const msg = String(err?.message ?? err);
+
+      // Infrastructure problems are NOT the lead's fault and DO fix themselves:
+      // an OpenRouter 402 clears the moment credit is topped up, a 429/5xx
+      // clears on its own. Previously these were marked permanently failed —
+      // 31 enrolments died purely because the AI account ran out of credit,
+      // and no amount of topping up would have revived them. Pause instead, so
+      // a human can resume, and retry on a backoff in the meantime.
+      if (isRecoverableInfraError(msg)) {
+        await db
+          .update(outreachEnrollments)
+          .set({
+            status:       "paused",
+            pausedReason: `Paused — service issue, will retry: ${msg}`.slice(0, 500),
+            nextSendAt:   computeNextSendAt(new Date(), 1),
+          })
+          .where(eq(outreachEnrollments.id, enrollment.id));
+        console.warn(`[outreach] paused enrollment ${enrollment.id} on recoverable error: ${msg.slice(0, 120)}`);
+        continue;   // not counted as a failure — nothing is wrong with this lead
+      }
+
       failed++;
       await db
         .update(outreachEnrollments)
-        .set({ status: "failed", pausedReason: String(err?.message ?? err).slice(0, 500), nextSendAt: null })
+        .set({ status: "failed", pausedReason: msg.slice(0, 500), nextSendAt: null })
         .where(eq(outreachEnrollments.id, enrollment.id));
     }
   }
@@ -349,6 +383,14 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
     subject = fallbackSubject;
     body    = renderTemplate(step.bodyTemplate ?? "", vars);
   }
+
+  // Our SMTP provider (Namecheap Private Email) hard-rejects a subject line
+  // that ends in "?" with `554 5.7.1 ... Reason: JFE040023`. The mail is never
+  // delivered and, before this, the enrolment was marked permanently failed.
+  // Cold-email subjects are very often questions, so this is not an edge case:
+  // 15 of 871 sends hit it. The agent prompt now forbids it too, but a prompt
+  // is a request — this is the guarantee.
+  subject = sanitizeSubject(subject);
 
   // GUARD: never send an empty / placeholder body. This catches steps that have
   // neither an agent nor a real body template (which previously sent the literal
@@ -585,8 +627,44 @@ export async function autoEnrollIfMatchingCategory(leadId: string, category: str
       )!,
     ));
 
-  for (const seq of matches) {
-    try { await enrollLead({ leadId, sequenceId: seq.id }); }
-    catch { /* swallow — won't kill ingestion */ }
+  if (matches.length === 0) return;
+
+  // ONE auto-enrolment per lead, ever.
+  //
+  // Two sequences were both flagged autoEnrollAll, so every new lead was
+  // enrolled in both and received two independent streams of email — 142 leads
+  // got up to 4 messages. Nothing in the sequencer could catch it, because each
+  // enrolment is individually valid; the duplication is across sequences.
+  //
+  // A category-matched sequence is more specific than a catch-all, so it wins;
+  // otherwise take the oldest, which is the stable choice across re-runs.
+  const ranked = [...matches].sort((a, b) => {
+    const aSpecific = a.autoEnrollOnCategory && a.category === category ? 0 : 1;
+    const bSpecific = b.autoEnrollOnCategory && b.category === category ? 0 : 1;
+    if (aSpecific !== bSpecific) return aSpecific - bSpecific;
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+  const chosen = ranked[0];
+
+  if (matches.length > 1) {
+    console.warn(
+      `[outreach] ${matches.length} sequences want to auto-enrol lead ${leadId}; ` +
+      `using "${chosen.name}" only. Turn off auto-enrol on the others.`,
+    );
   }
+
+  // Belt and braces: never add a second ACTIVE/PAUSED enrolment for this lead,
+  // even in a different sequence. enrollLead() only de-dupes within one sequence.
+  const [live] = await db
+    .select({ id: outreachEnrollments.id })
+    .from(outreachEnrollments)
+    .where(and(
+      eq(outreachEnrollments.leadId, leadId),
+      or(eq(outreachEnrollments.status, "active"), eq(outreachEnrollments.status, "paused"))!,
+    ))
+    .limit(1);
+  if (live) return;
+
+  try { await enrollLead({ leadId, sequenceId: chosen.id }); }
+  catch { /* swallow — won't kill ingestion */ }
 }
