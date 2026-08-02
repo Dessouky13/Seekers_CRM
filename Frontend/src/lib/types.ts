@@ -126,6 +126,16 @@ export interface ApiLead {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  // ── v2 lead intelligence ──
+  // GET /crm/leads selects the whole leads row, so these have been on the wire
+  // since the outbound-machine work landed; the type just never caught up.
+  // Populated by n8n via the /intel/* ingest endpoints — null until enrichment
+  // has run for that lead.
+  icpScore?:        number | null;          // 0-100, computed server-side
+  techFingerprint?: Record<string, unknown> | null;
+  reviewStats?:     Record<string, unknown> | null;
+  complaintTags?:   string[] | null;        // slow_response, booking_chaos, …
+  signals?:         Record<string, unknown> | null;
 }
 
 export interface ApiLeadDetail extends ApiLead {

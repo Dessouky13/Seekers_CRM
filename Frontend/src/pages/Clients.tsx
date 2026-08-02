@@ -17,7 +17,23 @@ import { toast } from "sonner";
 import { useClients, useClientDetail, useCreateClient, useUpdateClient, useDeleteClient } from "@/hooks/useClients";
 import { AgentPanel } from "@/components/modules/AgentPanel";
 import { cn } from "@/lib/utils";
+import { exportCsv, type CsvColumn } from "@/lib/csv";
+import { Download } from "lucide-react";
 import type { ApiClient } from "@/lib/types";
+
+// Spreadsheet columns for the clients export. Revenue stays numeric so it
+// can be summed in Excel.
+const CLIENT_CSV_COLUMNS: CsvColumn<ApiClient>[] = [
+  { header: "Name",     value: (c) => c.name },
+  { header: "Company",  value: (c) => c.company },
+  { header: "Email",    value: (c) => c.email },
+  { header: "Phone",    value: (c) => c.phone },
+  { header: "Status",   value: (c) => c.status },
+  { header: "Industry", value: (c) => c.industry },
+  { header: "Revenue",  value: (c) => Number(c.totalRevenue ?? 0) },
+  { header: "Projects", value: (c) => c.project_count },
+  { header: "Notes",    value: (c) => c.notes },
+];
 
 const fmt = (n: string | number) => `EGP ${Number(n).toLocaleString()}`;
 
@@ -391,6 +407,18 @@ export default function Clients() {
           <h1 className="text-xl font-semibold text-foreground">Clients</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Manage client relationships and track connected tasks.</p>
         </div>
+        <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          disabled={clients.length === 0}
+          onClick={() => exportCsv("clients", clients, CLIENT_CSV_COLUMNS)}
+          title={clients.length ? "Export " + clients.length + " clients to CSV" : "Nothing to export"}
+        >
+          <Download className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Export</span>
+        </Button>
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
           <DialogTrigger asChild>
             <Button size="sm" className="gap-1.5"><Plus className="h-3.5 w-3.5" /> Add Client</Button>
@@ -423,6 +451,7 @@ export default function Clients() {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Summary — these are derived from the client list, so they wait on it too */}

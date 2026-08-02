@@ -19,6 +19,28 @@ import {
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useUsers } from "@/hooks/useTasks";
 import { useSequences, useBulkEnroll } from "@/hooks/useOutreach";
+import { Button } from "@/components/ui/button";
+import { Download } from "lucide-react";
+import { exportCsv, type CsvColumn } from "@/lib/csv";
+import type { ApiLead } from "@/lib/types";
+
+// Spreadsheet columns for the leads export. Deal value stays numeric so it can
+// be summed; complaint tags collapse into one semicolon-joined cell.
+const LEAD_CSV_COLUMNS: CsvColumn<ApiLead>[] = [
+  { header: "Name",        value: (l) => l.name },
+  { header: "Company",     value: (l) => l.company },
+  { header: "Email",       value: (l) => l.email },
+  { header: "Phone",       value: (l) => l.phone },
+  { header: "Stage",       value: (l) => l.stage },
+  { header: "Category",    value: (l) => l.category },
+  { header: "Source",      value: (l) => l.source },
+  { header: "Deal value",  value: (l) => Number(l.dealValue ?? 0) },
+  { header: "Assignee",    value: (l) => l.assignee_name },
+  { header: "ICP score",   value: (l) => l.icpScore },
+  { header: "Complaints",  value: (l) => (l.complaintTags?.length ? l.complaintTags.join("; ") : "") },
+  { header: "Last activity", value: (l) => l.lastActivity },
+  { header: "Notes",       value: (l) => l.notes },
+];
 
 export default function CRM() {
   const currentUser = useCurrentUser();
@@ -171,6 +193,18 @@ export default function CRM() {
           {pipelineLoading ? <PipelineStatsSkeleton /> : <PipelineStats pipeline={pipeline} />}
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            disabled={leads.length === 0}
+            // Exports the filtered set shown on screen, matching the filter bar.
+            onClick={() => exportCsv("leads", leads, LEAD_CSV_COLUMNS)}
+            title={leads.length ? `Export ${leads.length} leads to CSV` : "Nothing to export"}
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Export</span>
+          </Button>
           {currentUser?.role === "admin" && <ScrapeLeadsDialog />}
           <CreateLeadDialog
             open={isOpen}

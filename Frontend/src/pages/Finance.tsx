@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { DollarSign, TrendingUp, TrendingDown, Plus, Pencil, Trash2, Users, Wrench, RefreshCcw, Zap } from "lucide-react";
+import { DollarSign, TrendingUp, TrendingDown, Plus, Pencil, Trash2, Users, Wrench, RefreshCcw, Zap, Download } from "lucide-react";
 import { StatCard } from "@/components/modules/StatCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,7 @@ import { MonthlyAnalytics } from "@/components/modules/finance/MonthlyAnalytics"
 import { ToolsPanel } from "@/components/modules/finance/ToolsPanel";
 import { CashPositionsPanel } from "@/components/modules/finance/CashPositionsPanel";
 import { cn } from "@/lib/utils";
+import { exportCsv, type CsvColumn } from "@/lib/csv";
 import type { ApiTransaction } from "@/lib/types";
 
 const fmt = (n: number) =>
@@ -34,6 +35,22 @@ const EGP_CATEGORIES = ["Client Setup Fee", "Client Recurring Fee", "Other Incom
 const CATEGORY_COLUMNS = ["Date", "Description", "Client", "Amount"];
 
 const TRANSACTION_COLUMNS = ["Date", "Type", "Amount", "Categories", "Tool", "Client", "Held by", "Notes", ""];
+
+// Spreadsheet columns for the CSV export. Amount stays numeric so totals can be
+// summed in Excel; categories collapse to a single semicolon-joined cell.
+const TX_CSV_COLUMNS: CsvColumn<ApiTransaction>[] = [
+  { header: "Date",       value: (t) => t.date },
+  { header: "Type",       value: (t) => t.type },
+  { header: "Amount",     value: (t) => Number(t.amount) },
+  { header: "Currency",   value: (t) => t.currency },
+  { header: "Categories", value: (t) => (t.categories?.length ? t.categories.join("; ") : t.category) },
+  { header: "Tool",       value: (t) => t.tool_name },
+  { header: "Client",     value: (t) => t.clientName },
+  { header: "Held by",    value: (t) => t.held_by_name },
+  { header: "Settled",    value: (t) => (t.heldBy ? (t.settledAt ? "yes" : "no") : "") },
+  { header: "Status",     value: (t) => t.status },
+  { header: "Notes",      value: (t) => t.notes },
+];
 
 /** Small icon + label + total tile. Only the total is data, so only it loads. */
 function MiniStat({ icon: Icon, iconBg, iconColor, label, value, loading }: {
@@ -239,6 +256,21 @@ export default function Finance() {
           <h1 className="text-xl font-semibold text-foreground">Finance</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Track income, expenses and profitability.</p>
         </div>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            disabled={transactions.length === 0}
+            // Exports what the current filters produced, not the whole ledger —
+            // the button sits next to the filters, so matching them is the
+            // least surprising behaviour.
+            onClick={() => exportCsv("transactions", transactions, TX_CSV_COLUMNS)}
+            title={transactions.length ? `Export ${transactions.length} rows to CSV` : "Nothing to export"}
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Export CSV</span>
+          </Button>
         <Dialog open={isOpen} onOpenChange={(o) => { setIsOpen(o); if (!o) setEditTx(null); }}>
           <DialogTrigger asChild>
             <Button size="sm" className="gap-1.5" onClick={() => openDialog(null)}>
@@ -334,6 +366,7 @@ export default function Finance() {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* ── Top-level sections ── */}
