@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Search, Users, Building2, CheckSquare, StickyNote, LayoutDashboard,
-  DollarSign, Send, Target, Lock, Settings, Sparkles,
+  DollarSign, Send, Target, Lock, Settings, Sparkles, Sun, Radar,
+  UsersRound,
 } from "lucide-react";
 import {
   CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup,
@@ -13,17 +14,26 @@ import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import type { ApiLead, ApiClient, ApiTask } from "@/lib/types";
 
-const PAGES: { label: string; path: string; icon: typeof LayoutDashboard }[] = [
-  { label: "Dashboard",  path: "/",          icon: LayoutDashboard },
-  { label: "Finance",    path: "/finance",   icon: DollarSign },
-  { label: "Tasks",      path: "/tasks",     icon: CheckSquare },
-  { label: "Clients",    path: "/clients",   icon: Building2 },
-  { label: "CRM Leads",  path: "/crm",       icon: Users },
-  { label: "Outreach",   path: "/outreach",  icon: Send },
-  { label: "Goals",      path: "/goals",     icon: Target },
-  { label: "Notes",      path: "/notes",     icon: StickyNote },
-  { label: "Vault",      path: "/vault",     icon: Lock },
-  { label: "Settings",   path: "/settings",  icon: Settings },
+// Keep in step with the routes in App.tsx. This list had gone stale — Today,
+// Outbound, Team and Knowledge shipped without being added, so the palette
+// couldn't reach them.
+const PAGES: { label: string; path: string; icon: typeof LayoutDashboard; keywords?: string }[] = [
+  { label: "Today",      path: "/",          icon: Sun,             keywords: "home queue focus now worklist" },
+  { label: "Dashboard",  path: "/dashboard", icon: LayoutDashboard, keywords: "overview kpis" },
+  { label: "Finance",    path: "/finance",   icon: DollarSign,      keywords: "money income expense transactions p&l" },
+  { label: "Tasks",      path: "/tasks",     icon: CheckSquare,     keywords: "todo kanban projects" },
+  { label: "Clients",    path: "/clients",   icon: Building2,       keywords: "customers accounts" },
+  { label: "CRM Leads",  path: "/crm",       icon: Users,           keywords: "pipeline prospects deals" },
+  { label: "Outreach",   path: "/outreach",  icon: Send,            keywords: "sequences email enrollments campaigns" },
+  { label: "Outbound",   path: "/outbound",  icon: Radar,           keywords: "intel enrichment deliverability mailbox audits" },
+  { label: "Goals",      path: "/goals",     icon: Target,          keywords: "okr targets" },
+  { label: "Notes",      path: "/notes",     icon: StickyNote,      keywords: "scratchpad board ideas" },
+  // NOTE: Knowledge.tsx exists (228 lines) but has no route in App.tsx and no
+  // sidebar entry, so it is currently unreachable. Deliberately not listed here
+  // — the palette must not offer a dead link. Either route it or delete it.
+  { label: "Team",       path: "/team",      icon: UsersRound,      keywords: "members access roles staff tracking" },
+  { label: "Vault",      path: "/vault",     icon: Lock,            keywords: "passwords secrets credentials" },
+  { label: "Settings",   path: "/settings",  icon: Settings,        keywords: "profile account signature webhooks" },
 ];
 
 interface SearchResults {
@@ -94,7 +104,14 @@ export function CommandPalette() {
         {/* Pages — always shown */}
         <CommandGroup heading="Pages">
           {PAGES
-            .filter((p) => !debounced || p.label.toLowerCase().includes(debounced.toLowerCase()))
+            // Match the synonyms too, so "money" finds Finance and "queue"
+            // finds Today — matching the label alone made the palette feel
+            // broken whenever you didn't guess our exact wording.
+            .filter((p) => {
+              const q = debounced.trim().toLowerCase();
+              if (!q) return true;
+              return `${p.label} ${p.keywords ?? ""}`.toLowerCase().includes(q);
+            })
             .map(({ label, path, icon: Icon }) => (
               <CommandItem key={path} onSelect={() => go(path)}>
                 <Icon className="mr-2 h-3.5 w-3.5 text-muted-foreground" />

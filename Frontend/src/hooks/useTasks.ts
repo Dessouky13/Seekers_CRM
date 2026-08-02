@@ -78,6 +78,28 @@ export function useToggleSubtask() {
         method: "PATCH",
         body: JSON.stringify({ done }),
       }),
+    // A checkbox that waits for a round-trip before ticking feels broken — the
+    // user clicks again, and the second click sends the opposite value. Flip it
+    // in the cache immediately and roll back only if the server rejects it.
+    onMutate: async ({ taskId, subtaskId, done }) => {
+      await qc.cancelQueries({ queryKey: ["tasks"] });
+      const prev = qc.getQueriesData<{ data: ApiTask[] }>({ queryKey: ["tasks"] });
+      qc.setQueriesData<{ data: ApiTask[] }>({ queryKey: ["tasks"] }, (old) =>
+        old
+          ? {
+              data: old.data.map((t) =>
+                t.id === taskId
+                  ? { ...t, subtasks: (t.subtasks ?? []).map((s) => (s.id === subtaskId ? { ...s, done } : s)) }
+                  : t,
+              ),
+            }
+          : old,
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) ctx.prev.forEach(([key, data]) => qc.setQueryData(key, data));
+    },
     onSettled: () => qc.invalidateQueries({ queryKey: ["tasks"] }),
   });
 }
