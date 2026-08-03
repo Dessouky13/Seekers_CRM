@@ -733,7 +733,13 @@ function MailboxCard({ mailbox: mb }: { mailbox: Mailbox }) {
         <div className={cn("h-full transition-all", tone.bar)} style={{ width: `${Math.max(0, Math.min(100, mb.healthScore ?? 0))}%` }} />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+      {/* No "Sent today" tile here by design: mailboxes.sent_today is never
+          written and daily_cap is seeded 0, so it could only ever render a
+          fabricated "0/∞". The Deliverability panel above already reports the
+          real send count and cap for the sending mailbox — this card sticks to
+          the two metrics (inbox placement, bounce rate) that this row's own
+          health-check data actually maintains. */}
+      <div className="grid grid-cols-2 gap-2">
         <div className="rounded-lg border border-border bg-muted/10 px-3 py-2">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Inbox</p>
           <p className="text-sm font-semibold tabular-nums text-foreground">{placement != null ? `${placement}%` : "—"}</p>
@@ -742,12 +748,6 @@ function MailboxCard({ mailbox: mb }: { mailbox: Mailbox }) {
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Bounce</p>
           <p className={cn("text-sm font-semibold tabular-nums", bounce != null && bounce >= 3 ? "text-destructive" : "text-foreground")}>
             {bounce != null ? `${bounce}%` : "—"}
-          </p>
-        </div>
-        <div className="rounded-lg border border-border bg-muted/10 px-3 py-2">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sent today</p>
-          <p className="text-sm font-semibold tabular-nums text-foreground">
-            {mb.sentToday}<span className="text-muted-foreground font-normal">/{mb.dailyCap || "∞"}</span>
           </p>
         </div>
       </div>
