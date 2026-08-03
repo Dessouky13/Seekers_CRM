@@ -11,6 +11,7 @@ import {
 } from "../utils/validators";
 import { orChat } from "../services/openrouter";
 import { fireEventAsync } from "../services/webhooks";
+import { phoneFields } from "../services/phone";
 import type { AppEnv } from "../types";
 
 const crm = new Hono<AppEnv>();
@@ -91,7 +92,7 @@ crm.post("/leads", authMiddleware, async (c) => {
       name:       body.name,
       company:    body.company,
       email:      body.email    || null,
-      phone:      body.phone    || null,
+      ...phoneFields(body.phone),
       source:     body.source   || null,
       category:   body.category || null,
       dealValue:  body.deal_value ? String(body.deal_value) : "0",
@@ -183,13 +184,22 @@ crm.patch("/leads/:id", authMiddleware, async (c) => {
 
   const stageChanged = body.stage && body.stage !== existing.stage;
 
+  // Only recompute phone_e164/phone_type when phone is actually part of this
+  // request — otherwise every unrelated PATCH (e.g. a stage move) would waste
+  // work re-deriving them from unchanged state. But when phone IS present,
+  // even as "" to clear it, all three columns must move together or a cleared
+  // lead keeps a ghost E.164 that no longer matches its (now blank) phone.
+  const phoneUpdate = body.phone !== undefined
+    ? phoneFields(body.phone)
+    : { phone: existing.phone, phoneE164: existing.phoneE164, phoneType: existing.phoneType };
+
   const [updated] = await db
     .update(leads)
     .set({
       name:         body.name        ?? existing.name,
       company:      body.company     ?? existing.company,
       email:        body.email       !== undefined ? (body.email || null) : existing.email,
-      phone:        body.phone       !== undefined ? (body.phone || null) : existing.phone,
+      ...phoneUpdate,
       source:       body.source      !== undefined ? (body.source || null) : existing.source,
       category:     body.category    !== undefined ? (body.category || null) : existing.category,
       dealValue:    body.deal_value  !== undefined ? String(body.deal_value) : existing.dealValue,

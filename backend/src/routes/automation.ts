@@ -9,6 +9,7 @@ import { db } from "../db/client";
 import { leads, events, mailboxes, audits } from "../db/schema";
 import { apiKeyAuth, adminOrApiKey } from "../middleware/automation-auth";
 import { fireEventAsync } from "../services/webhooks";
+import { phoneFields } from "../services/phone";
 import type { AppEnv } from "../types";
 
 // Resolve a lead from lead_id | domain | email (in that order). Returns id or null.
@@ -95,10 +96,21 @@ intel.post("/enrichment", apiKeyAuth, async (c) => {
 
   // Prefer the first verified email as the lead's primary contact.
   const best = b.contacts.find((x) => x.email && (x.email_status === "verified" || !x.email_status)) ?? b.contacts[0];
+
+  // phone/phone_e164/phone_type must move together, so this can't stay a bare
+  // SQL COALESCE like the email fields below — that would leave phone_e164
+  // describing whichever number the raw SQL happened to keep, not necessarily
+  // the one `phone` ends up with. Read the current value, decide the winner in
+  // JS (existing wins if non-null, same as COALESCE), then derive all three
+  // from that single winning value.
+  const [current] = await db.select({ phone: leads.phone }).from(leads).where(eq(leads.id, leadId)).limit(1);
+  const winningPhone = current?.phone ?? best?.phone ?? null;
+  const { phone, phoneE164, phoneType } = phoneFields(winningPhone);
+
   await db.update(leads).set({
     email:       best?.email       ? sql`COALESCE(${leads.email}, ${best.email})` : sql`${leads.email}`,
     emailStatus: best?.email_status ?? sql`${leads.emailStatus}`,
-    phone:       best?.phone       ? sql`COALESCE(${leads.phone}, ${best.phone})` : sql`${leads.phone}`,
+    phone, phoneE164, phoneType,
     signals:     sql`COALESCE(${leads.signals}, '{}'::jsonb) || ${JSON.stringify({ contacts: b.contacts })}::jsonb`,
     updatedAt:   new Date(),
   }).where(eq(leads.id, leadId));

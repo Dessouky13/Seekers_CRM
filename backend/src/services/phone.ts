@@ -107,6 +107,36 @@ export function classifyPhone(e164: string | null): PhoneType {
   return "unknown";
 }
 
+/**
+ * The three stored phone fields (`leads.phone`, `leads.phone_e164`,
+ * `leads.phone_type`), derived together so a caller cannot populate one and
+ * forget the others — which is exactly how the routing columns went stale:
+ * every write path set `phone` directly and never called this file at all.
+ *
+ * `phone` (the human-readable original) is preserved whenever the caller
+ * supplied non-blank text, even when it cannot be parsed to E.164 — a raw
+ * number with no country code (a real, common case; see `normalisePhone`)
+ * is still worth a human's time to fix, so it is never discarded. It is only
+ * cleared (along with the other two) when the input itself is null, undefined,
+ * or blank/whitespace-only — i.e. "no phone" in, "no phone" out.
+ *
+ * `phoneType` is null exactly when `phoneE164` is null (raw was blank or
+ * unparseable) — NOT the same as `classifyPhone`'s "unknown", which means "a
+ * real E.164 number whose type this dialling plan can't determine" (e.g. any
+ * +1 number). That distinction matters downstream: `channels.ts` still tries
+ * WhatsApp for "unknown" numbers, but null means there was no number at all.
+ */
+export function phoneFields(raw: string | null | undefined): {
+  phone: string | null;
+  phoneE164: string | null;
+  phoneType: PhoneType | null;
+} {
+  const phone = raw?.trim() ? raw.trim() : null;
+  const phoneE164 = normalisePhone(raw);
+  const phoneType = phoneE164 ? classifyPhone(phoneE164) : null;
+  return { phone, phoneE164, phoneType };
+}
+
 /** Short human label for the UI. */
 export function describePhone(e164: string | null): string {
   if (!e164) return "no number";

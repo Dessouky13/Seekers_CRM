@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalisePhone, classifyPhone, describePhone } from "./phone";
+import { normalisePhone, classifyPhone, describePhone, phoneFields } from "./phone";
 
 describe("normalisePhone", () => {
   it("strips formatting from an international number", () => {
@@ -103,5 +103,54 @@ describe("describePhone", () => {
 
   it("handles null", () => {
     expect(describePhone(null)).toBe("no number");
+  });
+});
+
+describe("phoneFields", () => {
+  it("derives all three fields from a valid international mobile", () => {
+    // Would FAIL if phoneE164 were the raw string: the raw has spaces, the
+    // stored E.164 must not.
+    expect(phoneFields("+20 100 555 1234")).toEqual({
+      phone:     "+20 100 555 1234",
+      phoneE164: "+201005551234",
+      phoneType: "mobile",
+    });
+  });
+
+  it("derives all three fields from a valid landline", () => {
+    // Cairo landline: "20" (Egypt) + "2" (Cairo) + local number.
+    expect(phoneFields("+20 2 1234 5678")).toEqual({
+      phone:     "+20 2 1234 5678",
+      phoneE164: "+20212345678",
+      phoneType: "landline",
+    });
+  });
+
+  it("keeps the raw text but nulls e164/type for an unparseable number", () => {
+    // No country code — normalisePhone deliberately refuses to guess one.
+    // The raw digits are real data a human should still be able to see and
+    // fix, so they must not be discarded.
+    expect(phoneFields("0123456789")).toEqual({
+      phone:     "0123456789",
+      phoneE164: null,
+      phoneType: null,
+    });
+  });
+
+  it("returns all-null for null, undefined and blank input", () => {
+    expect(phoneFields(null)).toEqual({ phone: null, phoneE164: null, phoneType: null });
+    expect(phoneFields(undefined)).toEqual({ phone: null, phoneE164: null, phoneType: null });
+    expect(phoneFields("")).toEqual({ phone: null, phoneE164: null, phoneType: null });
+    expect(phoneFields("   ")).toEqual({ phone: null, phoneE164: null, phoneType: null });
+  });
+
+  it("normalises the NANP bracket shape, and reports 'unknown' rather than null since it IS a usable E.164 number", () => {
+    // This must not be confused with the unparseable case above: +1 has a
+    // real, dialable E.164 form, just an unclassifiable one (see classifyPhone).
+    expect(phoneFields("(212) 285-1110")).toEqual({
+      phone:     "(212) 285-1110",
+      phoneE164: "+12122851110",
+      phoneType: "unknown",
+    });
   });
 });

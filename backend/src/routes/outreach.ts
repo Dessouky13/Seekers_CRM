@@ -24,6 +24,7 @@ import {
 import { fireEventAsync } from "../services/webhooks";
 import { checkDomainAuth } from "../services/domain-auth";
 import { effectiveDailyCap, slotsRemainingToday, type WarmupStage } from "../services/sending-policy";
+import { phoneFields } from "../services/phone";
 import type { AppEnv } from "../types";
 
 const outreach = new Hono<AppEnv>();
@@ -164,48 +165,54 @@ outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
     // a single scalar parameter, which Postgres then rejects as a malformed
     // array literal.
     emails.length
-      ? db.select({ id: leads.id, email: sql<string>`LOWER(${leads.email})` })
+      ? db.select({ id: leads.id, email: sql<string>`LOWER(${leads.email})`, phone: leads.phone })
           .from(leads)
           .where(sql`LOWER(${leads.email}) IN (${sql.join(emails.map((e) => sql`${e}`), sql`, `)})`)
-      : Promise.resolve([] as { id: string; email: string }[]),
+      : Promise.resolve([] as { id: string; email: string; phone: string | null }[]),
     pairRows.length
-      ? db.select({ id: leads.id, name: leads.name, company: leads.company })
+      ? db.select({ id: leads.id, name: leads.name, company: leads.company, phone: leads.phone })
           .from(leads)
           .where(sql`(${leads.name}, ${leads.company}) IN (${sql.join(
             pairRows.map((r) => sql`(${r.name}, ${r.company})`), sql`, `)})`)
-      : Promise.resolve([] as { id: string; name: string; company: string }[]),
+      : Promise.resolve([] as { id: string; name: string; company: string; phone: string | null }[]),
   ]);
 
-  const existingByEmail = new Map(byEmailRows.map((r) => [r.email, r.id]));
-  const existingByPair  = new Map(byPairRows.map((r) => [pairKey(r.name, r.company), r.id]));
+  const existingByEmail = new Map(byEmailRows.map((r) => [r.email, { id: r.id, phone: r.phone }]));
+  const existingByPair  = new Map(byPairRows.map((r) => [pairKey(r.name, r.company), { id: r.id, phone: r.phone }]));
 
   // 3. Split into updates and inserts. A duplicate *within* the payload is
   //    treated as a dedupe too, so one CSV containing the same lead twice does
   //    not create two records.
   const seenInBatch = new Set<string>();
-  const toUpdate: { id: string; row: typeof rows[number] }[] = [];
+  const toUpdate: { id: string; existingPhone: string | null; row: typeof rows[number] }[] = [];
   const toInsert: typeof rows = [];
 
   for (const r of rows) {
     const key = r.emailLower ?? pairKey(r.name, r.company);
-    const existingId = r.emailLower
+    const existing = r.emailLower
       ? existingByEmail.get(r.emailLower)
       : existingByPair.get(key);
 
-    if (existingId) { toUpdate.push({ id: existingId, row: r }); continue; }
+    if (existing) { toUpdate.push({ id: existing.id, existingPhone: existing.phone, row: r }); continue; }
     if (seenInBatch.has(key)) { deduped++; continue; }
     seenInBatch.add(key);
     toInsert.push(r);
   }
 
   // 4. Fill blanks on the rows we already had. COALESCE keeps existing values;
-  //    the incoming row only supplies what is currently missing.
+  //    the incoming row only supplies what is currently missing. phone can't
+  //    use a bare SQL COALESCE like source/category: phone_e164/phone_type
+  //    must be derived from whichever `phone` value actually wins, so the
+  //    winner is picked in JS (existing.phone wins if non-null, same as
+  //    COALESCE would) and all three columns are derived from it together.
   for (const u of toUpdate) {
     try {
+      const winningPhone = u.existingPhone ?? u.row.lead.phone ?? null;
+      const { phone, phoneE164, phoneType } = phoneFields(winningPhone);
       await db.update(leads).set({
         source:    sql`COALESCE(${leads.source},   ${u.row.lead.source   ?? null})`,
         category:  sql`COALESCE(${leads.category}, ${u.row.lead.category ?? null})`,
-        phone:     sql`COALESCE(${leads.phone},    ${u.row.lead.phone    ?? null})`,
+        phone, phoneE164, phoneType,
         updatedAt: new Date(),
       }).where(eq(leads.id, u.id));
       deduped++;
@@ -222,7 +229,7 @@ outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
         name:       r.name,
         company:    r.company,
         email:      r.emailLower,
-        phone:      r.lead.phone    ?? null,
+        ...phoneFields(r.lead.phone),
         source:     r.lead.source   ?? "csv-import",
         category:   r.lead.category ?? null,
         dealValue:  r.lead.deal_value != null ? String(r.lead.deal_value) : "0",
@@ -272,27 +279,33 @@ outreach.post("/leads/ingest", apiKeyAuth, async (c) => {
   const emailLower = body.email?.toLowerCase().trim() || null;
 
   // Dedupe by lowercased email (if provided) or by exact company+name
-  let existing: { id: string } | undefined;
+  let existing: { id: string; phone: string | null } | undefined;
   if (emailLower) {
     [existing] = await db
-      .select({ id: leads.id })
+      .select({ id: leads.id, phone: leads.phone })
       .from(leads)
       .where(sql`LOWER(${leads.email}) = ${emailLower}`)
       .limit(1);
   } else {
     [existing] = await db
-      .select({ id: leads.id })
+      .select({ id: leads.id, phone: leads.phone })
       .from(leads)
       .where(and(eq(leads.name, name), eq(leads.company, company)))
       .limit(1);
   }
 
   if (existing) {
-    // Patch source/category if missing, but keep existing data
+    // Patch source/category if missing, but keep existing data. phone can't
+    // use a bare SQL COALESCE like source/category: phone_e164/phone_type
+    // must describe whichever `phone` value wins, so the winner is picked in
+    // JS (existing.phone wins if non-null, same as COALESCE would) and all
+    // three phone columns are derived from it together.
+    const winningPhone = existing.phone ?? body.phone ?? null;
+    const { phone, phoneE164, phoneType } = phoneFields(winningPhone);
     await db.update(leads).set({
       source:   sql`COALESCE(${leads.source},   ${body.source   ?? null})`,
       category: sql`COALESCE(${leads.category}, ${body.category ?? null})`,
-      phone:    sql`COALESCE(${leads.phone},    ${body.phone    ?? null})`,
+      phone, phoneE164, phoneType,
       updatedAt: new Date(),
     }).where(eq(leads.id, existing.id));
 
@@ -304,7 +317,7 @@ outreach.post("/leads/ingest", apiKeyAuth, async (c) => {
     name,
     company,
     email:     emailLower,
-    phone:     body.phone    ?? null,
+    ...phoneFields(body.phone),
     source:    body.source   ?? null,
     category:  body.category ?? null,
     dealValue: body.deal_value != null ? String(body.deal_value) : "0",
