@@ -3,9 +3,10 @@
 // Exists because the failure modes were previously invisible: 30 sends were
 // rejected by the provider's own filter and nothing surfaced it, and the domain
 // has no DMARC record with nothing anywhere to say so.
-import { ShieldCheck, ShieldAlert, Gauge, Ban, AlertTriangle } from "lucide-react";
+import { ShieldCheck, ShieldAlert, Gauge, Ban, AlertTriangle, RefreshCw } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDeliverability } from "@/hooks/useDeliverability";
 import { cn } from "@/lib/utils";
@@ -17,7 +18,7 @@ const STAGE_COPY: Record<string, string> = {
 };
 
 export function DeliverabilityPanel() {
-  const { data, isLoading, isError } = useDeliverability();
+  const { data, isLoading, isError, refetch, isRefetching } = useDeliverability();
 
   if (isLoading) {
     return (
@@ -27,7 +28,39 @@ export function DeliverabilityPanel() {
       </div>
     );
   }
-  if (isError || !data) return null;
+  // A failed fetch (e.g. a stale admin session) used to blank this panel
+  // entirely with no message and no way to recover short of a full page
+  // reload. Show what happened and let the user retry in place instead.
+  if (isError) {
+    return (
+      <Card className="p-4">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-destructive/10">
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-foreground">
+              Couldn't load deliverability data
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              This might be a stale session or a network issue. Try again.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2 h-7 gap-1.5 text-xs"
+              onClick={() => refetch()}
+              disabled={isRefetching}
+            >
+              <RefreshCw className={cn("h-3 w-3", isRefetching && "animate-spin")} />
+              Retry
+            </Button>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+  if (!data) return null;
 
   const { mailbox, auth, suppressions, failures } = data;
   const used = mailbox.daily_cap > 0
