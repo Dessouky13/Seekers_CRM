@@ -1,7 +1,52 @@
 # Frontend Enhancement — Design
 
-**Date:** 2026-08-03 · **Status:** approved, ready to implement
+**Date:** 2026-08-03 · **Status:** ✅ all four phases shipped
 **Scope:** SEEKERS CRM frontend (`Frontend/`), four phases
+
+---
+
+## Outcome
+
+| Phase | Commit | Result |
+|---|---|---|
+| 1 — Mobile | `910b103` | 12 tables scrollable, 17 grids collapse, dialogs bounded, 10 tap targets enlarged |
+| 2 — Polish | `b277da5` | Skeletons on every page; optimistic updates 2 → 6; CRM 1031 → 253, Outreach 1090 → 65 |
+| 3 — Capabilities | `8b1e30c`, `9e49a8b` | Palette refreshed; CSV export on Finance/CRM/Clients with 8 tests |
+| 4 — Flow | `4fa1c07` | Deep links resolve to records; lead → task loop closed |
+
+Page code overall: **7,071 → 5,704 lines**. Frontend tests 0 → 9. Backend 31 still pass.
+
+### Things the spec got wrong (corrected during implementation)
+
+- **`tsc --noEmit` in `Frontend/` checks nothing.** The root config is
+  `"files": []` with project references, so every "typecheck clean" claim made
+  before this discovery was a no-op. The real command is
+  `tsc --noEmit -p tsconfig.app.json`, which revealed **4 real errors**. All are
+  now fixed. **Use the `-p` form.**
+- **Optimistic updates already existed** for lead-stage and task moves; the spec
+  implied none existed.
+- **The command palette already existed** and searched real data — it was stale,
+  not missing.
+- **Knowledge.tsx is dead code:** 228 lines with no route and no nav entry. Left
+  out of the palette deliberately; still needs routing or deleting.
+
+### Bugs found that were not in scope but were real
+
+- `SignatureEditor` received the localStorage `StoredUser` typed as `ApiUser`, so
+  `title`/`phone`/`signature` were `undefined` at runtime and an existing
+  signature never loaded. Fixed with `useCurrentProfile()`.
+- `ApiLead` was missing `icpScore`, `techFingerprint`, `reviewStats`,
+  `complaintTags`, `signals` — all already on the wire.
+- Three loading-vs-empty conflations showed false "nothing here" states while
+  data was still loading (Finance categories, Goals, CRM bulk-enrol menu).
+- `Knowledge.tsx` imported a non-existent `ApiApiKbDocument` and had never
+  typechecked.
+
+### Still open
+
+- Route or delete `Knowledge.tsx`.
+- Saved filter views on CRM (Phase 3 item, deferred — not built).
+- Bulk actions consistency pass (Phase 3 item, deferred — partial coverage today).
 
 ---
 
