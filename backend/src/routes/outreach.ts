@@ -27,6 +27,9 @@ import { checkDomainAuth } from "../services/domain-auth";
 import { effectiveDailyCap, slotsRemainingToday, type WarmupStage } from "../services/sending-policy";
 import { configuredSenderAddress, loadSendingMailbox } from "../services/mailbox";
 import { phoneFields } from "../services/phone";
+import {
+  fillNameCompany, pairKey, emailKey, planLeadImport, type ImportRow,
+} from "../services/lead-import";
 import { touchOutcomeEffects } from "../services/manual-touch";
 import type { AppEnv } from "../types";
 
@@ -105,9 +108,15 @@ const ingestSchema = z.object({
   { message: "Lead must have at least one of: name, company, email, or phone" },
 );
 
-// ── BULK INGEST (authMiddleware — for in-app CSV import) ──────────
+// ── BULK INGEST (authMiddleware — for in-app CSV/paste import) ──────────
+// `mode` decides what happens to a row that matches an existing lead:
+//   "update" (default) — patch missing fields (current behaviour, unchanged)
+//   "skip"              — leave the existing lead untouched
+// Either way, a row repeating an earlier row in the SAME batch never creates
+// a second record — see planLeadImport for the shared, unit-tested rule.
 const bulkIngestSchema = z.object({
   leads: z.array(ingestSchemaInline()).min(1).max(500),
+  mode:  z.enum(["skip", "update"]).default("update"),
 });
 
 function ingestSchemaInline() {
@@ -126,25 +135,13 @@ function ingestSchemaInline() {
   );
 }
 
-// Resolve required NOT NULL fields when only one of name/company was supplied.
-function fillNameCompany(name: string | null | undefined, company: string | null | undefined): { name: string; company: string } {
-  const n = name?.trim();
-  const c = company?.trim();
-  if (n && c) return { name: n,            company: c };
-  if (n)      return { name: n,            company: n };
-  if (c)      return { name: c,            company: c };
-  return       { name: "(unknown)",        company: "(unknown)" };
-}
-
-/** Dedupe key for leads with no email. JSON so a name containing the separator
- *  cannot collide with a different name/company split. */
-const pairKey = (name: string, company: string) => JSON.stringify([name, company]);
+type IngestLeadInput = z.infer<ReturnType<typeof ingestSchemaInline>>;
 
 outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
   const user = c.get("user");
   const body = bulkIngestSchema.parse(await c.req.json());
 
-  let created = 0, deduped = 0, errors = 0;
+  let created = 0, updated = 0, skipped = 0, errors = 0;
   const created_ids: string[] = [];
   const errorRows: { index: number; error: string }[] = [];
 
@@ -154,9 +151,9 @@ outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
   // of latency on a real VPS rather than the sub-second it should be.
 
   // 1. Normalise every row up front so dedupe keys are consistent.
-  const rows = body.leads.map((lead, index) => {
+  const rows: ImportRow<IngestLeadInput>[] = body.leads.map((lead, index) => {
     const { name, company } = fillNameCompany(lead.name, lead.company);
-    return { index, lead, name, company, emailLower: lead.email?.toLowerCase().trim() || null };
+    return { index, lead, name, company, emailLower: emailKey(lead.email) };
   });
 
   // 2. Two lookups for the whole batch instead of one per row.
@@ -183,24 +180,10 @@ outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
   const existingByEmail = new Map(byEmailRows.map((r) => [r.email, { id: r.id, phone: r.phone }]));
   const existingByPair  = new Map(byPairRows.map((r) => [pairKey(r.name, r.company), { id: r.id, phone: r.phone }]));
 
-  // 3. Split into updates and inserts. A duplicate *within* the payload is
-  //    treated as a dedupe too, so one CSV containing the same lead twice does
-  //    not create two records.
-  const seenInBatch = new Set<string>();
-  const toUpdate: { id: string; existingPhone: string | null; row: typeof rows[number] }[] = [];
-  const toInsert: typeof rows = [];
-
-  for (const r of rows) {
-    const key = r.emailLower ?? pairKey(r.name, r.company);
-    const existing = r.emailLower
-      ? existingByEmail.get(r.emailLower)
-      : existingByPair.get(key);
-
-    if (existing) { toUpdate.push({ id: existing.id, existingPhone: existing.phone, row: r }); continue; }
-    if (seenInBatch.has(key)) { deduped++; continue; }
-    seenInBatch.add(key);
-    toInsert.push(r);
-  }
+  // 3. The dedupe decision itself — pure and unit-tested (lead-import.test.ts)
+  //    precisely because "import the same sheet twice" must never regress.
+  const plan = planLeadImport({ rows, existingByEmail, existingByPair, mode: body.mode });
+  skipped += plan.toSkip.length;
 
   // 4. Fill blanks on the rows we already had. COALESCE keeps existing values;
   //    the incoming row only supplies what is currently missing. phone can't
@@ -208,7 +191,7 @@ outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
   //    must be derived from whichever `phone` value actually wins, so the
   //    winner is picked in JS (existing.phone wins if non-null, same as
   //    COALESCE would) and all three columns are derived from it together.
-  for (const u of toUpdate) {
+  for (const u of plan.toUpdate) {
     try {
       const winningPhone = u.existingPhone ?? u.row.lead.phone ?? null;
       const { phone, phoneE164, phoneType } = phoneFields(winningPhone);
@@ -218,7 +201,7 @@ outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
         phone, phoneE164, phoneType,
         updatedAt: new Date(),
       }).where(eq(leads.id, u.id));
-      deduped++;
+      updated++;
     } catch (err: any) {
       errors++;
       errorRows.push({ index: u.row.index, error: String(err?.message ?? err).slice(0, 200) });
@@ -226,6 +209,7 @@ outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
   }
 
   // 5. One insert for every new lead, one for all their activity rows.
+  const toInsert = plan.toInsert;
   if (toInsert.length) {
     try {
       const inserted = await db.insert(leads).values(toInsert.map((r) => ({
@@ -246,7 +230,7 @@ outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
       await db.insert(leadActivities).values(inserted.map((l) => ({
         leadId:      l.id,
         type:        "form" as const,
-        description: `CSV import by ${user.name}`,
+        description: `Bulk import by ${user.name}`,
       })));
 
       // 6. Auto-enrol with the candidate sequences fetched once for the batch.
@@ -269,7 +253,8 @@ outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
   return c.json({
     total:        body.leads.length,
     created,
-    deduped,
+    updated,
+    skipped,
     errors,
     created_ids,
     error_rows:   errorRows,
@@ -279,7 +264,7 @@ outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
 outreach.post("/leads/ingest", apiKeyAuth, async (c) => {
   const body = ingestSchema.parse(await c.req.json());
   const { name, company } = fillNameCompany(body.name, body.company);
-  const emailLower = body.email?.toLowerCase().trim() || null;
+  const emailLower = emailKey(body.email);
 
   // Dedupe by lowercased email (if provided) or by exact company+name
   let existing: { id: string; phone: string | null } | undefined;
