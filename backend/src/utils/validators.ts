@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { formatMoney, parseMoney } from "../services/money";
 
 /**
  * Canonical email input: trim and lowercase BEFORE validating.
@@ -229,6 +230,160 @@ export const externalNotificationSchema = z.object({
   link: z.string().max(300).optional(),
 }).refine((value) => value.user_id || value.target, {
   message: "Either user_id or target is required",
+});
+
+// ── Quotations & Invoices ─────────────────────────────────
+
+/**
+ * A money field on the wire.
+ *
+ * Accepts a string or a JSON number, validates it through the same integer
+ * parser the totals engine uses, and NORMALISES it to a canonical "1234.56"
+ * string. Routes therefore never see a float and can write the value straight
+ * into `numeric(12,2)`.
+ */
+function moneyField(label: string, { max = 99_999_999.99 } = {}) {
+  return z.union([z.string(), z.number()]).superRefine((value, ctx) => {
+    let minor: bigint;
+    try {
+      minor = parseMoney(value, label);
+    } catch (err) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: (err as Error).message });
+      return;
+    }
+    if (minor < 0n) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${label} must not be negative` });
+    }
+    if (minor > parseMoney(max.toFixed(2))) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${label} is too large` });
+    }
+  }).transform((value) => formatMoney(parseMoney(value, label)));
+}
+
+/** 0–100 with at most 2dp, normalised to "14.00". */
+const percentField = (label: string) =>
+  z.union([z.string(), z.number()]).superRefine((value, ctx) => {
+    let minor: bigint;
+    try {
+      minor = parseMoney(value, label);
+    } catch (err) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: (err as Error).message });
+      return;
+    }
+    if (minor < 0n)      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${label} must not be negative` });
+    if (minor > 10_000n) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${label} must not exceed 100` });
+  }).transform((value) => formatMoney(parseMoney(value, label)));
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD");
+
+export const documentItemSchema = z.object({
+  description: z.string().trim().min(1, "Description is required").max(300),
+  quantity:    moneyField("quantity", { max: 1_000_000 }).optional(),
+  unit_price:  moneyField("unit price").optional(),
+  kind:        z.enum(["one_off", "recurring"]).optional(),
+});
+
+/** Every money-bearing field a quotation or an invoice shares. */
+const documentMoneyFields = {
+  currency:         z.string().trim().length(3, "Currency must be a 3-letter code").toUpperCase().optional(),
+  setup_fee:        moneyField("setup fee").optional(),
+  monthly_retainer: moneyField("monthly retainer").optional(),
+  retainer_months:  z.number().int().min(0).max(120).optional(),
+  discount_type:    z.enum(["none", "percent", "amount"]).optional(),
+  discount_value:   moneyField("discount").optional(),
+  tax_rate:         percentField("tax rate").optional(),
+  notes:            z.string().max(5000).nullable().optional(),
+  terms:            z.string().max(5000).nullable().optional(),
+  title:            z.string().trim().max(200).nullable().optional(),
+  items:            z.array(documentItemSchema).max(100, "At most 100 line items").optional(),
+};
+
+/** Recipient details — snapshotted so a reprint never picks up a renamed company. */
+const documentClientFields = {
+  client_id:      z.string().uuid().nullable().optional(),
+  client_name:    z.string().trim().max(200).nullable().optional(),
+  client_company: z.string().trim().max(200).nullable().optional(),
+  client_email:   z.union([emailInput, z.literal("")]).nullable().optional(),
+  client_phone:   z.string().trim().max(50).nullable().optional(),
+  client_address: z.string().trim().max(500).nullable().optional(),
+};
+
+export const createQuotationSchema = z.object({
+  ...documentClientFields,
+  ...documentMoneyFields,
+  status:      z.enum(["draft", "sent", "accepted", "rejected", "expired"]).optional(),
+  valid_until: isoDate.nullable().optional(),
+});
+
+export const updateQuotationSchema = createQuotationSchema;
+
+export const quotationStatusSchema = z.object({
+  status: z.enum(["draft", "sent", "accepted", "rejected", "expired"]),
+});
+
+export const createInvoiceSchema = z.object({
+  ...documentClientFields,
+  ...documentMoneyFields,
+  status:     z.enum(["draft", "sent", "paid", "overdue", "void"]).optional(),
+  issue_date: isoDate.optional(),
+  due_date:   isoDate.nullable().optional(),
+  // A retainer invoice spawns the next one in its series on demand.
+  recurring:         z.boolean().optional(),
+  recurrence_months: z.number().int().min(1).max(12).optional(),
+  recurrence_total:  z.number().int().min(1).max(120).nullable().optional(),
+});
+
+export const updateInvoiceSchema = createInvoiceSchema;
+
+export const invoiceStatusSchema = z.object({
+  status:   z.enum(["draft", "sent", "paid", "overdue", "void"]),
+  /** Ledger date for the income row written when an invoice becomes paid. */
+  paid_on:  isoDate.optional(),
+});
+
+export const convertQuotationSchema = z.object({
+  issue_date: isoDate.optional(),
+  due_date:   isoDate.nullable().optional(),
+  /**
+   * Bill the first month of the retainer alongside the setup fee and start a
+   * monthly series. False bills the one-off portion only.
+   */
+  start_recurring: z.boolean().optional(),
+});
+
+// ── Company settings (branding for client-facing documents) ──
+
+const hexColor = z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, "Use a 6-digit hex colour, e.g. #7C3AED");
+
+export const updateCompanySettingsSchema = z.object({
+  company_name:          z.string().trim().min(1).max(200).optional(),
+  tagline:               z.string().trim().max(200).nullable().optional(),
+  address:               z.string().trim().max(300).nullable().optional(),
+  email:                 z.union([emailInput, z.literal("")]).nullable().optional(),
+  phone:                 z.string().trim().max(50).nullable().optional(),
+  website:               z.string().trim().max(200).nullable().optional(),
+  tax_number:            z.string().trim().max(60).nullable().optional(),
+  registration_number:   z.string().trim().max(60).nullable().optional(),
+  // Data URI or https URL. 512 kB of base64 is a generous ceiling for a logo and
+  // keeps a stray 8 MB photo out of every PDF render.
+  logo: z.string()
+    .max(700_000, "Logo is too large — use an image under ~500 kB")
+    .refine(
+      (v) => /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v) || /^https:\/\/\S+$/.test(v),
+      "Logo must be a PNG/JPEG/WebP data URI or an https URL",
+    )
+    .nullable().optional(),
+  brand_primary:         hexColor.optional(),
+  brand_secondary:       hexColor.optional(),
+  brand_dark:            hexColor.optional(),
+  default_currency:      z.string().trim().length(3).toUpperCase().optional(),
+  default_payment_terms: z.string().max(2000).nullable().optional(),
+  default_tax_rate:      percentField("default tax rate").optional(),
+  quotation_prefix:      z.string().trim().regex(/^[A-Z0-9]{1,8}$/, "1–8 uppercase letters or digits").optional(),
+  invoice_prefix:        z.string().trim().regex(/^[A-Z0-9]{1,8}$/, "1–8 uppercase letters or digits").optional(),
+  quotation_footer:      z.string().max(2000).nullable().optional(),
+  invoice_footer:        z.string().max(2000).nullable().optional(),
+  bank_details:          z.string().max(2000).nullable().optional(),
 });
 
 // ── CRM Insights ─────────────────────────────────────────

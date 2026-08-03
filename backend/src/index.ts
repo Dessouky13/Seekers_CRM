@@ -21,6 +21,10 @@ import agentsRouter        from "./routes/agents";
 import outreachRouter      from "./routes/outreach";
 import webhooksRouter      from "./routes/webhooks";
 import worklistRouter      from "./routes/worklist";
+import quotationsRouter    from "./routes/quotations";
+import invoicesRouter      from "./routes/invoices";
+import companySettingsRouter from "./routes/company-settings";
+import { publicQuotations, publicInvoices } from "./routes/public-documents";
 import {
   intel as intelRouter, eventsRouter, mailboxesRouter,
   auditsRouter, intentRouter,
@@ -71,6 +75,15 @@ const ADMIN_ONLY_MODULES = [
   // so any member could read the credential and the payloads. Gating the module
   // closes both at once and keeps the rule in one place.
   "/webhooks",   // automation credentials + delivered event payloads
+  // Client-facing money documents: prices, discounts, tax numbers and the P&L
+  // rows an invoice writes when it is paid.
+  //
+  // The PUBLIC share links are NOT here — they live at /q/:token and /i/:token,
+  // outside this prefix by construction rather than as an exception carved into
+  // the guard.
+  "/quotations",
+  "/invoices",
+  "/company-settings",   // branding + bank details printed on every document
 ] as const;
 
 for (const mod of ADMIN_ONLY_MODULES) {
@@ -99,6 +112,10 @@ api.route("/webhooks",      webhooksRouter);
 // the service; only /worklist/pipeline-health is admin-gated, at the route.
 api.route("/worklist",      worklistRouter);
 
+api.route("/quotations",       quotationsRouter);
+api.route("/invoices",         invoicesRouter);
+api.route("/company-settings", companySettingsRouter);
+
 // v2 Outbound Machine — automation ingest (API-key auth; for n8n)
 api.route("/intel",      intelRouter);
 api.route("/events",     eventsRouter);
@@ -107,6 +124,16 @@ api.route("/audits",     auditsRouter);
 api.route("/intent",     intentRouter);
 
 app.route("/api/v1", api);
+
+// ── Public share links (no auth) ──────────────────────────
+// Deliberately mounted at the ROOT, not under /api/v1: these are pages a client
+// opens from WhatsApp, and a short link is the point. Being outside the /api/v1
+// tree also puts them outside every module guard registered above.
+//   GET /q/:token       → branded quotation page
+//   GET /q/:token/pdf   → the same document as a PDF
+//   GET /i/:token[/pdf] → the invoice equivalents
+app.route("/q", publicQuotations);
+app.route("/i", publicInvoices);
 
 // ── 404 fallback ──────────────────────────────────────────
 app.notFound((c) => c.json({ error: "Not found" }, 404));
