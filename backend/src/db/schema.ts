@@ -238,6 +238,12 @@ export const leads = pgTable("leads", {
   reviewStats:     jsonb("review_stats"),                 // rating, count, source
   complaintTags:   text("complaint_tags").array(),        // slow_response, booking_chaos, …
   signals:         jsonb("signals"),                      // catch-all: enrichment contacts, hooks…
+  // ── Outreach channels (phone routing) ──
+  // Normalised once on write, so routing never re-parses free text.
+  phoneE164:      text("phone_e164"),
+  phoneType:      text("phone_type", { enum: ["mobile", "landline", "unknown"] }),
+  // Learned from outcomes: there is no compliant free WhatsApp presence check.
+  whatsappStatus: text("whatsapp_status", { enum: ["unknown", "yes", "no"] }).notNull().default("unknown"),
   createdAt:    timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt:    timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
@@ -246,6 +252,8 @@ export const leads = pgTable("leads", {
   nameIdx:     index("idx_leads_name").on(t.name),
   companyIdx:  index("idx_leads_company").on(t.company),
   domainIdx:   index("idx_leads_domain").on(t.domain),
+  phoneTypeIdx:      index("idx_leads_phone_type").on(t.phoneType),
+  whatsappStatusIdx: index("idx_leads_whatsapp_status").on(t.whatsappStatus),
 }));
 
 // ── Events (append-only fact log — the learning-loop training data) ──
@@ -505,8 +513,31 @@ export const outreachSends = pgTable("outreach_sends", {
   status:       text("status", { enum: ["sent", "failed"] }).notNull().default("sent"),
   messageId:    text("message_id"),
   error:        text("error"),
+  // transient | permanent | spam_reject | infra | suppressed — lets the UI say
+  // WHY a send failed rather than only that it did.
+  failureKind:  text("failure_kind"),
 }, (t) => ({
   enrollmentIdx: index("idx_sends_enrollment").on(t.enrollmentId, t.sentAt),
+  failureKindIdx: index("idx_sends_failure_kind").on(t.failureKind),
+}));
+
+// ── Suppressions ──────────────────────────────────────────
+// Addresses that must never be emailed again.
+//
+// Replaces the previous hard-bounce handling, which set leads.email = NULL and
+// destroyed the address — so the lead could never be corrected, and nothing
+// recorded why it had gone. This is permanent, non-destructive, and keyed by
+// address rather than by lead so a shared inbox is suppressed once.
+export const suppressions = pgTable("suppressions", {
+  address:   text("address").primaryKey(),
+  reason:    text("reason", {
+    enum: ["hard_bounce", "spam_reject", "complaint", "unsubscribe", "manual"],
+  }).notNull(),
+  source:    text("source"),
+  notes:     text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  reasonIdx: index("idx_suppressions_reason").on(t.reason, t.createdAt),
 }));
 
 // ── Webhook Subscriptions ─────────────────────────────────
