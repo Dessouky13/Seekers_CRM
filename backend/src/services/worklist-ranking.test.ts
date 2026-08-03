@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rankWorklist, valueBonus, formatAge, type WorklistInputs } from "./worklist-ranking";
+import { rankWorklist, valueBonus, formatAge, type WorklistInputs, type ManualTouchRow } from "./worklist-ranking";
 
 const NOW = new Date("2026-08-03T12:00:00Z");
 const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000);
@@ -14,6 +14,14 @@ function inputs(over: Partial<WorklistInputs> = {}): WorklistInputs {
     ...over,
   };
 }
+
+const manualTouch = (over: Partial<ManualTouchRow> = {}): ManualTouchRow => ({
+  enrollmentId: "enr-1", leadId: "lead-manual", leadName: "Karim Ezzat",
+  leadCompany: "Ezzat Clinics", channel: "whatsapp",
+  message: "Hi {{first_name}} — quick question about {{company}}.",
+  phoneE164: "+201234567890", dealValue: 60_000, since: hoursAgo(2),
+  ...over,
+});
 
 const reply = (over: Partial<WorklistInputs["replies"][0]> = {}) => ({
   leadId: "lead-reply", name: "Dr. Aya Mansour", company: "Rajac Dental",
@@ -75,6 +83,54 @@ describe("rankWorklist — ordering", () => {
     const one  = rankWorklist(inputs({ blocked: [{ enrollmentId: "a", sequenceName: "S", reason: "no body", leadCount: 1,  since: hoursAgo(5) }] }))[0];
     const many = rankWorklist(inputs({ blocked: [{ enrollmentId: "b", sequenceName: "S", reason: "no body", leadCount: 40, since: hoursAgo(5) }] }))[0];
     expect(many.score).toBeGreaterThan(one.score);
+  });
+});
+
+describe("rankWorklist — manual_touch", () => {
+  it("emits a manual_touch action carrying all four enrollment fields", () => {
+    const out = rankWorklist(inputs({
+      manualTouches: [manualTouch({
+        enrollmentId: "enr-42", channel: "whatsapp",
+        message: "Hi Karim — quick question about Ezzat Clinics.",
+        phoneE164: "+201112223334",
+      })],
+    }));
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe("manual_touch");
+    expect(out[0].enrollmentId).toBe("enr-42");
+    expect(out[0].channel).toBe("whatsapp");
+    expect(out[0].message).toBe("Hi Karim — quick question about Ezzat Clinics.");
+    expect(out[0].phoneE164).toBe("+201112223334");
+  });
+
+  it("grows ageHours with wait time, older enrollment ranked with a larger age", () => {
+    const fresh = rankWorklist(inputs({
+      manualTouches: [manualTouch({ enrollmentId: "fresh", leadId: "lead-fresh", since: hoursAgo(1) })],
+    }))[0];
+    const old = rankWorklist(inputs({
+      manualTouches: [manualTouch({ enrollmentId: "old", leadId: "lead-old", since: hoursAgo(30) })],
+    }))[0];
+    expect(old.ageHours).toBeGreaterThan(fresh.ageHours);
+  });
+
+  it("says the message is ready to send for whatsapp, but to call for call", () => {
+    const whatsapp = rankWorklist(inputs({
+      manualTouches: [manualTouch({ channel: "whatsapp" })],
+    }))[0];
+    const call = rankWorklist(inputs({
+      manualTouches: [manualTouch({ enrollmentId: "enr-2", leadId: "lead-call", channel: "call" })],
+    }))[0];
+    expect(whatsapp.reason).toBe("WhatsApp message ready to send");
+    expect(call.reason).toBe("Call this lead");
+  });
+
+  it("sorts a manual_touch ahead of a lower-priority action type", () => {
+    const out = rankWorklist(inputs({
+      manualTouches: [manualTouch()],
+      staleLeads: [stale()],
+    }));
+    expect(out[0].type).toBe("manual_touch");
+    expect(out.map((a) => a.type)).toEqual(["manual_touch", "stale_lead"]);
   });
 });
 

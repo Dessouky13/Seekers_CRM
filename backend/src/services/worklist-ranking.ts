@@ -34,6 +34,12 @@ export interface WorklistAction {
   taskId:    string | null;
   dealValue: number;
   ageHours:  number;
+  /** Present only on manual_touch — the enrollment a human must action. */
+  enrollmentId?: string;
+  channel?:      "whatsapp" | "call";
+  /** The message text to send, already rendered by the caller. */
+  message?:      string | null;
+  phoneE164?:    string | null;
 }
 
 /** Rows the ranker needs. Shaped by fetchWorklist, but any source works. */
@@ -153,6 +159,8 @@ export function rankWorklist(input: WorklistInputs): WorklistAction[] {
       detail: m.message ?? null,
       deepLink: `/crm?lead=${m.leadId}`,
       leadId: m.leadId, taskId: null, dealValue: Number(m.dealValue ?? 0), ageHours: age,
+      enrollmentId: m.enrollmentId, channel: m.channel,
+      message: m.message ?? null, phoneE164: m.phoneE164 ?? null,
     });
   }
 
