@@ -27,6 +27,7 @@ import { checkDomainAuth } from "../services/domain-auth";
 import { effectiveDailyCap, slotsRemainingToday, type WarmupStage } from "../services/sending-policy";
 import { configuredSenderAddress, loadSendingMailbox } from "../services/mailbox";
 import { phoneFields } from "../services/phone";
+import { touchOutcomeEffects } from "../services/manual-touch";
 import type { AppEnv } from "../types";
 
 const outreach = new Hono<AppEnv>();
@@ -1478,6 +1479,12 @@ outreach.post("/enrollments/:id/touch-outcome", authMiddleware, async (c) => {
         enrollment: outreachEnrollments,
         leadId:     leads.id,
         channel:    outreachSteps.channel,
+        // The routing facts, selected raw and decided on by channels.ts below.
+        // Without them this handler could only see the STEP's channel, which is
+        // not what the human was shown — see touchOutcomeEffects.
+        phoneE164:      leads.phoneE164,
+        phoneType:      leads.phoneType,
+        whatsappStatus: leads.whatsappStatus,
       })
       .from(outreachEnrollments)
       .innerJoin(leads, eq(leads.id, outreachEnrollments.leadId))
@@ -1496,61 +1503,85 @@ outreach.post("/enrollments/:id/touch-outcome", authMiddleware, async (c) => {
       return { status: 409 as const, body: { error: "This enrollment is not waiting on a manual step" } };
     }
 
-    // currentStep can point at a step that was deleted while the enrollment
-    // sat blocked, in which case the LEFT JOIN yields a null channel. Don't
-    // claim a channel we don't actually know, and don't touch whatsapp_status
-    // on a guess.
-    const channel = row.channel;
+    // What this outcome is ALLOWED to write, decided from the channel the human
+    // was actually shown — not from the step's own channel.
+    //
+    // Those differ, and gating on the wrong one was a real defect: a `whatsapp`
+    // step on a landline is presented as a CALL (worklist.ts downgrades it via
+    // channels.ts, and the card then hides the wa.me link, the WhatsApp script
+    // and the "No WhatsApp" button), so the only success a human can report is
+    // "Sent" — and reading the STEP's channel back here turned that into
+    // `whatsapp_status = 'yes'`, i.e. "a human confirmed this landline is on
+    // WhatsApp". channels.ts trusts that over its own classification, so the
+    // lead's next whatsapp step was no longer downgraded and the queue offered a
+    // wa.me link for a Cairo landline.
+    //
+    // The decision is a pure function (services/manual-touch.ts) so it has
+    // tests; this handler only applies it. `row.channel` is null when the step
+    // was deleted while the enrollment sat blocked — that case claims no channel
+    // at all rather than guessing.
+    const effects = touchOutcomeEffects({
+      outcome:        body.outcome,
+      notes:          body.notes ?? null,
+      stepChannel:    row.channel,
+      phoneE164:      row.phoneE164,
+      phoneType:      row.phoneType,
+      whatsappStatus: row.whatsappStatus,
+    });
 
-    const activity = async (description: string) => {
+    const activity = async () => {
       await tx.insert(leadActivities).values({
         leadId:      row.leadId,
-        type:        channel === "call" ? "call" : "note",
-        description: description.slice(0, 1000),
+        type:        effects.activity.type,
+        description: effects.activity.description.slice(0, 1000),
         createdBy:   user.id,
       });
     };
 
+    // Single place that writes the lead, so no outcome can skip the decided
+    // whatsapp_status or substitute a value of its own.
+    const updateLead = async (extra: Partial<typeof leads.$inferInsert> = {}) => {
+      const set = {
+        ...extra,
+        ...(effects.whatsappStatus ? { whatsappStatus: effects.whatsappStatus } : {}),
+      };
+      if (Object.keys(set).length === 0) return;
+      await tx.update(leads).set(set).where(eq(leads.id, row.leadId));
+    };
+
     switch (body.outcome) {
       case "sent": {
-        // A message that went through IS the confirmation the number is on
-        // WhatsApp, so success teaches the list as well as failure does.
-        if (channel === "whatsapp") {
-          await tx.update(leads).set({ whatsappStatus: "yes" }).where(eq(leads.id, row.leadId));
-        }
-        const label = channel === "call" ? "Called" : channel === "whatsapp" ? "WhatsApp sent" : "Actioned";
-        await activity(`${label}${body.notes ? ` — ${body.notes}` : ""}`);
+        await updateLead();
+        await activity();
         await resumeAndAdvance(tx, row.enrollment);
         break;
       }
       case "no_whatsapp": {
-        await tx.update(leads).set({ whatsappStatus: "no" }).where(eq(leads.id, row.leadId));
-        await activity("No WhatsApp on this number — routing to another channel");
+        await updateLead();
+        await activity();
         // Re-route rather than stop: the lead may still have a working email.
         await resumeAndAdvance(tx, row.enrollment);
         break;
       }
       case "wrong_number": {
-        await tx.update(leads)
-          .set({ phone: null, phoneE164: null, phoneType: null, whatsappStatus: "no" })
-          .where(eq(leads.id, row.leadId));
-        await activity("Wrong number — cleared");
+        await updateLead({ phone: null, phoneE164: null, phoneType: null });
+        await activity();
         await resumeAndAdvance(tx, row.enrollment);
         break;
       }
       case "not_interested": {
-        await tx.update(leads).set({ stage: "closed_lost" }).where(eq(leads.id, row.leadId));
+        await updateLead({ stage: "closed_lost" });
         await tx.update(outreachEnrollments)
           .set({ status: "completed", completedAt: new Date(), nextSendAt: null })
           .where(eq(outreachEnrollments.id, id));
-        await activity(`Not interested${body.notes ? ` — ${body.notes}` : ""}`);
+        await activity();
         break;
       }
       case "replied": {
         await tx.update(outreachEnrollments)
           .set({ status: "replied", completedAt: new Date(), nextSendAt: null })
           .where(eq(outreachEnrollments.id, id));
-        await activity(`Replied${body.notes ? ` — ${body.notes}` : ""}`);
+        await activity();
         break;
       }
     }

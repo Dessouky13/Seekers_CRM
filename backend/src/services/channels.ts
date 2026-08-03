@@ -125,7 +125,15 @@ export function unreachableReason(lead: ChannelInput): string | null {
  * needs a person may be missing from the queue.
  */
 export function manualTouchRouting(input: {
-  stepChannel: ChannelKind;
+  /**
+   * `outreach_steps.channel` verbatim — any value of that enum, or null when the
+   * step was edited or deleted while the enrollment sat blocked on it. Only
+   * `whatsapp` is special here; everything else is something a human does with a
+   * phone number, i.e. a call. Deliberately NOT narrowed to ChannelKind: this is
+   * the one place that maps a step channel to a manual one, and narrowing it
+   * pushed the same "anything but whatsapp is a call" mapping out into callers.
+   */
+  stepChannel: string | null;
   phoneE164:      string | null;
   phoneType:      PhoneType | null;
   whatsappStatus: "unknown" | "yes" | "no" | null;

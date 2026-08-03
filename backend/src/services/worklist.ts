@@ -7,7 +7,7 @@ import { sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { leads } from "../db/schema";
 import { isAdmin } from "../middleware/auth";
-import { manualTouchRouting } from "./channels";
+import { manualTouchRow, type ManualTouchQueryRow } from "./manual-touch";
 import { rankWorklist, type WorklistInputs, type WorklistAction } from "./worklist-ranking";
 
 export * from "./worklist-ranking";
@@ -200,27 +200,19 @@ export async function fetchWorklist(
       dealValue: num(r.deal_value), createdAt: date(r.created_at),
     })),
     // Route every manual touch through channels.ts before it becomes a card.
-    // THIS is where the "WhatsApp must never target a landline" guarantee is
-    // actually enforced: a whatsapp step on a landline, or on a number a human
-    // has already marked as having no WhatsApp, is downgraded to a call here, so
-    // no wa.me link can ever be built for it downstream. The card is downgraded
-    // rather than dropped on purpose — dropping it would leave the enrollment
-    // sitting in awaiting_action with nothing in the product able to clear it.
-    manualTouches: (manualTouches.rows as any[]).map((r) => {
-      const routed = manualTouchRouting({
-        stepChannel:    r.channel,
-        phoneE164:      r.phoneE164 ?? null,
-        phoneType:      r.phoneType ?? null,
-        whatsappStatus: r.whatsappStatus ?? null,
-      });
-      return {
-        enrollmentId: r.enrollmentId, leadId: r.leadId,
-        leadName: r.leadName, leadCompany: r.leadCompany,
-        channel: routed.channel, channelNote: routed.note,
-        message: r.message, phoneE164: r.phoneE164,
-        dealValue: num(r.dealValue), since: date(r.since),
-      };
-    }),
+    // manualTouchRow is where the "WhatsApp must never target a landline"
+    // guarantee is enforced: a whatsapp step on a landline, or on a number a
+    // human has already marked as having no WhatsApp, is downgraded to a call
+    // there, so no wa.me link can ever be built for it downstream. The card is
+    // downgraded rather than dropped on purpose — dropping it would leave the
+    // enrollment sitting in awaiting_action with nothing in the product able to
+    // clear it.
+    //
+    // The mapping is a pure function in manual-touch.ts rather than inline here
+    // ONLY so that it has a test: this function queries the database and the
+    // test suite has no database, so while the downgrade lived in this file it
+    // could be deleted without failing anything.
+    manualTouches: (manualTouches.rows as unknown as ManualTouchQueryRow[]).map(manualTouchRow),
   };
 }
 
