@@ -613,19 +613,53 @@ export async function handleReply(opts: {
 //   1. Sequences marked autoEnrollAll → enroll EVERY new lead regardless of category.
 //   2. Sequences marked autoEnrollOnCategory with matching category → enroll only matches.
 // enrollLead() is dedup-safe so a lead can never be double-enrolled in the same sequence.
-export async function autoEnrollIfMatchingCategory(leadId: string, category: string | null) {
-  const matches = await db
+/**
+ * Every sequence that could auto-enrol something, fetched once.
+ *
+ * Bulk ingest calls autoEnrollIfMatchingCategory per lead, and each call used
+ * to re-run this query — 500 identical round trips for one CSV import. The
+ * candidate set cannot change during a single request, so callers processing a
+ * batch fetch it once and pass it in.
+ */
+export async function getAutoEnrollCandidates() {
+  return db
     .select()
     .from(outreachSequences)
     .where(and(
       eq(outreachSequences.isActive, true),
       or(
         eq(outreachSequences.autoEnrollAll, true),
-        category
-          ? and(eq(outreachSequences.autoEnrollOnCategory, true), eq(outreachSequences.category, category))
-          : sql`false`,
+        eq(outreachSequences.autoEnrollOnCategory, true),
       )!,
     ));
+}
+
+type AutoEnrollCandidate = Awaited<ReturnType<typeof getAutoEnrollCandidates>>[number];
+
+export async function autoEnrollIfMatchingCategory(
+  leadId: string,
+  category: string | null,
+  /** Pre-fetched candidates, for batch callers. Omit to query per call. */
+  candidates?: AutoEnrollCandidate[],
+) {
+  // Same predicate as the query below, applied in memory when the caller has
+  // already fetched the candidate set.
+  const matches = candidates
+    ? candidates.filter((s) =>
+        s.autoEnrollAll ||
+        (s.autoEnrollOnCategory && !!category && s.category === category))
+    : await db
+        .select()
+        .from(outreachSequences)
+        .where(and(
+          eq(outreachSequences.isActive, true),
+          or(
+            eq(outreachSequences.autoEnrollAll, true),
+            category
+              ? and(eq(outreachSequences.autoEnrollOnCategory, true), eq(outreachSequences.category, category))
+              : sql`false`,
+          )!,
+        ));
 
   if (matches.length === 0) return;
 

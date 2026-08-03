@@ -19,6 +19,7 @@ import { createMiddleware } from "hono/factory";
 import { isEmailCapableAgent } from "../services/agents";
 import {
   enrollLead, processDueSends, autoEnrollIfMatchingCategory, handleReply,
+  getAutoEnrollCandidates,
 } from "../services/outreach";
 import { fireEventAsync } from "../services/webhooks";
 import type { AppEnv } from "../types";
@@ -129,6 +130,10 @@ function fillNameCompany(name: string | null | undefined, company: string | null
   return       { name: "(unknown)",        company: "(unknown)" };
 }
 
+/** Dedupe key for leads with no email. JSON so a name containing the separator
+ *  cannot collide with a different name/company split. */
+const pairKey = (name: string, company: string) => JSON.stringify([name, company]);
+
 outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
   const user = c.get("user");
   const body = bulkIngestSchema.parse(await c.req.json());
@@ -137,56 +142,115 @@ outreach.post("/leads/ingest-bulk", authMiddleware, adminOnly, async (c) => {
   const created_ids: string[] = [];
   const errorRows: { index: number; error: string }[] = [];
 
-  for (let i = 0; i < body.leads.length; i++) {
-    const lead = body.leads[i];
+  // Batched, because this ran one dedupe SELECT, one INSERT, one activity
+  // INSERT and a full auto-enrol lookup per row. At the 500-row cap that was
+  // roughly 2,500 serial round trips for a single CSV import, which is minutes
+  // of latency on a real VPS rather than the sub-second it should be.
+
+  // 1. Normalise every row up front so dedupe keys are consistent.
+  const rows = body.leads.map((lead, index) => {
+    const { name, company } = fillNameCompany(lead.name, lead.company);
+    return { index, lead, name, company, emailLower: lead.email?.toLowerCase().trim() || null };
+  });
+
+  // 2. Two lookups for the whole batch instead of one per row.
+  const emails    = [...new Set(rows.map((r) => r.emailLower).filter((e): e is string => !!e))];
+  const pairRows  = rows.filter((r) => !r.emailLower);
+
+  const [byEmailRows, byPairRows] = await Promise.all([
+    // An explicit IN list rather than `= ANY($1)`: Drizzle binds a JS array as
+    // a single scalar parameter, which Postgres then rejects as a malformed
+    // array literal.
+    emails.length
+      ? db.select({ id: leads.id, email: sql<string>`LOWER(${leads.email})` })
+          .from(leads)
+          .where(sql`LOWER(${leads.email}) IN (${sql.join(emails.map((e) => sql`${e}`), sql`, `)})`)
+      : Promise.resolve([] as { id: string; email: string }[]),
+    pairRows.length
+      ? db.select({ id: leads.id, name: leads.name, company: leads.company })
+          .from(leads)
+          .where(sql`(${leads.name}, ${leads.company}) IN (${sql.join(
+            pairRows.map((r) => sql`(${r.name}, ${r.company})`), sql`, `)})`)
+      : Promise.resolve([] as { id: string; name: string; company: string }[]),
+  ]);
+
+  const existingByEmail = new Map(byEmailRows.map((r) => [r.email, r.id]));
+  const existingByPair  = new Map(byPairRows.map((r) => [pairKey(r.name, r.company), r.id]));
+
+  // 3. Split into updates and inserts. A duplicate *within* the payload is
+  //    treated as a dedupe too, so one CSV containing the same lead twice does
+  //    not create two records.
+  const seenInBatch = new Set<string>();
+  const toUpdate: { id: string; row: typeof rows[number] }[] = [];
+  const toInsert: typeof rows = [];
+
+  for (const r of rows) {
+    const key = r.emailLower ?? pairKey(r.name, r.company);
+    const existingId = r.emailLower
+      ? existingByEmail.get(r.emailLower)
+      : existingByPair.get(key);
+
+    if (existingId) { toUpdate.push({ id: existingId, row: r }); continue; }
+    if (seenInBatch.has(key)) { deduped++; continue; }
+    seenInBatch.add(key);
+    toInsert.push(r);
+  }
+
+  // 4. Fill blanks on the rows we already had. COALESCE keeps existing values;
+  //    the incoming row only supplies what is currently missing.
+  for (const u of toUpdate) {
     try {
-      const { name, company } = fillNameCompany(lead.name, lead.company);
-      const emailLower = lead.email?.toLowerCase().trim() || null;
-      let existing: { id: string } | undefined;
-      if (emailLower) {
-        [existing] = await db.select({ id: leads.id }).from(leads)
-          .where(sql`LOWER(${leads.email}) = ${emailLower}`).limit(1);
-      } else {
-        [existing] = await db.select({ id: leads.id }).from(leads)
-          .where(and(eq(leads.name, name), eq(leads.company, company))).limit(1);
-      }
-
-      if (existing) {
-        await db.update(leads).set({
-          source:    sql`COALESCE(${leads.source},   ${lead.source   ?? null})`,
-          category:  sql`COALESCE(${leads.category}, ${lead.category ?? null})`,
-          phone:     sql`COALESCE(${leads.phone},    ${lead.phone    ?? null})`,
-          updatedAt: new Date(),
-        }).where(eq(leads.id, existing.id));
-        deduped++;
-        continue;
-      }
-
-      const [newLead] = await db.insert(leads).values({
-        name,
-        company,
-        email:     emailLower,
-        phone:     lead.phone    ?? null,
-        source:    lead.source   ?? "csv-import",
-        category:  lead.category ?? null,
-        dealValue: lead.deal_value != null ? String(lead.deal_value) : "0",
-        notes:     lead.notes    ?? null,
-        assigneeId: user.id,
-      }).returning({ id: leads.id });
-
-      await db.insert(leadActivities).values({
-        leadId:      newLead.id,
-        type:        "form",
-        description: `CSV import by ${user.name}`,
-      });
-
-      await autoEnrollIfMatchingCategory(newLead.id, lead.category ?? null);
-
-      created_ids.push(newLead.id);
-      created++;
+      await db.update(leads).set({
+        source:    sql`COALESCE(${leads.source},   ${u.row.lead.source   ?? null})`,
+        category:  sql`COALESCE(${leads.category}, ${u.row.lead.category ?? null})`,
+        phone:     sql`COALESCE(${leads.phone},    ${u.row.lead.phone    ?? null})`,
+        updatedAt: new Date(),
+      }).where(eq(leads.id, u.id));
+      deduped++;
     } catch (err: any) {
       errors++;
-      errorRows.push({ index: i, error: String(err?.message ?? err).slice(0, 200) });
+      errorRows.push({ index: u.row.index, error: String(err?.message ?? err).slice(0, 200) });
+    }
+  }
+
+  // 5. One insert for every new lead, one for all their activity rows.
+  if (toInsert.length) {
+    try {
+      const inserted = await db.insert(leads).values(toInsert.map((r) => ({
+        name:       r.name,
+        company:    r.company,
+        email:      r.emailLower,
+        phone:      r.lead.phone    ?? null,
+        source:     r.lead.source   ?? "csv-import",
+        category:   r.lead.category ?? null,
+        dealValue:  r.lead.deal_value != null ? String(r.lead.deal_value) : "0",
+        notes:      r.lead.notes    ?? null,
+        assigneeId: user.id,
+      }))).returning({ id: leads.id });
+
+      created_ids.push(...inserted.map((l) => l.id));
+      created = inserted.length;
+
+      await db.insert(leadActivities).values(inserted.map((l) => ({
+        leadId:      l.id,
+        type:        "form" as const,
+        description: `CSV import by ${user.name}`,
+      })));
+
+      // 6. Auto-enrol with the candidate sequences fetched once for the batch.
+      //    Kept per-lead because the ranking and the never-enrol-twice guard
+      //    are what stopped a repeat of the 142-lead double-email incident.
+      const candidates = await getAutoEnrollCandidates();
+      if (candidates.length) {
+        for (const [i, l] of inserted.entries()) {
+          await autoEnrollIfMatchingCategory(l.id, toInsert[i].lead.category ?? null, candidates);
+        }
+      }
+    } catch (err: any) {
+      // A batch insert is all-or-nothing, so report it against the whole group
+      // rather than silently claiming success for rows that never landed.
+      errors += toInsert.length;
+      errorRows.push({ index: toInsert[0].index, error: `batch insert failed: ${String(err?.message ?? err).slice(0, 160)}` });
     }
   }
 
