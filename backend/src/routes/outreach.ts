@@ -447,9 +447,12 @@ outreach.get("/sequences/:id", authMiddleware, async (c) => {
       .orderBy(outreachSteps.position),
     db.select({
       // Same LIVE definition as the list endpoint above — the two must agree,
-      // and both feed the "N leads enrolled" delete warning.
+      // and both feed the "N leads enrolled" delete warning. Built from the
+      // constant rather than spelled out in the SQL: this was the fourth site to
+      // hardcode the set, and hardcoding it is exactly how `awaiting_action` came
+      // to be missing from three of them. The next status added cannot desync it.
       active: sql<number>`COUNT(*) FILTER (
-        WHERE ${outreachEnrollments.status} IN ('active','paused','awaiting_action')
+        WHERE ${inArray(outreachEnrollments.status, [...LIVE_ENROLLMENT_STATUSES])}
       )::int`,
       total:  sql<number>`COUNT(*)::int`,
     })
