@@ -594,6 +594,163 @@ export const webhookDeliveries = pgTable("webhook_deliveries", {
   subIdx: index("idx_webhook_deliveries_sub").on(t.subscriptionId, t.deliveredAt),
 }));
 
+// ── Company Settings (single row) ─────────────────────────
+// Branding + company details for client-facing documents. Lives in the DB, not
+// in the PDF renderer, so the logo/colours/terms are editable from Settings
+// without a deploy. `singleton` has a unique index, which is what makes
+// "exactly one row" a database guarantee.
+export const companySettings = pgTable("company_settings", {
+  id:                  uuid("id").primaryKey().defaultRandom(),
+  singleton:           boolean("singleton").notNull().default(true),
+  companyName:         text("company_name").notNull().default("Seekers AI Automation Solutions"),
+  tagline:             text("tagline"),
+  address:             text("address"),
+  email:               text("email"),
+  phone:               text("phone"),
+  website:             text("website"),
+  taxNumber:           text("tax_number"),
+  registrationNumber:  text("registration_number"),
+  // NULL = the white Seekers mark bundled with the API (services/brand-logo.ts).
+  // Otherwise a data:image/png;base64,… URI uploaded from Settings.
+  logo:                text("logo"),
+  brandPrimary:        text("brand_primary").notNull().default("#7C3AED"),
+  brandSecondary:      text("brand_secondary").notNull().default("#3730A3"),
+  brandDark:           text("brand_dark").notNull().default("#1E1B4B"),
+  defaultCurrency:     text("default_currency").notNull().default("EGP"),
+  defaultPaymentTerms: text("default_payment_terms"),
+  defaultTaxRate:      numeric("default_tax_rate", { precision: 5, scale: 2 }).notNull().default("0"),
+  quotationPrefix:     text("quotation_prefix").notNull().default("SQ"),
+  invoicePrefix:       text("invoice_prefix").notNull().default("INV"),
+  quotationFooter:     text("quotation_footer"),
+  invoiceFooter:       text("invoice_footer"),
+  bankDetails:         text("bank_details"),
+  updatedAt:           timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ── Quotations ────────────────────────────────────────────
+// clientId is nullable on purpose: a quotation routinely goes out before the
+// prospect exists as a client row, so the recipient is also snapshotted as free
+// text. Converting an accepted quotation is what creates/links the client.
+export const quotations = pgTable("quotations", {
+  id:              uuid("id").primaryKey().defaultRandom(),
+  number:          text("number").notNull().unique(),          // SQ-2026-0001
+  title:           text("title"),
+  clientId:        uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+  clientName:      text("client_name"),
+  clientCompany:   text("client_company"),
+  clientEmail:     text("client_email"),
+  clientPhone:     text("client_phone"),
+  clientAddress:   text("client_address"),
+  status:          text("status", {
+    enum: ["draft", "sent", "accepted", "rejected", "expired"],
+  }).notNull().default("draft"),
+  currency:        text("currency").notNull().default("EGP"),
+  setupFee:        numeric("setup_fee",        { precision: 12, scale: 2 }).notNull().default("0"),
+  monthlyRetainer: numeric("monthly_retainer", { precision: 12, scale: 2 }).notNull().default("0"),
+  retainerMonths:  integer("retainer_months").notNull().default(0),
+  // Explicit discriminator rather than two nullable columns — "10" can never be
+  // ambiguous between 10% and EGP 10.
+  discountType:    text("discount_type", { enum: ["none", "percent", "amount"] }).notNull().default("none"),
+  discountValue:   numeric("discount_value", { precision: 12, scale: 2 }).notNull().default("0"),
+  taxRate:         numeric("tax_rate", { precision: 5, scale: 2 }).notNull().default("0"),
+  notes:           text("notes"),
+  terms:           text("terms"),
+  validUntil:      date("valid_until"),
+  // 43-char base64url of 32 random bytes. The share link is the only thing
+  // authenticating a public reader, so it must be unguessable.
+  shareToken:      text("share_token").notNull().unique(),
+  sentAt:          timestamp("sent_at",    { withTimezone: true }),
+  decidedAt:       timestamp("decided_at", { withTimezone: true }),
+  createdBy:       uuid("created_by").references(() => profiles.id, { onDelete: "set null" }),
+  createdAt:       timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:       timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  statusIdx: index("idx_quotations_status").on(t.status, t.createdAt),
+  clientIdx: index("idx_quotations_client").on(t.clientId),
+}));
+
+export const quotationItems = pgTable("quotation_items", {
+  id:          uuid("id").primaryKey().defaultRandom(),
+  quotationId: uuid("quotation_id").notNull().references(() => quotations.id, { onDelete: "cascade" }),
+  description: text("description").notNull(),
+  quantity:    numeric("quantity",   { precision: 12, scale: 2 }).notNull().default("1"),
+  unitPrice:   numeric("unit_price", { precision: 12, scale: 2 }).notNull().default("0"),
+  // one_off bills once; recurring bills once per month of the retainer term.
+  kind:        text("kind", { enum: ["one_off", "recurring"] }).notNull().default("one_off"),
+  position:    integer("position").notNull().default(0),
+  createdAt:   timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  quotationIdx: index("idx_quotation_items_quotation").on(t.quotationId, t.position),
+}));
+
+// ── Invoices ──────────────────────────────────────────────
+// Same money shape as a quotation, so one pure total engine serves both.
+export const invoices = pgTable("invoices", {
+  id:              uuid("id").primaryKey().defaultRandom(),
+  number:          text("number").notNull().unique(),          // INV-2026-0001
+  title:           text("title"),
+  clientId:        uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+  quotationId:     uuid("quotation_id").references(() => quotations.id, { onDelete: "set null" }),
+  clientName:      text("client_name"),
+  clientCompany:   text("client_company"),
+  clientEmail:     text("client_email"),
+  clientPhone:     text("client_phone"),
+  clientAddress:   text("client_address"),
+  status:          text("status", {
+    enum: ["draft", "sent", "paid", "overdue", "void"],
+  }).notNull().default("draft"),
+  issueDate:       date("issue_date").notNull().default(sql`CURRENT_DATE`),
+  dueDate:         date("due_date"),
+  currency:        text("currency").notNull().default("EGP"),
+  setupFee:        numeric("setup_fee",        { precision: 12, scale: 2 }).notNull().default("0"),
+  monthlyRetainer: numeric("monthly_retainer", { precision: 12, scale: 2 }).notNull().default("0"),
+  retainerMonths:  integer("retainer_months").notNull().default(0),
+  discountType:    text("discount_type", { enum: ["none", "percent", "amount"] }).notNull().default("none"),
+  discountValue:   numeric("discount_value", { precision: 12, scale: 2 }).notNull().default("0"),
+  taxRate:         numeric("tax_rate", { precision: 5, scale: 2 }).notNull().default("0"),
+  notes:           text("notes"),
+  terms:           text("terms"),
+  paidAt:          timestamp("paid_at", { withTimezone: true }),
+  // ── Recurrence ──
+  // A retainer produces a ROLLING series: the next invoice is spawned from this
+  // one on demand, rather than pre-creating N drafts that go stale if the
+  // client churns or the price changes.
+  recurring:        boolean("recurring").notNull().default(false),
+  recurrenceMonths: integer("recurrence_months").notNull().default(1),
+  recurrenceIndex:  integer("recurrence_index").notNull().default(1),
+  recurrenceTotal:  integer("recurrence_total"),
+  nextInvoiceDate:  date("next_invoice_date"),
+  parentInvoiceId:  uuid("parent_invoice_id"),
+  // ── Finance tie-in ──
+  // The income row written into the P&L when this invoice was FIRST marked
+  // paid. Its presence is the idempotency marker: mark-paid refuses to write a
+  // second transaction while it is populated, so marking paid twice cannot
+  // double-count revenue.
+  transactionId:   uuid("transaction_id").references(() => transactions.id, { onDelete: "set null" }),
+  shareToken:      text("share_token").notNull().unique(),
+  createdBy:       uuid("created_by").references(() => profiles.id, { onDelete: "set null" }),
+  createdAt:       timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:       timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  statusIdx:    index("idx_invoices_status").on(t.status, t.issueDate),
+  clientIdx:    index("idx_invoices_client").on(t.clientId),
+  quotationIdx: index("idx_invoices_quotation").on(t.quotationId),
+  parentIdx:    index("idx_invoices_parent").on(t.parentInvoiceId),
+}));
+
+export const invoiceItems = pgTable("invoice_items", {
+  id:          uuid("id").primaryKey().defaultRandom(),
+  invoiceId:   uuid("invoice_id").notNull().references(() => invoices.id, { onDelete: "cascade" }),
+  description: text("description").notNull(),
+  quantity:    numeric("quantity",   { precision: 12, scale: 2 }).notNull().default("1"),
+  unitPrice:   numeric("unit_price", { precision: 12, scale: 2 }).notNull().default("0"),
+  kind:        text("kind", { enum: ["one_off", "recurring"] }).notNull().default("one_off"),
+  position:    integer("position").notNull().default(0),
+  createdAt:   timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  invoiceIdx: index("idx_invoice_items_invoice").on(t.invoiceId, t.position),
+}));
+
 // ── Vault Categories (dynamic, team-managed) ─────────────
 export const vaultCategories = pgTable("vault_categories", {
   id:        uuid("id").primaryKey().defaultRandom(),
