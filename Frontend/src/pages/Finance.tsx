@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatCardSkeleton, TableSkeleton } from "@/components/ui/skeletons";
 import { toast } from "sonner";
 import {
-  useTransactions, useFinanceSummary, useCategories,
+  useTransactions, useFinanceSummary, useCategories, useCategoryTotals,
   useCreateTransaction, useUpdateTransaction, useDeleteTransaction,
   useTools,
 } from "@/hooks/useFinance";
@@ -158,9 +158,25 @@ export default function Finance() {
   const [formHeldBy, setFormHeldBy] = useState<string>("");
   const [section,    setSection]    = useState("overview");
 
-  // All transactions for category breakdowns (no filter)
-  const { data: allTxRes, isLoading: loadingAllTx } = useTransactions({ limit: 2000 });
+  // Which sub-tab of the overview is showing. Lifted out of the inner <Tabs>
+  // so the expensive full-ledger fetch below can be tied to it.
+  const [txTab, setTxTab] = useState("all");
+  const needsAllTx = txTab !== "all";
+
+  // The four KPI cards come from a server-side aggregate. They used to be
+  // computed by downloading up to 2,000 transactions and summing four
+  // categories in the browser on every page load — which also silently
+  // under-reported once the ledger passed that limit.
+  const { data: categoryTotals = [], isLoading: loadingTotals } = useCategoryTotals();
+  const totalFor = (name: string) =>
+    categoryTotals.find((t) => t.category === name)?.total ?? 0;
+
+  // The per-category tables genuinely need the rows, so this still fetches —
+  // but only once the user opens one of those tabs.
+  const { data: allTxRes, isLoading: loadingAllTxRaw } =
+    useTransactions({ limit: 2000 }, { enabled: needsAllTx });
   const allTransactions = allTxRes?.data ?? [];
+  const loadingAllTx = needsAllTx && loadingAllTxRaw;
 
   const { data: txRes, isLoading } = useTransactions({
     type:     typeFilter !== "all" ? typeFilter : undefined,
@@ -196,10 +212,10 @@ export default function Finance() {
   const transactions = txRes?.data ?? [];
 
   // Category breakdowns
-  const totalSalary   = allTransactions.filter((t) => t.category === "Salary").reduce((s, t) => s + Number(t.amount), 0);
-  const totalTools    = allTransactions.filter((t) => t.category === "Tools").reduce((s, t) => s + Number(t.amount), 0);
-  const totalRecurring = allTransactions.filter((t) => t.category === "Client Recurring Fee").reduce((s, t) => s + Number(t.amount), 0);
-  const totalSetup    = allTransactions.filter((t) => t.category === "Client Setup Fee").reduce((s, t) => s + Number(t.amount), 0);
+  const totalSalary    = totalFor("Salary");
+  const totalTools     = totalFor("Tools");
+  const totalRecurring = totalFor("Client Recurring Fee");
+  const totalSetup     = totalFor("Client Setup Fee");
 
   const handleSave = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -385,7 +401,7 @@ export default function Finance() {
         <TabsContent value="overview" className="mt-4 space-y-6">
       {/* KPI cards — placeheld rather than showing EGP 0 before the numbers land */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {(loadingSummary || loadingAllTx) ? (
+        {(loadingSummary || loadingTotals) ? (
           Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
         ) : (
           <>
@@ -424,15 +440,15 @@ export default function Finance() {
       {/* Category summary row — icons/labels are static, only the totals load */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <MiniStat icon={Wrench}    iconBg="bg-blue-500/10"   iconColor="text-blue-500"
-                  label="Tools Spend"      value={fmt(totalTools)}     loading={loadingAllTx} />
+                  label="Tools Spend"      value={fmt(totalTools)}     loading={loadingTotals} />
         <MiniStat icon={RefreshCcw} iconBg="bg-green-500/10"  iconColor="text-green-500"
-                  label="Client Recurring" value={fmt(totalRecurring)} loading={loadingAllTx} />
+                  label="Client Recurring" value={fmt(totalRecurring)} loading={loadingTotals} />
         <MiniStat icon={Zap}        iconBg="bg-violet-500/10" iconColor="text-violet-500"
-                  label="Setup Fees"       value={fmt(totalSetup)}     loading={loadingAllTx} />
+                  label="Setup Fees"       value={fmt(totalSetup)}     loading={loadingTotals} />
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="all">
+      <Tabs value={txTab} onValueChange={setTxTab}>
         <TabsList className="mb-4">
           <TabsTrigger value="all">All Transactions</TabsTrigger>
           <TabsTrigger value="salary">Salaries</TabsTrigger>

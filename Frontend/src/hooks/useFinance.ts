@@ -16,7 +16,11 @@ interface TransactionParams {
   period?: string;
 }
 
-export function useTransactions(params: TransactionParams = {}) {
+export function useTransactions(
+  params: TransactionParams = {},
+  /** Set false to hold the request until the data is actually needed. */
+  opts: { enabled?: boolean } = {},
+) {
   const qs = new URLSearchParams();
   if (params.type && params.type !== "all") qs.set("type", params.type);
   if (params.category && params.category !== "all") qs.set("category", params.category);
@@ -33,6 +37,25 @@ export function useTransactions(params: TransactionParams = {}) {
   return useQuery<{ data: ApiTransaction[]; total: number; page: number; limit: number }>({
     queryKey: ["transactions", params],
     queryFn:  () => apiFetch(`/finance/transactions${query ? `?${query}` : ""}`),
+    enabled:  opts.enabled ?? true,
+  });
+}
+
+// ── All-time totals per category ──────────────────────────
+// Replaces summing a 2,000-row transaction download in the browser. Server-side
+// aggregation is both cheaper and correct past the row limit.
+export interface CategoryTotal {
+  category:  string;
+  count:     number;
+  total:     number;
+  last_date: string | null;
+}
+
+export function useCategoryTotals() {
+  return useQuery<CategoryTotal[]>({
+    queryKey: ["finance-category-totals"],
+    queryFn:  () => apiFetch("/finance/category-totals"),
+    staleTime: 60_000,
   });
 }
 

@@ -576,7 +576,14 @@ function MemberWorkDialog({ userId, onClose }: { userId: string | null; onClose:
               ) : (
                 <div className="relative max-h-80 space-y-0 overflow-y-auto pl-1">
                   {data.timeline.map((t, i) => {
-                    const s = TIMELINE_STYLE[t.kind] ?? TIMELINE_STYLE.lead_activity;
+                    const base = TIMELINE_STYLE[t.kind] ?? TIMELINE_STYLE.lead_activity;
+                    // A failed sign-in is not a sign-in. Without this the row
+                    // read "Signed in · <ip>" with a body saying the attempt
+                    // failed — the label contradicted the detail beneath it.
+                    const failedLogin = t.kind === "login" && t.detail === "failed";
+                    const s = failedLogin
+                      ? { label: "Failed sign-in", icon: ShieldAlert, tone: "text-destructive" }
+                      : base;
                     const Icon = s.icon;
                     const last = i === data.timeline.length - 1;
                     return (
@@ -603,9 +610,7 @@ function MemberWorkDialog({ userId, onClose }: { userId: string | null; onClose:
                           </div>
                           {(t.body || t.detail) && (
                             <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
-                              {t.kind === "login"
-                                ? `${t.detail === "failed" ? "Failed attempt" : "Signed in"} from ${t.subject} · ${deviceOf(t.body)}`
-                                : t.body || t.detail}
+                              {t.kind === "login" ? deviceOf(t.body) : t.body || t.detail}
                             </p>
                           )}
                         </div>

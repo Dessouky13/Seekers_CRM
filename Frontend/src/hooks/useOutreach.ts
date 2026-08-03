@@ -81,10 +81,24 @@ export function useSequence(id: string | null) {
   });
 }
 
+/** A step supplied at creation time, e.g. from a starter template. */
+export interface SeedStep {
+  day_offset:        number;
+  channel?:          Channel;
+  subject_template?: string | null;
+  body_template?:    string | null;
+  agent_id?:         string | null;
+}
+
 export function useCreateSequence() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name: string; description?: string; category?: string; is_active?: boolean; auto_enroll_on_category?: boolean; auto_enroll_all?: boolean }) =>
+    mutationFn: (body: {
+      name: string; description?: string; category?: string; is_active?: boolean;
+      auto_enroll_on_category?: boolean; auto_enroll_all?: boolean;
+      /** Created atomically with the sequence — see POST /outreach/sequences. */
+      steps?: SeedStep[];
+    }) =>
       apiFetch<Sequence>("/outreach/sequences", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["outreach", "sequences"] }),
   });
@@ -124,6 +138,42 @@ export function useUpdateStep() {
     mutationFn: ({ sequenceId, stepId, ...body }: { sequenceId: string; stepId: string } & Partial<{ day_offset: number; channel: Channel; subject_template: string | null; body_template: string | null; agent_id: string | null }>) =>
       apiFetch<SequenceStep>(`/outreach/sequences/${sequenceId}/steps/${stepId}`, { method: "PATCH", body: JSON.stringify(body) }),
     onSuccess: (_d, { sequenceId }) => qc.invalidateQueries({ queryKey: ["outreach", "sequences", sequenceId] }),
+  });
+}
+
+/**
+ * Persist a drag-and-drop reorder. The server rewrites day offsets to preserve
+ * the gaps between steps, so the response is authoritative — the optimistic
+ * update below is replaced by it on settle.
+ */
+export function useReorderSteps() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sequenceId, order }: { sequenceId: string; order: string[] }) =>
+      apiFetch<SequenceStep[]>(`/outreach/sequences/${sequenceId}/steps/reorder`, {
+        method: "PUT",
+        body:   JSON.stringify({ order }),
+      }),
+    // Dragging must feel instant; without this the card snaps back to its old
+    // slot for the duration of the round trip.
+    onMutate: async ({ sequenceId, order }) => {
+      const key = ["outreach", "sequences", sequenceId];
+      await qc.cancelQueries({ queryKey: key });
+      const prev = qc.getQueryData<SequenceWithSteps>(key);
+      if (prev) {
+        const byId = new Map(prev.steps.map((s) => [s.id, s]));
+        qc.setQueryData<SequenceWithSteps>(key, {
+          ...prev,
+          steps: order
+            .map((id, i) => { const s = byId.get(id); return s ? { ...s, position: i } : null; })
+            .filter((s): s is SequenceStep => s !== null),
+        });
+      }
+      return { prev, key };
+    },
+    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(ctx.key, ctx.prev); },
+    onSettled: (_d, _e, { sequenceId }) =>
+      qc.invalidateQueries({ queryKey: ["outreach", "sequences", sequenceId] }),
   });
 }
 

@@ -364,6 +364,43 @@ finance.get("/categories", authMiddleware, async (c) => {
   return c.json((rows.rows as { category: string }[]).map((r) => r.category));
 });
 
+// ── GET /finance/category-totals ──────────────────────────
+// All-time totals and counts per category.
+//
+// The Finance page used to pull `/transactions?limit=2000` on every load purely
+// to sum four fixed categories client-side. That is up to 2,000 full rows over
+// the wire to produce eight numbers, and it silently under-reports once the
+// ledger passes the limit. Aggregating in Postgres is both correct and cheap.
+//
+// Reads the `categories` array with a fallback to the legacy scalar `category`,
+// since older rows predate the multi-select.
+finance.get("/category-totals", authMiddleware, async (c) => {
+  // The CASE picks an array and the LATERAL expands it. Putting unnest()
+  // directly inside the CASE fails: "set-returning functions are not allowed
+  // in CASE".
+  const rows = await db.execute(sql`
+    SELECT cat                                AS category,
+           COUNT(*)::int                      AS count,
+           COALESCE(SUM(t.amount::numeric),0) AS total,
+           MAX(t.date)::text                  AS last_date
+      FROM transactions t
+      CROSS JOIN LATERAL unnest(
+        CASE WHEN cardinality(t.categories) > 0 THEN t.categories
+             WHEN t.category IS NOT NULL       THEN ARRAY[t.category]
+             ELSE ARRAY[]::text[] END
+      ) AS cat
+     GROUP BY cat
+     ORDER BY total DESC
+  `);
+
+  return c.json((rows.rows as Record<string, unknown>[]).map((r) => ({
+    category:  String(r.category),
+    count:     Number(r.count ?? 0),
+    total:     Number(r.total ?? 0),
+    last_date: (r.last_date as string) ?? null,
+  })));
+});
+
 // ── GET /finance/monthly ──────────────────────────────────
 // Per-cycle P&L for the last N periods (20th→19th by default), newest last.
 // Each period also carries its category + tool breakdown so the UI can drill in

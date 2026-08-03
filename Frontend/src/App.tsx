@@ -84,7 +84,10 @@ const App = () => (
     <TooltipProvider>
       <Sonner />
       <SeekersBackground />
-      <BrowserRouter>
+      {/* Opt in to the v7 behaviours now. Both were logging warnings on every
+          page load, and adopting them early means the eventual upgrade is not
+          a behavioural change. */}
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route

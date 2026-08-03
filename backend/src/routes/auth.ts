@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { profiles, teamInvites, loginEvents } from "../db/schema";
@@ -56,8 +57,13 @@ auth.post("/login", async (c) => {
       userId,
       email:     body.email,
       success,
+      // Behind nginx the real address is only in the forwarded headers; on a
+      // direct connection it is only on the socket. Try both, or the history
+      // reads "unknown IP" for every row in one of the two deployments.
       ip:        c.req.header("x-forwarded-for")?.split(",")[0].trim()
-                 ?? c.req.header("x-real-ip") ?? null,
+                 ?? c.req.header("x-real-ip")
+                 ?? getConnInfo(c).remote.address
+                 ?? null,
       userAgent: c.req.header("user-agent")?.slice(0, 500) ?? null,
     }).catch((e) => console.error("[auth] login event not recorded:", e?.message));
 

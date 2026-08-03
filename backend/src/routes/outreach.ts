@@ -302,6 +302,17 @@ const sequenceSchema = z.object({
   auto_enroll_all:         z.boolean().optional(),
 });
 
+// Steps supplied inline when creating a sequence from a template. Declared here
+// rather than reusing stepSchema (defined further down) because creation needs
+// it before that point; kept structurally identical.
+const seedStepsSchema = z.array(z.object({
+  day_offset:       z.number().int().min(0).max(365),
+  channel:          z.enum(["email", "linkedin", "note"]).default("email"),
+  subject_template: z.string().max(300).optional().nullable(),
+  body_template:    z.string().max(8000).optional().nullable(),
+  agent_id:         z.string().max(100).optional().nullable(),
+})).max(20).default([]);
+
 outreach.get("/sequences", authMiddleware, async (c) => {
   // Fetch sequences + step counts + active enrollment counts in parallel.
   // (Previously did this with correlated subqueries in one query, but those were
@@ -338,23 +349,76 @@ outreach.get("/sequences/:id", authMiddleware, async (c) => {
   const id = c.req.param("id");
   const [seq] = await db.select().from(outreachSequences).where(eq(outreachSequences.id, id)).limit(1);
   if (!seq) return c.json({ error: "Not found" }, 404);
-  const steps = await db.select().from(outreachSteps).where(eq(outreachSteps.sequenceId, id)).orderBy(outreachSteps.position);
-  return c.json({ ...seq, steps });
+
+  // active_enrollments is on the list response but was missing here, so the
+  // editor header rendered "· active" with no number, and — worse — its delete
+  // confirmation compared `undefined > 0` and therefore always claimed no leads
+  // were enrolled, on a sequence that might have had hundreds.
+  const [steps, [counts]] = await Promise.all([
+    db.select().from(outreachSteps)
+      .where(eq(outreachSteps.sequenceId, id))
+      .orderBy(outreachSteps.position),
+    db.select({
+      active: sql<number>`COUNT(*) FILTER (WHERE ${outreachEnrollments.status} = 'active')::int`,
+      total:  sql<number>`COUNT(*)::int`,
+    })
+      .from(outreachEnrollments)
+      .where(eq(outreachEnrollments.sequenceId, id)),
+  ]);
+
+  return c.json({
+    ...seq,
+    steps,
+    step_count:         steps.length,
+    active_enrollments: Number(counts?.active ?? 0),
+    total_enrollments:  Number(counts?.total  ?? 0),
+  });
 });
 
 outreach.post("/sequences", authMiddleware, adminOnly, async (c) => {
   const user = c.get("user");
-  const body = sequenceSchema.parse(await c.req.json());
-  const [created] = await db.insert(outreachSequences).values({
-    name:                  body.name,
-    description:           body.description ?? null,
-    category:              body.category    ?? null,
-    isActive:              body.is_active ?? true,
-    autoEnrollOnCategory:  body.auto_enroll_on_category ?? false,
-    autoEnrollAll:         body.auto_enroll_all ?? false,
-    createdBy:             user.id,
-  }).returning();
-  return c.json(created, 201);
+  const raw  = await c.req.json();
+  const body = sequenceSchema.parse(raw);
+
+  // Optional inline steps. Creating a usable sequence previously meant one
+  // request for the sequence and one per step, each behind its own dialog —
+  // four round trips before anything could send. Accepting the steps up front
+  // lets the UI offer a starter template as a single action, and makes the
+  // whole thing atomic: no more half-built sequences left behind by a failed
+  // second request.
+  const steps = seedStepsSchema.parse(raw.steps ?? []);
+
+  for (const s of steps) {
+    const err = validateEmailStepAgent(s.channel, s.agent_id);
+    if (err) return c.json({ error: err }, 400);
+  }
+
+  const created = await db.transaction(async (tx) => {
+    const [seq] = await tx.insert(outreachSequences).values({
+      name:                  body.name,
+      description:           body.description ?? null,
+      category:              body.category    ?? null,
+      isActive:              body.is_active ?? true,
+      autoEnrollOnCategory:  body.auto_enroll_on_category ?? false,
+      autoEnrollAll:         body.auto_enroll_all ?? false,
+      createdBy:             user.id,
+    }).returning();
+
+    if (steps.length) {
+      await tx.insert(outreachSteps).values(steps.map((s, i) => ({
+        sequenceId:      seq.id,
+        position:        i,
+        dayOffset:       s.day_offset,
+        channel:         s.channel,
+        subjectTemplate: s.subject_template ?? null,
+        bodyTemplate:    s.body_template    ?? null,
+        agentId:         s.agent_id         ?? null,
+      })));
+    }
+    return seq;
+  });
+
+  return c.json({ ...created, step_count: steps.length }, 201);
 });
 
 outreach.patch("/sequences/:id", authMiddleware, adminOnly, async (c) => {
@@ -445,6 +509,58 @@ outreach.patch("/sequences/:sid/steps/:stepId", authMiddleware, adminOnly, async
   if (body.agent_id !== undefined)         patch.agentId         = body.agent_id;
   const [updated] = await db.update(outreachSteps).set(patch).where(eq(outreachSteps.id, c.req.param("stepId"))).returning();
   if (!updated) return c.json({ error: "Not found" }, 404);
+  return c.json(updated);
+});
+
+// ── PUT /sequences/:id/steps/reorder ──────────────────────
+// Reassigns step positions from a client-supplied order, for drag-and-drop.
+//
+// Day offsets are rewritten to preserve the *gaps* between steps rather than
+// their absolute values. Dragging step 3 (day 7) above step 2 (day 3) and
+// keeping the original numbers would leave the sequence sending day 7 before
+// day 3, which the scheduler reads as "both are overdue" and fires back to
+// back. Preserving gaps keeps the cadence the user designed.
+outreach.put("/sequences/:id/steps/reorder", authMiddleware, adminOnly, async (c) => {
+  const sequenceId = c.req.param("id");
+  const { order } = z.object({ order: z.array(z.string().uuid()).min(1).max(50) })
+    .parse(await c.req.json());
+
+  const existing = await db.select().from(outreachSteps)
+    .where(eq(outreachSteps.sequenceId, sequenceId))
+    .orderBy(outreachSteps.position);
+
+  // Reject a partial or foreign list outright — silently ignoring unknown ids
+  // would leave stored positions inconsistent with what is on screen.
+  const known = new Set(existing.map((s) => s.id));
+  if (order.length !== existing.length || !order.every((id) => known.has(id))) {
+    return c.json({
+      error: "Order must list every step in this sequence exactly once",
+      expected: existing.length,
+      received: order.length,
+    }, 400);
+  }
+
+  // The gaps, in the order they were originally authored.
+  const sortedOffsets = existing.map((s) => s.dayOffset).sort((a, b) => a - b);
+  const gaps = sortedOffsets.map((v, i) => (i === 0 ? v : v - sortedOffsets[i - 1]));
+
+  const updated = await db.transaction(async (tx) => {
+    let running = 0;
+    const out = [];
+    for (const [i, id] of order.entries()) {
+      running = i === 0 ? gaps[0] : running + gaps[i];
+      const [row] = await tx.update(outreachSteps)
+        .set({ position: i, dayOffset: running })
+        .where(eq(outreachSteps.id, id))
+        .returning();
+      out.push(row);
+    }
+    await tx.update(outreachSequences)
+      .set({ updatedAt: new Date() })
+      .where(eq(outreachSequences.id, sequenceId));
+    return out;
+  });
+
   return c.json(updated);
 });
 
