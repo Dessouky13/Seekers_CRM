@@ -10,7 +10,7 @@ import { runAgent, isEmailCapableAgent } from "./agents";
 import { fireEventAsync } from "./webhooks";
 import { sanitizeSubject } from "./outreach-subject";
 import {
-  slotsRemainingToday, spreadGapSeconds, nextSpreadSlot,
+  slotsRemainingToday, spreadGapSeconds, nextSpreadSlot, isWithinSendWindow,
   releaseCountNow, nextStageAfterSpamReject, type WarmupStage,
 } from "./sending-policy";
 import { suppress, suppressedSet } from "./suppressions";
@@ -219,8 +219,12 @@ function classifyFailure(msg: string): "spam_reject" | "permanent" | "infra" | "
 /**
  * Whole clean weeks since the mailbox last changed stage, which is what the
  * warmup ramp is paid out against. Missing timestamp means "just started".
+ *
+ * Exported so the deliverability panel (routes/outreach.ts) can compute the
+ * SAME cap the scheduler actually enforces, instead of hardcoding cleanWeeks
+ * to 0 and showing a number that disagrees with reality.
  */
-function cleanWeeksFor(mailbox: typeof mailboxes.$inferSelect | undefined): number {
+export function cleanWeeksFor(mailbox: typeof mailboxes.$inferSelect | undefined): number {
   if (!mailbox?.updatedAt) return 0;
   const ms = Date.now() - new Date(mailbox.updatedAt).getTime();
   return Math.max(0, Math.floor(ms / (7 * 86_400_000)));
@@ -233,14 +237,24 @@ async function isSuppressedAddress(address: string): Promise<boolean> {
 // ── Scheduler tick: find due enrollments, send next step ──
 //
 // Guards against overlapping ticks. The spread delay below can make a single
-// tick take several minutes (up to ~16 min in the worst case: a release of 5
-// at the max 240s gap), which can outlive the 5-minute sweep interval — if the
-// next setInterval firing started a second tick while the first was still
-// mid-flight, both could select the SAME due enrollment before either had
-// updated its nextSendAt/status, causing an actual duplicate send. A simple
-// in-process mutex is the more direct fix for that (a delay-budget cap only
-// bounds the sleep portion, not real DB/SMTP time, and doesn't stop two ticks
-// from starting) and is simpler to reason about than a partial-budget scheme.
+// tick take far longer than "a release of 5 at the max 240s gap" (~16 min) —
+// that figure is only true for the recovery-stage cap. releaseCount
+// deliberately dumps the ENTIRE remaining daily allowance into the final
+// hourly slot (see its own doc comment), so at the active-stage ceiling of 40
+// a batch can run ~2.6 hours (39 gaps x up to 240s), and a stored
+// mailboxes.daily_cap override is uncapped by effectiveDailyCap — so with an
+// override in place, the worst case is unbounded. Any of these easily outlive
+// the 5-minute sweep interval — if the next setInterval firing started a
+// second tick while the first was still mid-flight, both could select the
+// SAME due enrollment before either had updated its nextSendAt/status,
+// causing an actual duplicate send. A simple in-process mutex is the more
+// direct fix for that (a delay-budget cap only bounds the sleep portion, not
+// real DB/SMTP time, and doesn't stop two ticks from starting) and is simpler
+// to reason about than a partial-budget scheme. It is the mutex, not a bound
+// on batch length, that stops a second tick from starting at all — what now
+// actually bounds how long a single batch can run is the per-iteration Cairo
+// window re-check inside the send loop below (isWithinSendWindow), which was
+// previously checked only once, at the top of the tick.
 let tickInFlight = false;
 
 export async function processDueSends(limit = 20): Promise<{ processed: number; sent: number; failed: number; throttled: number }> {
@@ -309,9 +323,34 @@ async function runOneTick(limit: number): Promise<{ processed: number; sent: num
   let sent = 0;
   let failed = 0;
   let throttled = 0;
+  // Number of `due` entries actually attempted (reached the try/catch below),
+  // as opposed to due.length, which also counts entries left untouched by an
+  // early window-close break. The caller must not be told work happened that
+  // didn't.
+  let attempted = 0;
 
   for (let i = 0; i < due.length; i++) {
+    // Re-check the Cairo window on EVERY iteration, not just once at the top
+    // of the tick. releaseCount can hand back the whole day's remaining
+    // allowance in a single release (it dumps everything into the final
+    // slot), and the spread delay below can stretch that release across
+    // hours of real time — long enough to run well past 17:00 Cairo if this
+    // were only checked once. The moment the window closes, stop and leave
+    // everything still in `due` exactly as it is: their nextSendAt is still
+    // legitimately in the past, so tomorrow's tick will pick them up again —
+    // this is throttling, not failure, and must not touch their rows.
+    if (!isWithinSendWindow(new Date())) {
+      const remaining = due.length - i;
+      console.warn(
+        `[outreach] send window closed mid-batch — stopping with ${remaining} ` +
+        `enrollment(s) left untouched for the next tick`,
+      );
+      throttled += remaining;
+      break;
+    }
+
     const enrollment = due[i];
+    attempted++;
     // Set by processSingleSend only when it actually reaches sendOutreachEmail
     // — never for a skipped non-email step, a suppressed address, a
     // config-hold, or a lead with no email. The spread delay below exists
@@ -366,7 +405,7 @@ async function runOneTick(limit: number): Promise<{ processed: number; sent: num
     }
   }
 
-  return { processed: due.length, sent, failed, throttled };
+  return { processed: attempted, sent, failed, throttled };
 }
 
 // Record a failed send + decide whether to retry (transient) or give up
@@ -400,9 +439,20 @@ async function handleSendFailure(
   // The provider is refusing us. Continuing at this rate makes it worse, so
   // drop THIS mailbox to the recovery cap and suppress the address that drew it.
   if (kind === "spam_reject") {
-    await db.update(mailboxes)
+    const downgrade = await db.update(mailboxes)
       .set({ warmupStage: nextStageAfterSpamReject(), updatedAt: new Date() })
       .where(eq(mailboxes.address, mailboxAddress));
+    // rowCount is 0 (or null) when no mailbox row matched mailboxAddress — a
+    // boot-seed race, or EMAIL_FROM changed between deploys without the row
+    // being updated to match. Silently doing nothing here means the safety
+    // downgrade never happens and sending keeps going at the rate that just
+    // drew a spam rejection, with no trace of why.
+    if (!downgrade.rowCount) {
+      console.error(
+        `[outreach] safety downgrade found no mailbox row for address "${mailboxAddress}" ` +
+        `— warmup stage was NOT changed. Check the mailboxes table / EMAIL_FROM.`,
+      );
+    }
     const [rejectedLead] = await db
       .select({ email: leads.email })
       .from(leads)

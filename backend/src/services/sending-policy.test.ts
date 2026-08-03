@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   dailyCapFor, releaseCount, spreadGapSeconds, slotsRemainingToday,
   nextStageAfterSpamReject, nextSpreadSlot,
-  effectiveDailyCap, releaseCountNow,
+  effectiveDailyCap, releaseCountNow, isWithinSendWindow,
   MIN_GAP_SECONDS, MAX_GAP_SECONDS,
   SEND_WINDOW_START_HOUR, SEND_WINDOW_END_HOUR,
 } from "./sending-policy";
@@ -89,6 +89,38 @@ describe("slotsRemainingToday", () => {
   it("returns 0 after the window closes", () => {
     const eighteenCairo = new Date("2026-08-03T15:00:00Z");
     expect(slotsRemainingToday(eighteenCairo)).toBe(0);
+  });
+});
+
+describe("isWithinSendWindow", () => {
+  // Cairo is UTC+3 in August 2026 (Egypt DST) — same convention as
+  // slotsRemainingToday's fixtures above.
+  it("is true in the middle of the window", () => {
+    const noonCairo = new Date("2026-08-03T09:00:00Z"); // 12:00 Cairo
+    expect(isWithinSendWindow(noonCairo)).toBe(true);
+  });
+
+  it("is false before the window opens", () => {
+    const sixCairo = new Date("2026-08-03T03:00:00Z"); // 06:00 Cairo
+    expect(isWithinSendWindow(sixCairo)).toBe(false);
+  });
+
+  it("is true exactly at the 09:00 open boundary", () => {
+    const nineCairo = new Date("2026-08-03T06:00:00Z"); // 09:00 Cairo
+    expect(isWithinSendWindow(nineCairo)).toBe(true);
+  });
+
+  it("is false exactly at the 17:00 close boundary", () => {
+    // The close boundary is exclusive: a batch still running AT 17:00 must
+    // stop, not squeeze in one more send because the hour number still
+    // matches. This boundary was never asserted before this test.
+    const seventeenCairo = new Date("2026-08-03T14:00:00Z"); // 17:00 Cairo
+    expect(isWithinSendWindow(seventeenCairo)).toBe(false);
+  });
+
+  it("is false after the window closes", () => {
+    const eighteenCairo = new Date("2026-08-03T15:00:00Z"); // 18:00 Cairo
+    expect(isWithinSendWindow(eighteenCairo)).toBe(false);
   });
 });
 

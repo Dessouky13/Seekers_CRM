@@ -19,7 +19,7 @@ import { createMiddleware } from "hono/factory";
 import { isEmailCapableAgent } from "../services/agents";
 import {
   enrollLead, processDueSends, autoEnrollIfMatchingCategory, handleReply,
-  getAutoEnrollCandidates,
+  getAutoEnrollCandidates, cleanWeeksFor,
 } from "../services/outreach";
 import { fireEventAsync } from "../services/webhooks";
 import { checkDomainAuth } from "../services/domain-auth";
@@ -1335,7 +1335,12 @@ outreach.get("/deliverability", authMiddleware, adminOnly, async (c) => {
   ]);
 
   const stage = (mailbox?.warmupStage ?? "recovery") as WarmupStage;
-  const cap   = effectiveDailyCap(stage, mailbox?.dailyCap ?? 0, 0);
+  // cleanWeeksFor(mailbox) — NOT a hardcoded 0 — so this panel reports the
+  // exact same cap the scheduler (runOneTick) actually enforces. A hardcoded
+  // 0 understates the cap for any mailbox that has been in `warmup` for a
+  // while: e.g. it would show 10 while the scheduler is really allowing 25
+  // after 3 clean weeks.
+  const cap   = effectiveDailyCap(stage, mailbox?.dailyCap ?? 0, cleanWeeksFor(mailbox));
 
   return c.json({
     mailbox: {

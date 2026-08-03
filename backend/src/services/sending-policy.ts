@@ -60,14 +60,39 @@ export function nextSpreadSlot(from: Date, gapSeconds: number): Date {
   return new Date(from.getTime() + gapSeconds * 1000);
 }
 
-/** Whole hours left in today's Cairo send window. 0 outside it. */
-export function slotsRemainingToday(now: Date): number {
-  const hour = Number(
+/** Cairo-local hour (0-23) for `now`. Factored out so the timezone arithmetic
+ *  exists in exactly one place — both slotsRemainingToday and
+ *  isWithinSendWindow need "what hour is it in Cairo right now" and must never
+ *  drift apart on how they compute it. */
+function cairoHourOf(now: Date): number {
+  return Number(
     now.toLocaleString("en-US", { timeZone: CAIRO_TZ, hour: "2-digit", hour12: false }),
   );
+}
+
+/** Whole hours left in today's Cairo send window. 0 outside it. */
+export function slotsRemainingToday(now: Date): number {
+  const hour = cairoHourOf(now);
   if (hour < SEND_WINDOW_START_HOUR) return 0;
   if (hour >= SEND_WINDOW_END_HOUR)  return 0;
   return SEND_WINDOW_END_HOUR - hour;
+}
+
+/**
+ * Is `now` inside the Cairo send window? The window is the hard stop on a
+ * batch that takes hours: the cap decides how much may go, this decides
+ * whether it still may.
+ *
+ * Needed because releaseCount deliberately dumps the entire remaining daily
+ * allowance into the final slot, and the scheduler's per-message spread delay
+ * (90-240s) can stretch that release across hours of real wall-clock time —
+ * so the release decision made at the top of a tick is not enough; the
+ * scheduler must re-check this on every iteration of a batch to avoid sends
+ * landing after close.
+ */
+export function isWithinSendWindow(now: Date): boolean {
+  const hour = cairoHourOf(now);
+  return hour >= SEND_WINDOW_START_HOUR && hour < SEND_WINDOW_END_HOUR;
 }
 
 /**

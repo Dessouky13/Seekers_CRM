@@ -9,22 +9,61 @@ export interface AuthRecord {
   record:  "SPF" | "DKIM" | "DMARC";
   pass:    boolean;
   value:   string | null;
-  /** Why it fails, in words the reader can act on. Null when it passes. */
+  /**
+   * Why it fails, in words the reader can act on. Null when it passes outright.
+   * Not always null on a pass, though: the DMARC p=none branch below returns
+   * pass: true WITH a non-null advisory note (monitoring-only, not yet
+   * enforcing) — this field also carries that kind of qualified-pass context,
+   * not only failure reasons.
+   */
   problem: string | null;
 }
 
+// DNS error codes that genuinely mean "this name/record does not exist" —
+// Node's dns/promises rejects with these when a query resolves successfully
+// but finds nothing, as opposed to failing to get an answer at all.
+const NOT_PUBLISHED_CODES = new Set(["ENOTFOUND", "ENODATA"]);
+
+interface TxtLookup {
+  records: string[];
+  /**
+   * Set (non-null) when the lookup itself failed for a reason OTHER than
+   * "no such record" — a resolver timeout, SERVFAIL, ECONNREFUSED,
+   * ECANCELLED, etc. In that case `records` is always []; but unlike a
+   * genuine "not published" answer, [] here does NOT mean the record is
+   * missing — it means we don't know. Callers must report that distinction
+   * rather than asserting the record is absent.
+   */
+  lookupError: string | null;
+}
+
 /** TXT records arrive as arrays of chunks that must be joined before matching. */
-async function txt(name: string): Promise<string[]> {
+async function txt(name: string): Promise<TxtLookup> {
   try {
-    return (await resolveTxt(name)).map((chunks) => chunks.join(""));
-  } catch {
-    // NXDOMAIN and ENODATA both mean "not published", which is the answer.
-    return [];
+    const records = (await resolveTxt(name)).map((chunks) => chunks.join(""));
+    return { records, lookupError: null };
+  } catch (err: any) {
+    const code = err?.code as string | undefined;
+    // ENOTFOUND and ENODATA both mean "not published" — that's a real answer.
+    if (code && NOT_PUBLISHED_CODES.has(code)) {
+      return { records: [], lookupError: null };
+    }
+    // Anything else (SERVFAIL, ECONNREFUSED, ETIMEOUT, ECANCELLED, a plain
+    // timeout, ...) means the check itself failed — we could not determine
+    // whether the record exists. Reporting "no record" for these would tell
+    // the user their correctly-configured domain has none, which is exactly
+    // the failure mode this function exists to avoid.
+    return { records: [], lookupError: code ?? String(err?.message ?? err) };
   }
 }
 
 async function checkSpf(domain: string): Promise<AuthRecord> {
-  const records = (await txt(domain)).filter((r) => r.toLowerCase().startsWith("v=spf1"));
+  const lookup = await txt(domain);
+  if (lookup.lookupError) {
+    return { record: "SPF", pass: false, value: null,
+      problem: `Could not check SPF — DNS lookup failed (${lookup.lookupError}). This means the check itself failed, not that the record is missing; retry once the resolver is reachable.` };
+  }
+  const records = lookup.records.filter((r) => r.toLowerCase().startsWith("v=spf1"));
   if (records.length === 0) {
     return { record: "SPF", pass: false, value: null,
       problem: "No SPF record. Receivers cannot tell which servers may send as this domain." };
@@ -47,7 +86,12 @@ async function checkSpf(domain: string): Promise<AuthRecord> {
 
 async function checkDkim(domain: string, selector: string): Promise<AuthRecord> {
   const name = `${selector}._domainkey.${domain}`;
-  const records = (await txt(name)).filter((r) => /(^|;)\s*v=DKIM1/i.test(r) || /p=/.test(r));
+  const lookup = await txt(name);
+  if (lookup.lookupError) {
+    return { record: "DKIM", pass: false, value: null,
+      problem: `Could not check DKIM at ${name} — DNS lookup failed (${lookup.lookupError}). This means the check itself failed, not that the key is missing; retry once the resolver is reachable.` };
+  }
+  const records = lookup.records.filter((r) => /(^|;)\s*v=DKIM1/i.test(r) || /p=/.test(r));
   if (records.length === 0) {
     return { record: "DKIM", pass: false, value: null,
       problem: `No DKIM key at ${name}. Messages cannot be cryptographically signed, so any relay can forge them.` };
@@ -61,7 +105,12 @@ async function checkDkim(domain: string, selector: string): Promise<AuthRecord> 
 }
 
 async function checkDmarc(domain: string): Promise<AuthRecord> {
-  const records = (await txt(`_dmarc.${domain}`)).filter((r) => /^v=DMARC1/i.test(r));
+  const lookup = await txt(`_dmarc.${domain}`);
+  if (lookup.lookupError) {
+    return { record: "DMARC", pass: false, value: null,
+      problem: `Could not check DMARC — DNS lookup failed (${lookup.lookupError}). This means the check itself failed, not that the record is missing; retry once the resolver is reachable.` };
+  }
+  const records = lookup.records.filter((r) => /^v=DMARC1/i.test(r));
   if (records.length === 0) {
     return { record: "DMARC", pass: false, value: null,
       problem: "No DMARC record. Nothing tells receivers what to do when SPF or DKIM fails, and no reports come back." };
