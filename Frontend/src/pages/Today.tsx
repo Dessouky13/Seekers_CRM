@@ -96,26 +96,46 @@ function FocusCard({ action, onGo, onSkip, position, total }: {
   );
 }
 
-function QueueRow({ action, onGo, active }: {
+/**
+ * A manual_touch row can't just deep-link like everything else: the CRM lead
+ * sheet has no way to send a WhatsApp/call touch or record its outcome, so
+ * that link used to be a dead end whenever a manual touch wasn't the single
+ * top-ranked item. Expanding the exact same ManualTouchCard in place — reusing
+ * the WorklistAction this row already holds, no extra fetch — closes that
+ * gap without adding a second surface to keep in sync with the focus slot.
+ */
+function QueueRow({ action, onGo, active, expanded, onToggleExpand, onSkip }: {
   action: WorklistAction;
   onGo: (a: WorklistAction) => void;
   active: boolean;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
+  onSkip?: () => void;
 }) {
   const s = STYLE[action.type];
+  const isManualTouch = action.type === "manual_touch";
   return (
-    <button
-      onClick={() => onGo(action)}
-      className={`flex w-full items-center gap-3 border-b border-border/40 px-4 py-2.5 text-left transition-colors last:border-0 hover:bg-muted/50 ${active ? "bg-muted/40" : ""}`}
-    >
-      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.dot}`} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm text-foreground">{action.title}</span>
-        <span className="block truncate text-xs text-muted-foreground">{action.reason}</span>
-      </span>
-      {action.dealValue > 0 && (
-        <span className="shrink-0 text-xs text-muted-foreground">{money(action.dealValue)}</span>
+    <>
+      <button
+        onClick={() => (isManualTouch ? onToggleExpand?.() : onGo(action))}
+        aria-expanded={isManualTouch ? !!expanded : undefined}
+        className={`flex w-full items-center gap-3 border-b border-border/40 px-4 py-2.5 text-left transition-colors last:border-0 hover:bg-muted/50 ${active || expanded ? "bg-muted/40" : ""}`}
+      >
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.dot}`} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm text-foreground">{action.title}</span>
+          <span className="block truncate text-xs text-muted-foreground">{action.reason}</span>
+        </span>
+        {action.dealValue > 0 && (
+          <span className="shrink-0 text-xs text-muted-foreground">{money(action.dealValue)}</span>
+        )}
+      </button>
+      {isManualTouch && expanded && (
+        <div className="border-b border-border/40 bg-muted/20 p-3 last:border-0">
+          <ManualTouchCard action={action} onSkip={onSkip} />
+        </div>
       )}
-    </button>
+    </>
   );
 }
 
@@ -215,6 +235,9 @@ export default function Today() {
   // Skipping only moves you down today's list; it never mutates the lead, so
   // the item is back tomorrow if it still needs doing.
   const [skipped, setSkipped] = useState<string[]>([]);
+  // Which manual_touch queue row (if any) is expanded in place. Only one at a
+  // time, same as focus — you work one thing at once.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const firstName = user?.name?.split(" ")[0] ?? "there";
   const hour = new Date().getHours();
@@ -301,7 +324,12 @@ export default function Today() {
       {focus ? (
         <>
           {focus.type === "manual_touch"
-            ? <ManualTouchCard action={focus} />
+            ? (
+              <ManualTouchCard
+                action={focus}
+                onSkip={all.length > 1 ? () => setSkipped((s) => [...s, focus.id]) : undefined}
+              />
+            )
             : (
               <FocusCard
                 action={focus}
@@ -318,7 +346,17 @@ export default function Today() {
                 Up next
               </p>
               <Card className="overflow-hidden">
-                {queue.map((a) => <QueueRow key={a.id} action={a} onGo={go} active={false} />)}
+                {queue.map((a) => (
+                  <QueueRow
+                    key={a.id}
+                    action={a}
+                    onGo={go}
+                    active={false}
+                    expanded={expandedId === a.id}
+                    onToggleExpand={() => setExpandedId((id) => (id === a.id ? null : a.id))}
+                    onSkip={() => setSkipped((s) => [...s, a.id])}
+                  />
+                ))}
               </Card>
               {live.length > 8 && (
                 <p className="mt-2 px-1 text-xs text-muted-foreground">

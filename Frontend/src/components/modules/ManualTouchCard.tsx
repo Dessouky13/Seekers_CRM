@@ -23,7 +23,18 @@ const OUTCOMES: { key: TouchOutcome; label: string; destructive?: boolean }[] = 
   { key: "not_interested", label: "Not interested", destructive: true },
 ];
 
-export function ManualTouchCard({ action }: { action: WorklistAction }) {
+interface Props {
+  action: WorklistAction;
+  /**
+   * Present when there is somewhere else to go — mirrors FocusCard's own
+   * "Skip for now", which Today.tsx only wires up when there's more than one
+   * live item. Lets a person work a second manual touch first without losing
+   * this one; it comes back next time the queue is fetched.
+   */
+  onSkip?: () => void;
+}
+
+export function ManualTouchCard({ action, onSkip }: Props) {
   const record = useRecordTouchOutcome();
   const [copied, setCopied] = useState(false);
 
@@ -121,6 +132,9 @@ export function ManualTouchCard({ action }: { action: WorklistAction }) {
             {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
             {copied ? "Copied" : "Copy message"}
           </Button>
+        )}
+        {onSkip && (
+          <Button variant="ghost" onClick={onSkip}>Skip for now</Button>
         )}
       </div>
 
