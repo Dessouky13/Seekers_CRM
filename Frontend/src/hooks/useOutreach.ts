@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 
-export type Channel = "email" | "linkedin" | "note";
+export type Channel = "email" | "linkedin" | "note" | "whatsapp" | "call";
 export type EnrollmentStatus = "active" | "paused" | "completed" | "failed" | "replied";
 
 export interface Sequence {

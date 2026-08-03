@@ -105,6 +105,40 @@ describe("checkSequence", () => {
     const issues = checkSequence(seq({ autoEnrollAll: true }));
     expect(issues.some((i) => /Every new lead/.test(i.message))).toBe(true);
   });
+
+  it("does not demand a subject line on a WhatsApp step", () => {
+    // WhatsApp messages have no subject; requiring one would make every
+    // WhatsApp sequence permanently un-sendable.
+    const issues = checkSequence(seq({
+      steps: [step({ channel: "whatsapp", subjectTemplate: null, bodyTemplate: "Hi there, quick question." })],
+    }));
+    expect(issues.some((i) => /no subject/i.test(i.message))).toBe(false);
+  });
+
+  it("still requires a body on a WhatsApp step", () => {
+    const issues = checkSequence(seq({
+      steps: [step({ channel: "whatsapp", subjectTemplate: null, bodyTemplate: null })],
+    }));
+    expect(issues.some((i) => i.level === "blocker" && /no body/i.test(i.message))).toBe(true);
+  });
+
+  it("requires neither subject nor body on a call step", () => {
+    // A call step is a reminder to phone someone; a script is optional.
+    const issues = checkSequence(seq({
+      steps: [step({ channel: "call", subjectTemplate: null, bodyTemplate: null })],
+    }));
+    expect(issues.some((i) => i.level === "blocker")).toBe(false);
+  });
+
+  it("notes that manual steps pause the sequence for a human", () => {
+    const issues = checkSequence(seq({
+      steps: [
+        step({ position: 0, dayOffset: 0, channel: "email" }),
+        step({ position: 1, dayOffset: 3, channel: "whatsapp", id: "b", subjectTemplate: null, bodyTemplate: "Hi" }),
+      ],
+    }));
+    expect(issues.some((i) => /waits for a person/i.test(i.message))).toBe(true);
+  });
 });
 
 describe("worstLevel", () => {

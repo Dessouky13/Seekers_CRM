@@ -294,27 +294,33 @@ export function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onB
                     <SelectItem value="email">Email</SelectItem>
                     <SelectItem value="linkedin">LinkedIn (manual)</SelectItem>
                     <SelectItem value="note">Internal note</SelectItem>
+                    <SelectItem value="whatsapp">WhatsApp (you press send)</SelectItem>
+                    <SelectItem value="call">Phone call (reminder)</SelectItem>
                   </SelectContent>
                 </Select>
                 {stepChannel !== "email" && (
                   <p className="mt-1 text-[10px] text-muted-foreground">
-                    Not sent automatically — this creates a reminder to do it by hand.
+                    {stepChannel === "whatsapp" || stepChannel === "call"
+                      ? "Nothing is sent automatically. This appears in Today and the sequence pauses until someone records an outcome."
+                      : "Not sent automatically — this creates a reminder to do it by hand."}
                   </p>
                 )}
               </div>
             </div>
 
-            <div>
-              <Label htmlFor="subject_template">Subject</Label>
-              <Input
-                id="subject_template" name="subject_template"
-                defaultValue={editingStep?.subjectTemplate ?? ""} className="mt-1"
-                placeholder="Quick question about {{company}}"
-              />
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                Variables: {VARIABLES.map((v) => `{{${v}}}`).join(", ")}
-              </p>
-            </div>
+            {stepChannel === "email" && (
+              <div>
+                <Label htmlFor="subject_template">Subject</Label>
+                <Input
+                  id="subject_template" name="subject_template"
+                  defaultValue={editingStep?.subjectTemplate ?? ""} className="mt-1"
+                  placeholder="Quick question about {{company}}"
+                />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Variables: {VARIABLES.map((v) => `{{${v}}}`).join(", ")}
+                </p>
+              </div>
+            )}
 
             <div>
               <Label htmlFor="body_template">Body</Label>

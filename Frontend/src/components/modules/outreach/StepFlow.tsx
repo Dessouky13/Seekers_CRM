@@ -12,7 +12,7 @@
 import { useState } from "react";
 import {
   Mail, Linkedin, FileText, GripVertical, Pencil, Trash2, Clock,
-  Sparkles, ChevronUp, ChevronDown, Flag, AlertCircle,
+  Sparkles, ChevronUp, ChevronDown, Flag, AlertCircle, MessageCircle, Phone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,9 +21,11 @@ import type { SequenceStep, Channel } from "@/hooks/useOutreach";
 import type { ReadinessIssue } from "./sequence-readiness";
 
 const CHANNEL: Record<Channel, { icon: typeof Mail; label: string; tone: string }> = {
-  email:    { icon: Mail,     label: "Email",           tone: "text-primary bg-primary/10" },
-  linkedin: { icon: Linkedin, label: "LinkedIn",        tone: "text-info bg-info/10" },
-  note:     { icon: FileText, label: "Internal note",   tone: "text-muted-foreground bg-muted" },
+  email:    { icon: Mail,          label: "Email",           tone: "text-primary bg-primary/10" },
+  linkedin: { icon: Linkedin,      label: "LinkedIn",        tone: "text-info bg-info/10" },
+  note:     { icon: FileText,      label: "Internal note",   tone: "text-muted-foreground bg-muted" },
+  whatsapp: { icon: MessageCircle, label: "WhatsApp",        tone: "text-emerald-400 bg-emerald-500/10" },
+  call:     { icon: Phone,         label: "Call",            tone: "text-amber-400 bg-amber-500/10" },
 };
 
 /** "the same day" / "1 day later" / "4 days later" */

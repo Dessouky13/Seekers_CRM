@@ -35,8 +35,19 @@ function stepHasContent(s: SequenceStep): boolean {
   return !!s.agentId || !!(s.bodyTemplate && s.bodyTemplate.trim().length >= 10);
 }
 
-const CHANNEL_SENDS: Record<Channel, boolean> = {
-  email: true, linkedin: false, note: false,
+/** Channels that need message text a human will actually send. */
+const CHANNEL_NEEDS_BODY: Record<Channel, boolean> = {
+  email: true, linkedin: false, note: false, whatsapp: true, call: false,
+};
+
+/** Only email has a subject line. */
+const CHANNEL_NEEDS_SUBJECT: Record<Channel, boolean> = {
+  email: true, linkedin: false, note: false, whatsapp: false, call: false,
+};
+
+/** Channels that stop the sequence until a person acts. */
+const CHANNEL_IS_MANUAL: Record<Channel, boolean> = {
+  email: false, linkedin: false, note: false, whatsapp: true, call: true,
 };
 
 export function checkSequence(seq: SequenceShape): ReadinessIssue[] {
@@ -53,29 +64,43 @@ export function checkSequence(seq: SequenceShape): ReadinessIssue[] {
   }
 
   for (const s of steps) {
-    if (!CHANNEL_SENDS[s.channel]) continue;   // manual channels need no body
-
-    if (!stepHasContent(s)) {
+    if (CHANNEL_NEEDS_BODY[s.channel] && !stepHasContent(s)) {
       issues.push({
         level: "blocker", stepId: s.id,
         message: `Day ${s.dayOffset} has no body.`,
-        fix: "Write a body template, or pick an AI agent to generate one per lead.",
+        fix: s.channel === "whatsapp"
+          ? "Write the WhatsApp message. Without it there is nothing for a human to send."
+          : "Write a body template, or pick an AI agent to generate one per lead.",
       });
     }
-    if (!s.subjectTemplate?.trim()) {
-      issues.push({
-        level: "blocker", stepId: s.id,
-        message: `Day ${s.dayOffset} has no subject line.`,
-        fix: "Emails without a subject are rejected by most mail servers.",
-      });
-    } else if (/[?!]\s*$/.test(s.subjectTemplate.trim())) {
-      // Learned the hard way: the mailbox provider rejects these outright.
-      issues.push({
-        level: "warning", stepId: s.id,
-        message: `Day ${s.dayOffset}'s subject ends with "${s.subjectTemplate.trim().slice(-1)}".`,
-        fix: "Some providers reject subject lines ending in ? or !. It will be stripped automatically before sending.",
-      });
+
+    if (CHANNEL_NEEDS_SUBJECT[s.channel]) {
+      if (!s.subjectTemplate?.trim()) {
+        issues.push({
+          level: "blocker", stepId: s.id,
+          message: `Day ${s.dayOffset} has no subject line.`,
+          fix: "Emails without a subject are rejected by most mail servers.",
+        });
+      } else if (/[?!]\s*$/.test(s.subjectTemplate.trim())) {
+        // Learned the hard way: the mailbox provider rejects these outright.
+        issues.push({
+          level: "warning", stepId: s.id,
+          message: `Day ${s.dayOffset}'s subject ends with "${s.subjectTemplate.trim().slice(-1)}".`,
+          fix: "Some providers reject subject lines ending in ? or !. It will be stripped automatically before sending.",
+        });
+      }
     }
+  }
+
+  // Manual steps are a feature, but they change how the sequence behaves and
+  // the author should know before enrolling anyone.
+  const manualCount = steps.filter((s) => CHANNEL_IS_MANUAL[s.channel]).length;
+  if (manualCount > 0) {
+    issues.push({
+      level: "info",
+      message: `${manualCount} step${manualCount === 1 ? "" : "s"} waits for a person.`,
+      fix: "Nothing is sent automatically at those steps — they appear in Today until someone records an outcome, and the sequence pauses until they do.",
+    });
   }
 
   // ── Cadence problems ──
