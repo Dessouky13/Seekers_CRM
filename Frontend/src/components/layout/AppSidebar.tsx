@@ -8,8 +8,10 @@ import {
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/useAuth";
 
-// SEEKERS-TODO: Replace /logo-white.png with actual logo file uploaded to /public/logo-white.png
-// SEEKERS-TODO: Replace /logo-symbol.png with the Seekers symbol mark (square icon variant) uploaded to /public/logo-symbol.png
+// Logos live in /public. logo-white.png is the full wordmark, used by the OG and
+// Twitter card meta in index.html — it was referenced there but the file did not
+// exist, so every shared link rendered a broken preview image. logo-symbol.png is
+// the square mark used below.
 
 // `memberOk: true` → visible to non-admin members. Everything else is
 // admin-only and is ALSO blocked server-side (see ADMIN_ONLY_MODULES in
