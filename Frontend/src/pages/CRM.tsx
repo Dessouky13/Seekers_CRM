@@ -48,9 +48,10 @@ export default function CRM() {
   const [isOpen,      setIsOpen]      = useState(false);
   const [selectedId,  setSelectedId]  = useState<string | null>(null);
   const [view,        setView]        = useState<LeadView>("kanban");
-  const [search,      setSearch]      = useState("");
-  const [catFilter,   setCatFilter]   = useState("");
-  const [stageFilter, setStageFilter] = useState("");
+  const [search,       setSearch]       = useState("");
+  const [catFilter,    setCatFilter]    = useState("");
+  const [stageFilter,  setStageFilter]  = useState("");
+  const [reachability, setReachability] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const debouncedSearch = useDebouncedValue(search.trim(), 350);
 
@@ -80,10 +81,11 @@ export default function CRM() {
   const enrollableSequences = sequencesList.filter((s) => s.isActive && s.step_count > 0);
 
   const { data: rawLeads = [], isLoading } = useLeads({
-    search:   debouncedSearch || undefined,
-    category: catFilter || undefined,
-    stage:    stageFilter || undefined,
-    limit:    200,
+    search:       debouncedSearch || undefined,
+    category:     catFilter || undefined,
+    stage:        stageFilter || undefined,
+    reachability: (reachability as "unreachable" | "reachable" | "") || undefined,
+    limit:        200,
   });
 
   // Pipeline-summary: accurate totals across ALL leads regardless of current filter
@@ -200,7 +202,7 @@ export default function CRM() {
     );
   };
 
-  const activeFilterCount = (catFilter ? 1 : 0) + (stageFilter ? 1 : 0);
+  const activeFilterCount = (catFilter ? 1 : 0) + (stageFilter ? 1 : 0) + (reachability ? 1 : 0);
 
   if (isLoading) {
     return <LeadsPageSkeleton view={view} />;
@@ -252,8 +254,10 @@ export default function CRM() {
         onStageFilterChange={setStageFilter}
         catFilter={catFilter}
         onCatFilterChange={setCatFilter}
+        reachability={reachability}
+        onReachabilityChange={setReachability}
         categories={categories}
-        onReset={() => { setSearch(""); setCatFilter(""); setStageFilter(""); }}
+        onReset={() => { setSearch(""); setCatFilter(""); setStageFilter(""); setReachability(""); }}
         resultCount={leads.length}
       />
 

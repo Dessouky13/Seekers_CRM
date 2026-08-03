@@ -10,6 +10,7 @@ export function LeadFilterBar({
   search, onSearchChange,
   stageFilter, onStageFilterChange,
   catFilter, onCatFilterChange,
+  reachability, onReachabilityChange,
   categories, onReset, resultCount,
 }: {
   search:               string;
@@ -18,11 +19,13 @@ export function LeadFilterBar({
   onStageFilterChange:  (value: string) => void;
   catFilter:            string;
   onCatFilterChange:    (value: string) => void;
+  reachability:         string;
+  onReachabilityChange: (value: string) => void;
   categories:           string[];
   onReset:              () => void;
   resultCount:          number;
 }) {
-  const activeFilterCount = (catFilter ? 1 : 0) + (stageFilter ? 1 : 0);
+  const activeFilterCount = (catFilter ? 1 : 0) + (stageFilter ? 1 : 0) + (reachability ? 1 : 0);
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -78,6 +81,16 @@ export function LeadFilterBar({
           </select>
           <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 pointer-events-none text-muted-foreground" />
         </div>
+        <select
+          value={reachability}
+          onChange={(e) => onReachabilityChange(e.target.value)}
+          aria-label="Filter by reachability"
+          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+        >
+          <option value="">Any contactability</option>
+          <option value="reachable">Reachable</option>
+          <option value="unreachable">Unreachable</option>
+        </select>
       </div>
 
       {/* Active filter pills */}
@@ -89,6 +102,12 @@ export function LeadFilterBar({
       )}
       {catFilter && (
         <FilterPill label={`Niche: ${catFilter}`} onRemove={() => onCatFilterChange("")} />
+      )}
+      {reachability && (
+        <FilterPill
+          label={`Contactability: ${reachability === "unreachable" ? "Unreachable" : "Reachable"}`}
+          onRemove={() => onReachabilityChange("")}
+        />
       )}
 
       {(search || activeFilterCount > 0) && (

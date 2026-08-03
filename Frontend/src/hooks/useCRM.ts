@@ -16,14 +16,16 @@ export function useLeads(params: {
   assignee_id?: string;
   search?: string;
   category?: string;
+  reachability?: "unreachable" | "reachable";
   limit?: number;
 } = {}) {
   const qs = new URLSearchParams();
-  if (params.stage)       qs.set("stage",       params.stage);
-  if (params.assignee_id) qs.set("assignee_id", params.assignee_id);
-  if (params.search)      qs.set("search",      params.search);
-  if (params.category)    qs.set("category",    params.category);
-  if (params.limit)       qs.set("limit",       String(params.limit));
+  if (params.stage)        qs.set("stage",        params.stage);
+  if (params.assignee_id)  qs.set("assignee_id",   params.assignee_id);
+  if (params.search)       qs.set("search",        params.search);
+  if (params.category)     qs.set("category",      params.category);
+  if (params.reachability) qs.set("reachability",  params.reachability);
+  if (params.limit)        qs.set("limit",         String(params.limit));
   const query = qs.toString();
 
   return useQuery<ApiLead[]>({

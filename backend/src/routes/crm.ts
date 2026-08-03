@@ -27,6 +27,29 @@ crm.get("/leads", authMiddleware, async (c) => {
   if (q.assignee_id) conditions.push(eq(leads.assigneeId, q.assignee_id));
   if (q.category)    conditions.push(eq(leads.category, q.category));
 
+  // "Unreachable" means every channel is dead: no usable number, and no email
+  // or an email we must never use. Such a lead cannot be enrolled at all, and
+  // today it is invisible — indistinguishable from one simply waiting its turn.
+  //
+  // email_status is nullable (most leads are "unknown", i.e. NULL). A bare
+  // `email_status = 'bounced'` is NULL — not FALSE — for those rows, which
+  // under three-valued logic makes the whole AND/OR chain NULL instead of
+  // FALSE. WHERE excludes NULL, so both this filter and its `NOT` negation
+  // would silently drop those leads and reachable+unreachable < total.
+  // coalesce() forces a real boolean so the predicate and its negation are
+  // exact complements for every row.
+  const UNREACHABLE = sql`(
+    (${leads.phoneE164} IS NULL OR ${leads.whatsappStatus} = 'no')
+    AND (
+      ${leads.email} IS NULL
+      OR coalesce(${leads.emailStatus}, '') = 'bounced'
+      OR EXISTS (SELECT 1 FROM suppressions s WHERE s.address = lower(trim(${leads.email})))
+    )
+  )`;
+
+  if (q.reachability === "unreachable") conditions.push(UNREACHABLE);
+  if (q.reachability === "reachable")   conditions.push(sql`NOT ${UNREACHABLE}`);
+
   // Members only ever see their OWN leads. Enforced server-side and applied
   // last so it cannot be widened by a client-supplied assignee_id filter.
   const forced = forcedAssigneeId(c.get("user"));
