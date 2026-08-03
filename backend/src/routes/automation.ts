@@ -250,7 +250,14 @@ mailboxesRouter.post("/health", apiKeyAuth, async (c) => {
     dnsbl_listings: z.array(z.string()).optional(),
     seed_results: z.record(z.unknown()).optional(),
     daily_cap: z.number().int().min(0).optional(),
-    warmup_stage: z.string().max(40).optional(),
+    // Enum, not a free string. A bare string let an automation payload post
+    // warmup_stage:"active" onto a mailbox the scheduler had just downgraded to
+    // "recovery" after a spam rejection — silently undoing the one safety
+    // response this system has to being filtered. An unrecognised value was
+    // worse still: it is cast to WarmupStage, matches neither the "recovery"
+    // nor "active" branch of dailyCapFor, and so falls through to the warmup
+    // ramp, quietly granting more volume than any real stage would.
+    warmup_stage: z.enum(["recovery", "warmup", "active"]).optional(),
   }).parse(await c.req.json());
 
   // Simple health score: placement is the dominant signal, penalize bounces + listings.
@@ -278,6 +285,11 @@ mailboxesRouter.post("/health", apiKeyAuth, async (c) => {
       bounceRate: b.bounce_rate != null ? String(b.bounce_rate) : sql`${mailboxes.bounceRate}`,
       dnsblListings: (b.dnsbl_listings ?? null) as any,
       seedResults: (b.seed_results ?? null) as any,
+      // Was absent from this set block, so a cap posted here only ever landed on
+      // a first INSERT — an operator updating it saw the request succeed and
+      // nothing change. Safe to honour: effectiveDailyCap clamps any stored
+      // value to ACTIVE_CEILING before it can authorise a send.
+      dailyCap: b.daily_cap ?? sql`${mailboxes.dailyCap}`,
       warmupStage: b.warmup_stage ?? sql`${mailboxes.warmupStage}`,
       healthScore: health ?? sql`${mailboxes.healthScore}`,
       lastCheckedAt: new Date(),

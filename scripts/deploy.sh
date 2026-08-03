@@ -40,6 +40,11 @@ echo "==> Copying backend source..."
 # `cp -r` had left a stale src/outreach.ts on the server since June 2026,
 # breaking typecheck for months without anyone noticing.
 rsync -a --delete "$TMP/backend/src/" "$BACKEND_DIR/src/"
+# scripts/ too, or one-off maintenance scripts simply do not exist on the server.
+# The phone backfill could not be run here at all until this line was added: the
+# deploy copied only src/, so `npx tsx scripts/backfill-phones.ts` failed with a
+# missing file on a box where the migration adding its columns had just run.
+rsync -a --delete "$TMP/backend/scripts/" "$BACKEND_DIR/scripts/"
 cp "$TMP/backend/package.json" "$TMP/backend/tsconfig.json" "$BACKEND_DIR/"
 cp "$TMP/backend/drizzle.config.ts" "$BACKEND_DIR/" 2>/dev/null || true
 
