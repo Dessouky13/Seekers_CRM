@@ -12,7 +12,7 @@ import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import {
   outreachSequences, outreachSteps, outreachEnrollments, outreachSends,
-  leads, leadActivities,
+  leads, leadActivities, mailboxes, suppressions,
 } from "../db/schema";
 import { authMiddleware, adminOnly, isAdmin } from "../middleware/auth";
 import { createMiddleware } from "hono/factory";
@@ -22,6 +22,8 @@ import {
   getAutoEnrollCandidates,
 } from "../services/outreach";
 import { fireEventAsync } from "../services/webhooks";
+import { checkDomainAuth } from "../services/domain-auth";
+import { effectiveDailyCap, slotsRemainingToday, type WarmupStage } from "../services/sending-policy";
 import type { AppEnv } from "../types";
 
 const outreach = new Hono<AppEnv>();
@@ -1291,6 +1293,68 @@ outreach.get("/analytics/sequence/:id", jwtOrApiKey, adminOrApiKey, async (c) =>
       lead_email:   r.lead_email,
       error:        r.error,
       sent_at:      r.sent_at ?? r.enrolled_at,
+    })),
+  });
+});
+
+// ── GET /outreach/deliverability ──────────────────────────
+// Everything needed to answer "is our sending healthy?" in one request: the
+// mailbox and its cap, the three DNS records, the suppression list size, and
+// recent failures grouped by cause.
+outreach.get("/deliverability", authMiddleware, adminOnly, async (c) => {
+  const [mailbox] = await db.select().from(mailboxes).limit(1);
+  const address = mailbox?.address ?? process.env.EMAIL_FROM ?? "";
+  const domain  = address.split("@")[1] ?? "";
+
+  const [auth, sentToday, suppressionRows, failureRows] = await Promise.all([
+    domain ? checkDomainAuth(domain) : Promise.resolve([]),
+
+    db.select({ n: sql<number>`COUNT(*)::int` })
+      .from(outreachSends)
+      .where(and(
+        eq(outreachSends.status, "sent"),
+        sql`(${outreachSends.sentAt} AT TIME ZONE 'Africa/Cairo')::date
+            = (NOW() AT TIME ZONE 'Africa/Cairo')::date`,
+      )),
+
+    db.select({ reason: suppressions.reason, n: sql<number>`COUNT(*)::int` })
+      .from(suppressions)
+      .groupBy(suppressions.reason),
+
+    db.select({
+      kind: outreachSends.failureKind,
+      n:    sql<number>`COUNT(*)::int`,
+      latest: sql<string>`MAX(${outreachSends.error})`,
+    })
+      .from(outreachSends)
+      .where(and(
+        eq(outreachSends.status, "failed"),
+        sql`${outreachSends.sentAt} > NOW() - INTERVAL '30 days'`,
+      ))
+      .groupBy(outreachSends.failureKind),
+  ]);
+
+  const stage = (mailbox?.warmupStage ?? "recovery") as WarmupStage;
+  const cap   = effectiveDailyCap(stage, mailbox?.dailyCap ?? 0, 0);
+
+  return c.json({
+    mailbox: {
+      address,
+      domain,
+      warmup_stage: stage,
+      daily_cap:    cap,
+      sent_today:   Number(sentToday[0]?.n ?? 0),
+      slots_left:   slotsRemainingToday(new Date()),
+    },
+    auth,
+    suppressions: {
+      total:     suppressionRows.reduce((s, r) => s + Number(r.n), 0),
+      by_reason: suppressionRows.map((r) => ({ reason: r.reason, count: Number(r.n) })),
+    },
+    failures: failureRows.map((r) => ({
+      kind: r.kind ?? "unclassified",
+      count: Number(r.n),
+      example: r.latest,
     })),
   });
 });

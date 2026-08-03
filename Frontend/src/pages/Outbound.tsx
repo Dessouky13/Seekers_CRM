@@ -14,6 +14,7 @@ import {
   useIntelSummary, useIntelLeads, useEvents, useMailboxes,
   type IntelLead, type OutboundEvent, type Mailbox, type TechFingerprint, type ReviewStats,
 } from "@/hooks/useOutbound";
+import { DeliverabilityPanel } from "@/components/modules/outbound/DeliverabilityPanel";
 import { cn } from "@/lib/utils";
 
 // ══════════════════════════════════════════════════════════
@@ -670,27 +671,37 @@ function MailboxCardSkeleton() {
 function DeliverabilityTab() {
   const { data: mailboxes = [], isLoading } = useMailboxes();
 
-  if (isLoading) {
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {Array.from({ length: 4 }).map((_, i) => <MailboxCardSkeleton key={i} />)}
-      </div>
-    );
-  }
-
-  if (mailboxes.length === 0) {
-    return (
-      <EmptyState
-        icon={Inbox}
-        title="No mailboxes reporting"
-        hint="Deliverability appears once the n8n seed-test workflow POSTs to /mailboxes/health with the automation API key. It reports inbox placement, bounce rate and DNSBL listings per sending address."
-      />
-    );
-  }
-
+  // Two complementary views under one tab: the sending-health panel (caps,
+  // DNS auth, suppressions, recent failures) answers "is our sending healthy
+  // right now", while the per-mailbox cards below report the slower-moving
+  // seed-test results (inbox placement, bounce rate, DNSBL) once n8n posts
+  // them. Kept as a single "Deliverability" tab rather than two, since a
+  // second tab with the same value would collide with this one.
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {mailboxes.map((mb) => <MailboxCard key={mb.id} mailbox={mb} />)}
+    <div className="space-y-6">
+      <DeliverabilityPanel />
+
+      <div className="space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Per-mailbox health
+        </p>
+
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => <MailboxCardSkeleton key={i} />)}
+          </div>
+        ) : mailboxes.length === 0 ? (
+          <EmptyState
+            icon={Inbox}
+            title="No mailboxes reporting"
+            hint="Deliverability appears once the n8n seed-test workflow POSTs to /mailboxes/health with the automation API key. It reports inbox placement, bounce rate and DNSBL listings per sending address."
+          />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {mailboxes.map((mb) => <MailboxCard key={mb.id} mailbox={mb} />)}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
