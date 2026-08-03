@@ -11,8 +11,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useDeliverability } from "@/hooks/useDeliverability";
 import { cn } from "@/lib/utils";
 
+// recovery is the domain's STARTING stage (see sending-policy.ts), not
+// necessarily a reaction to a rejection — a freshly seeded mailbox lands here
+// too. The copy stays true either way, instead of asserting a cause that may
+// not have happened.
 const STAGE_COPY: Record<string, string> = {
-  recovery: "Recovering — reduced volume after a provider rejection",
+  recovery: "Recovering — sending at reduced volume while sender reputation rebuilds",
   warmup:   "Warming up — volume increases each clean week",
   active:   "Active — at the steady ceiling",
 };
