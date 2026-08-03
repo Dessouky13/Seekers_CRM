@@ -201,8 +201,21 @@ crm.patch("/leads/:id", authMiddleware, async (c) => {
   // work re-deriving them from unchanged state. But when phone IS present,
   // even as "" to clear it, all three columns must move together or a cleared
   // lead keeps a ghost E.164 that no longer matches its (now blank) phone.
+  //
+  // Changing the number also retires what we had learned about the OLD one.
+  // whatsapp_status records a human's observation about a specific number
+  // ("I opened this chat and there was nothing there"), so carrying it across an
+  // edit would apply one number's finding to a different number — suppressing
+  // WhatsApp on a freshly entered mobile that nobody has ever tried. Reset to
+  // "unknown" so it is re-learned, exactly as the wrong_number outcome does.
+  const phoneChanged = body.phone !== undefined
+    && phoneFields(body.phone).phoneE164 !== existing.phoneE164;
+
   const phoneUpdate = body.phone !== undefined
-    ? phoneFields(body.phone)
+    ? {
+        ...phoneFields(body.phone),
+        ...(phoneChanged ? { whatsappStatus: "unknown" as const } : {}),
+      }
     : { phone: existing.phone, phoneE164: existing.phoneE164, phoneType: existing.phoneType };
 
   const [updated] = await db
