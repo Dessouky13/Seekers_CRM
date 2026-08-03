@@ -124,7 +124,9 @@ function SupplyStrip() {
   if (isLoading) {
     return (
       <Card className="overflow-hidden border-border/70">
-        <div className="grid grid-cols-2 gap-px bg-border/40 sm:grid-cols-5">
+        {/* Five stats in a two-column grid leaves a dead cell on the last row,
+            so the odd one out spans the full width instead. */}
+        <div className="grid grid-cols-2 gap-px bg-border/40 sm:grid-cols-5 [&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="bg-card px-4 py-3">
               <Skeleton className="h-7 w-12" />
@@ -152,7 +154,7 @@ function SupplyStrip() {
 
   return (
     <Card className={`overflow-hidden ${data.starving ? "border-red-500/40" : "border-border/70"}`}>
-      <div className="grid grid-cols-2 gap-px bg-border/40 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-px bg-border/40 sm:grid-cols-5 [&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1">
         {stats.map((s) => (
           <div key={s.label} className="bg-card px-4 py-3">
             <div className={`text-lg font-semibold ${s.warn ? "text-red-400" : "text-foreground"}`}>{s.value}</div>
