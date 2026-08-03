@@ -78,7 +78,16 @@ export interface ManualTouchRow {
   leadId:       string;
   leadName:     string | null;
   leadCompany:  string | null;
+  /**
+   * The channel a human should ACTUALLY use — already routed through
+   * `channels.ts:manualTouchRouting` by the caller, so this can differ from the
+   * step's own channel. A `whatsapp` step on a landline arrives here as `call`.
+   * That is the landline guarantee: nothing downstream may turn this into a
+   * wa.me link for a number that cannot receive one.
+   */
   channel:      "whatsapp" | "call";
+  /** Why the channel was downgraded, if it was. Folded into `reason`. */
+  channelNote?: string | null;
   message:      string | null;
   phoneE164:    string | null;
   dealValue:    string | number | null;
@@ -153,9 +162,14 @@ export function rankWorklist(input: WorklistInputs): WorklistAction[] {
       score: BASE.manual_touch,
       title: m.leadName ?? "Lead",
       subtitle: m.leadCompany ?? null,
-      reason: m.channel === "whatsapp"
-        ? "WhatsApp message ready to send"
-        : "Call this lead",
+      // The note explains a downgrade ("landline — WhatsApp not available —
+      // call instead") in the card's own words, so nobody has to work out why a
+      // WhatsApp step is asking them to dial.
+      reason: m.channelNote
+        ? `${m.channel === "whatsapp" ? "WhatsApp" : "Call this lead"} — ${m.channelNote}`
+        : m.channel === "whatsapp"
+          ? "WhatsApp message ready to send"
+          : "Call this lead",
       detail: m.message ?? null,
       deepLink: `/crm?lead=${m.leadId}`,
       leadId: m.leadId, taskId: null, dealValue: Number(m.dealValue ?? 0), ageHours: age,
@@ -254,10 +268,30 @@ export function rankWorklist(input: WorklistInputs): WorklistAction[] {
   // One lead can only occupy one slot. A lead that replied AND is hot is a
   // single conversation — showing it twice makes the list feel like noise and
   // teaches people to skim it. Highest-scoring entry wins.
+  //
+  // manual_touch is EXEMPT, in both directions: it never suppresses another
+  // card and is never suppressed by one.
+  //
+  // Every other card type is a view over state that stays reachable somewhere
+  // else — the lead sheet, the tasks page, the outreach page. manual_touch is
+  // not: it is the only surface in the product that can resolve an
+  // `awaiting_action` enrollment, because POST /enrollments/:id/touch-outcome is
+  // driven from this card and nothing else calls it. Deduping it away therefore
+  // does not merely hide a row, it strands a database row that says a human must
+  // act with no screen anywhere saying so — which is exactly what happened to a
+  // lead who replied by email while blocked on a WhatsApp step: reply_waiting
+  // (1000) outscores manual_touch (900), so the touch card vanished and the
+  // enrollment could never be cleared.
+  //
+  // handleReply now resolves awaiting_action enrollments too, so that specific
+  // pair no longer arises — but a reply on one sequence and a pending manual
+  // step on another still can, and they are genuinely two different jobs
+  // ("answer them" and "send the message the sequence queued"), so both surface.
+  const suppressesLead = (a: WorklistAction) => a.type !== "manual_touch";
   const seenLeads = new Set<string>();
   const keepers: WorklistAction[] = [];
   for (const a of out.sort((x, y) => y.score - x.score)) {
-    if (a.leadId) {
+    if (a.leadId && suppressesLead(a)) {
       if (seenLeads.has(a.leadId)) continue;
       seenLeads.add(a.leadId);
     }

@@ -7,13 +7,26 @@ import { sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { leads } from "../db/schema";
 import { isAdmin } from "../middleware/auth";
+import { manualTouchRouting } from "./channels";
 import { rankWorklist, type WorklistInputs, type WorklistAction } from "./worklist-ranking";
 
 export * from "./worklist-ranking";
 
 const STALE_DAYS  = Number(process.env.WORKLIST_STALE_DAYS ?? 7);
 const HOT_VIEWS   = Number(process.env.WORKLIST_HOT_VIEWS ?? 3);
-const ACTIVE_ONLY = sql`${leads.stage} NOT IN ('closed_won','closed_lost')`;
+/**
+ * "This lead is still in play." Every query below that touches a lead must
+ * carry it — a closed-won or closed-lost lead is finished, and asking someone
+ * to chase it is noise at best and embarrassing at worst.
+ *
+ * Written against the `l` alias every query below uses, NOT against the Drizzle
+ * `leads` table object. It previously interpolated `${leads.stage}`, which
+ * renders `"leads"."stage"` — invalid SQL inside these alias-based queries — and
+ * as a result the constant was referenced by nothing at all while all five
+ * queries spelled the predicate out by hand. One of them (manual touches) then
+ * simply forgot to, which is what let a closed lead raise a manual-touch card.
+ */
+const ACTIVE_ONLY = sql`l.stage NOT IN ('closed_won','closed_lost')`;
 
 /**
  * Collect everything the ranker needs for one user.
@@ -45,7 +58,7 @@ export async function fetchWorklist(
         JOIN leads l ON l.id = e.lead_id
        WHERE e.status = 'replied'
          AND e.completed_at IS NOT NULL
-         AND l.stage NOT IN ('closed_won','closed_lost')
+         AND ${ACTIVE_ONLY}
          AND ${mine}
          AND NOT EXISTS (
            SELECT 1 FROM lead_activities a
@@ -61,7 +74,7 @@ export async function fetchWorklist(
         FROM audits au
         JOIN leads l ON l.id = au.lead_id
        WHERE au.views >= ${HOT_VIEWS}
-         AND l.stage NOT IN ('closed_won','closed_lost')
+         AND ${ACTIVE_ONLY}
          AND ${mine}
        ORDER BY au.views DESC
        LIMIT 50`),
@@ -104,7 +117,7 @@ export async function fetchWorklist(
     db.execute(sql`
       SELECT l.id, l.name, l.company, l.deal_value, l.stage, l.last_activity
         FROM leads l
-       WHERE l.stage NOT IN ('closed_won','closed_lost')
+       WHERE ${ACTIVE_ONLY}
          AND l.assignee_id IS NOT NULL
          AND ${mine}
          AND (l.last_activity IS NULL
@@ -117,7 +130,7 @@ export async function fetchWorklist(
           SELECT l.id, l.name, l.company, l.deal_value, l.created_at
             FROM leads l
            WHERE l.assignee_id IS NULL
-             AND l.stage NOT IN ('closed_won','closed_lost')
+             AND ${ACTIVE_ONLY}
            ORDER BY l.created_at DESC LIMIT 50`)
       : empty,
 
@@ -126,12 +139,21 @@ export async function fetchWorklist(
     // when the enrollment arrived at this step (last advance, or enrollment
     // itself if it's the first step) — that's what "blocked for three days"
     // means, not when it was enrolled in the sequence.
+    //
+    // Deliberately a THIN query: it selects the raw routing facts
+    // (phone_type, whatsapp_status) and decides nothing with them. Whether a
+    // whatsapp step may actually be presented as WhatsApp is decided by
+    // services/channels.ts:manualTouchRouting below — that file is the single
+    // authority on channel eligibility, and duplicating its landline/
+    // whatsapp_status rules in SQL is how the two would drift.
     db.execute(sql`
       SELECT e.id                                            AS "enrollmentId",
              l.id                                             AS "leadId",
              l.name                                           AS "leadName",
              l.company                                        AS "leadCompany",
              l.phone_e164                                     AS "phoneE164",
+             l.phone_type                                     AS "phoneType",
+             l.whatsapp_status                                AS "whatsappStatus",
              l.deal_value                                     AS "dealValue",
              s.channel                                        AS channel,
              s.body_template                                  AS message,
@@ -141,6 +163,7 @@ export async function fetchWorklist(
         JOIN outreach_steps s ON s.sequence_id = e.sequence_id
                              AND s.position    = e.current_step
        WHERE e.status = 'awaiting_action'
+         AND ${ACTIVE_ONLY}
          AND ${mine}
        ORDER BY e.enrolled_at
        LIMIT 50`),
@@ -176,13 +199,28 @@ export async function fetchWorklist(
       leadId: r.id, name: r.name, company: r.company,
       dealValue: num(r.deal_value), createdAt: date(r.created_at),
     })),
-    manualTouches: (manualTouches.rows as any[]).map((r) => ({
-      enrollmentId: r.enrollmentId, leadId: r.leadId,
-      leadName: r.leadName, leadCompany: r.leadCompany,
-      channel: r.channel as "whatsapp" | "call",
-      message: r.message, phoneE164: r.phoneE164,
-      dealValue: num(r.dealValue), since: date(r.since),
-    })),
+    // Route every manual touch through channels.ts before it becomes a card.
+    // THIS is where the "WhatsApp must never target a landline" guarantee is
+    // actually enforced: a whatsapp step on a landline, or on a number a human
+    // has already marked as having no WhatsApp, is downgraded to a call here, so
+    // no wa.me link can ever be built for it downstream. The card is downgraded
+    // rather than dropped on purpose — dropping it would leave the enrollment
+    // sitting in awaiting_action with nothing in the product able to clear it.
+    manualTouches: (manualTouches.rows as any[]).map((r) => {
+      const routed = manualTouchRouting({
+        stepChannel:    r.channel,
+        phoneE164:      r.phoneE164 ?? null,
+        phoneType:      r.phoneType ?? null,
+        whatsappStatus: r.whatsappStatus ?? null,
+      });
+      return {
+        enrollmentId: r.enrollmentId, leadId: r.leadId,
+        leadName: r.leadName, leadCompany: r.leadCompany,
+        channel: routed.channel, channelNote: routed.note,
+        message: r.message, phoneE164: r.phoneE164,
+        dealValue: num(r.dealValue), since: date(r.since),
+      };
+    }),
   };
 }
 

@@ -124,6 +124,20 @@ describe("rankWorklist — manual_touch", () => {
     expect(call.reason).toBe("Call this lead");
   });
 
+  it("explains a downgraded channel in the card's own words", () => {
+    // worklist.ts routes every touch through channels.ts:manualTouchRouting
+    // first, so a whatsapp step on a landline arrives here already downgraded to
+    // a call. The card must say WHY, or someone reading a "call this lead" card
+    // on a WhatsApp sequence has no idea what happened.
+    const out = rankWorklist(inputs({
+      manualTouches: [manualTouch({
+        channel: "call",
+        channelNote: "landline — WhatsApp not available — call instead",
+      })],
+    }))[0];
+    expect(out.reason).toBe("Call this lead — landline — WhatsApp not available — call instead");
+  });
+
   it("sorts a manual_touch ahead of a lower-priority action type", () => {
     const out = rankWorklist(inputs({
       manualTouches: [manualTouch()],
@@ -157,6 +171,43 @@ describe("rankWorklist — deduplication", () => {
       replies: [reply({ leadId: "a" }), reply({ leadId: "b" })],
     }));
     expect(out).toHaveLength(2);
+  });
+
+  it("never drops a pending manual touch just because the lead also replied", () => {
+    // The bug this guards: dedupe was by leadId with the highest score winning,
+    // and reply_waiting (1000) outranks manual_touch (900). So a lead who
+    // replied while blocked on a WhatsApp step lost their manual-touch card —
+    // and that card is the ONLY thing in the product that can resolve an
+    // awaiting_action enrollment, because nothing else calls
+    // POST /enrollments/:id/touch-outcome. The database went on saying a human
+    // must act, with no screen anywhere saying so.
+    const out = rankWorklist(inputs({
+      replies:       [reply({ leadId: "same" })],
+      manualTouches: [manualTouch({ leadId: "same" })],
+    }));
+    expect(out.map((a) => a.type)).toEqual(["reply_waiting", "manual_touch"]);
+    expect(out.find((a) => a.type === "manual_touch")?.enrollmentId).toBe("enr-1");
+  });
+
+  it("does not let a manual touch suppress other cards for the same lead either", () => {
+    // Exempt in BOTH directions: the touch is an extra job, not a replacement
+    // for whatever else that lead needs.
+    const out = rankWorklist(inputs({
+      manualTouches: [manualTouch({ leadId: "same" })],
+      staleLeads:    [stale({ leadId: "same" })],
+    }));
+    expect(out.map((a) => a.type)).toEqual(["manual_touch", "stale_lead"]);
+  });
+
+  it("still collapses two non-manual cards for one lead", () => {
+    // The exemption is scoped to manual_touch and must not have loosened the
+    // rest of the deduper.
+    const out = rankWorklist(inputs({
+      replies:  [reply({ leadId: "same" })],
+      hotLeads: [{ leadId: "same", name: "N", company: "C", dealValue: 1, views: 9, slug: "s", lastViewAt: hoursAgo(1) }],
+      manualTouches: [manualTouch({ leadId: "same" })],
+    }));
+    expect(out.map((a) => a.type)).toEqual(["reply_waiting", "manual_touch"]);
   });
 
   it("keeps every lead-less action even when several share a type", () => {
