@@ -9,6 +9,7 @@ import authRouter         from "./routes/auth";
 import usersRouter        from "./routes/users";
 import clientsRouter      from "./routes/clients";
 import tasksRouter, { projectsRouter } from "./routes/tasks";
+import taskTemplatesRouter from "./routes/task-templates";
 import financeRouter      from "./routes/finance";
 import crmRouter          from "./routes/crm";
 import goalsRouter        from "./routes/goals";
@@ -96,6 +97,10 @@ api.route("/users",         usersRouter);
 api.route("/clients",       clientsRouter);
 api.route("/tasks",         tasksRouter);
 api.route("/projects",      projectsRouter);
+// Deliberately not admin-gated: a member's own repeated checklist is exactly
+// the thing this is for, and applying a template only ever creates tasks they
+// could already create one at a time. Only DELETE is adminOnly, at the route.
+api.route("/task-templates", taskTemplatesRouter);
 api.route("/finance",       financeRouter);
 api.route("/crm",           crmRouter);
 api.route("/goals",         goalsRouter);

@@ -143,6 +143,32 @@ export const tasks = pgTable("tasks", {
   clientIdx:   index("idx_tasks_client").on(t.clientId),
 }));
 
+// ── Task Templates ────────────────────────────────────────
+// A saved checklist. Onboarding a client is the same handful of tasks every
+// time; applying a template lays them out on the calendar in one action
+// instead of a dozen trips through the New Task dialog.
+export const taskTemplates = pgTable("task_templates", {
+  id:          uuid("id").primaryKey().defaultRandom(),
+  name:        text("name").notNull(),
+  description: text("description"),
+  createdBy:   uuid("created_by").references(() => profiles.id, { onDelete: "set null" }),
+  createdAt:   timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:   timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const taskTemplateItems = pgTable("task_template_items", {
+  id:         uuid("id").primaryKey().defaultRandom(),
+  templateId: uuid("template_id").notNull().references(() => taskTemplates.id, { onDelete: "cascade" }),
+  title:      text("title").notNull(),
+  priority:   text("priority", { enum: ["low", "medium", "high", "critical"] }).notNull().default("medium"),
+  // Days after the start date chosen when applying. 0 = due on the start day;
+  // negative is allowed for prep work that happens before kickoff.
+  dayOffset:  integer("day_offset").notNull().default(0),
+  position:   integer("position").notNull().default(0),
+}, (t) => ({
+  templateIdx: index("idx_task_template_items_template").on(t.templateId, t.position),
+}));
+
 // ── Subtasks ──────────────────────────────────────────────
 export const subtasks = pgTable("subtasks", {
   id:       uuid("id").primaryKey().defaultRandom(),
