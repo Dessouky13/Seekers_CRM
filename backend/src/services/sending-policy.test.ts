@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   dailyCapFor, releaseCount, spreadGapSeconds, slotsRemainingToday,
   nextStageAfterSpamReject, nextSpreadSlot,
+  effectiveDailyCap, releaseCountNow,
   MIN_GAP_SECONDS, MAX_GAP_SECONDS,
   SEND_WINDOW_START_HOUR, SEND_WINDOW_END_HOUR,
 } from "./sending-policy";
@@ -94,5 +95,54 @@ describe("slotsRemainingToday", () => {
 describe("nextStageAfterSpamReject", () => {
   it("drops straight to recovery", () => {
     expect(nextStageAfterSpamReject()).toBe("recovery");
+  });
+});
+
+describe("effectiveDailyCap", () => {
+  it("a positive stored cap overrides the stage default", () => {
+    expect(effectiveDailyCap("recovery", 12, 0)).toBe(12);
+    expect(effectiveDailyCap("active", 3, 0)).toBe(3);
+  });
+
+  it("a stored cap of 0 falls back to the stage (warmup-ramp) default", () => {
+    expect(effectiveDailyCap("recovery", 0, 0)).toBe(5);
+    expect(effectiveDailyCap("warmup", 0, 2)).toBe(20);
+  });
+});
+
+describe("releaseCountNow", () => {
+  // Same fixtures as slotsRemainingToday's own tests: Cairo is UTC+3 in
+  // August 2026 (Egypt DST).
+  const insideWindow  = new Date("2026-08-03T06:00:00Z"); // 09:00 Cairo — window just opened, 8 slots left
+  const outsideWindow = new Date("2026-08-03T03:00:00Z"); // 06:00 Cairo — before the window opens
+
+  it("returns 0 outside the send window regardless of cap or sentToday", () => {
+    expect(releaseCountNow({
+      stage: "active", storedCap: 0, cleanWeeks: 0, sentToday: 0, now: outsideWindow,
+    })).toBe(0);
+  });
+
+  it("returns 0 once today's cap is already used up", () => {
+    expect(releaseCountNow({
+      stage: "recovery", storedCap: 0, cleanWeeks: 0, sentToday: 5, now: insideWindow,
+    })).toBe(0);
+  });
+
+  it("releases a normal in-window allowance spread across the remaining slots", () => {
+    // active cap 40, 8 slots, nothing sent yet -> floor(40/8) = 5. This is the
+    // exact "5 released at once" scenario the per-message spread delay exists
+    // to space out — the count itself is correct; outreach.ts is responsible
+    // for not firing all 5 back-to-back.
+    expect(releaseCountNow({
+      stage: "active", storedCap: 0, cleanWeeks: 0, sentToday: 0, now: insideWindow,
+    })).toBe(5);
+  });
+
+  it("honours a stored cap override in the release decision, not just the stage default", () => {
+    // stored cap 8 (not the active default of 40), 8 slots, nothing sent ->
+    // floor(8/8) = 1. Proves storedCap wins over dailyCapFor("active", ...).
+    expect(releaseCountNow({
+      stage: "active", storedCap: 8, cleanWeeks: 0, sentToday: 0, now: insideWindow,
+    })).toBe(1);
   });
 });

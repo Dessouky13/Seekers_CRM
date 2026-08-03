@@ -3,17 +3,23 @@ import { and, eq, lte, sql, asc, isNull, or } from "drizzle-orm";
 import { db } from "../db/client";
 import {
   outreachSequences, outreachSteps, outreachEnrollments, outreachSends,
-  leads, leadActivities, profiles, mailboxes, suppressions,
+  leads, leadActivities, profiles, mailboxes,
 } from "../db/schema";
 import { sendOutreachEmail, buildDefaultSignature, buildDefaultSignatureText } from "./email";
 import { runAgent, isEmailCapableAgent } from "./agents";
 import { fireEventAsync } from "./webhooks";
 import { sanitizeSubject } from "./outreach-subject";
 import {
-  dailyCapFor, releaseCount, slotsRemainingToday, spreadGapSeconds,
-  nextSpreadSlot, nextStageAfterSpamReject, type WarmupStage,
+  slotsRemainingToday, spreadGapSeconds, nextSpreadSlot,
+  releaseCountNow, nextStageAfterSpamReject, type WarmupStage,
 } from "./sending-policy";
 import { suppress, suppressedSet } from "./suppressions";
+
+// Promise-based sleep for spacing sends within a released batch.
+function sleepUntil(target: Date): Promise<void> {
+  const ms = Math.max(0, target.getTime() - Date.now());
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 // Mustache-lite template renderer. Supports {{name}}, {{company}}, etc.
 // Missing keys render as empty string. Whitespace inside braces is ignored.
@@ -225,22 +231,47 @@ async function isSuppressedAddress(address: string): Promise<boolean> {
 }
 
 // ── Scheduler tick: find due enrollments, send next step ──
+//
+// Guards against overlapping ticks. The spread delay below can make a single
+// tick take several minutes (up to ~16 min in the worst case: a release of 5
+// at the max 240s gap), which can outlive the 5-minute sweep interval — if the
+// next setInterval firing started a second tick while the first was still
+// mid-flight, both could select the SAME due enrollment before either had
+// updated its nextSendAt/status, causing an actual duplicate send. A simple
+// in-process mutex is the more direct fix for that (a delay-budget cap only
+// bounds the sleep portion, not real DB/SMTP time, and doesn't stop two ticks
+// from starting) and is simpler to reason about than a partial-budget scheme.
+let tickInFlight = false;
+
 export async function processDueSends(limit = 20): Promise<{ processed: number; sent: number; failed: number; throttled: number }> {
+  if (tickInFlight) {
+    console.warn("[outreach] tick already in flight — skipping this interval");
+    return { processed: 0, sent: 0, failed: 0, throttled: 0 };
+  }
+  tickInFlight = true;
+  try {
+    return await runOneTick(limit);
+  } finally {
+    tickInFlight = false;
+  }
+}
+
+async function runOneTick(limit: number): Promise<{ processed: number; sent: number; failed: number; throttled: number }> {
   const now = new Date();
 
   // ── Volume gate ───────────────────────────────────────
   // Outside the Cairo send window, or over today's cap, nothing goes out. This
   // replaces the previous behaviour of releasing every due enrollment at once.
+  // Cheap pure check first so an out-of-window tick never touches the DB.
   const slots = slotsRemainingToday(now);
   if (slots === 0) {
     return { processed: 0, sent: 0, failed: 0, throttled: 0 };
   }
 
-  const [mailbox] = await db.select().from(mailboxes).limit(1);
-  const stage = (mailbox?.warmupStage ?? "recovery") as WarmupStage;
-  const cap   = mailbox?.dailyCap && mailbox.dailyCap > 0
-    ? mailbox.dailyCap
-    : dailyCapFor(stage, cleanWeeksFor(mailbox));
+  const [mailbox]  = await db.select().from(mailboxes).limit(1);
+  const stage      = (mailbox?.warmupStage ?? "recovery") as WarmupStage;
+  const storedCap  = mailbox?.dailyCap ?? 0;
+  const cleanWeeks = cleanWeeksFor(mailbox);
 
   // Authoritative count: derived from the sends table for the current Cairo
   // day, never from a stored counter — a counter drifts across restarts and
@@ -254,9 +285,13 @@ export async function processDueSends(limit = 20): Promise<{ processed: number; 
           = (NOW() AT TIME ZONE 'Africa/Cairo')::date`,
     ));
 
-  const release = releaseCount({
-    capRemaining:   cap - Number(sentTodayCount),
-    slotsRemaining: slots,
+  // The whole cap+window release decision is one pure, unit-tested function
+  // (sending-policy.ts) — see releaseCountNow's own tests for the
+  // outside-window-zero and over-cap-zero paths in isolation.
+  const release = releaseCountNow({
+    stage, storedCap, cleanWeeks,
+    sentToday: Number(sentTodayCount),
+    now,
   });
   if (release === 0) {
     return { processed: 0, sent: 0, failed: 0, throttled: 1 };
@@ -275,9 +310,16 @@ export async function processDueSends(limit = 20): Promise<{ processed: number; 
   let failed = 0;
   let throttled = 0;
 
-  for (const enrollment of due) {
+  for (let i = 0; i < due.length; i++) {
+    const enrollment = due[i];
+    // Set by processSingleSend only when it actually reaches sendOutreachEmail
+    // — never for a skipped non-email step, a suppressed address, a
+    // config-hold, or a lead with no email. The spread delay below exists
+    // only to space out real SMTP transmissions, so it must key off this,
+    // not off "an enrollment was processed."
+    const attempt = { smtpAttempted: false };
     try {
-      const outcome = await processSingleSend(enrollment);
+      const outcome = await processSingleSend(enrollment, attempt);
       if (outcome === "failed") failed++;
       else sent++;   // "sent", "advanced" (non-email skip), "completed", "retry" all count as handled
     } catch (err: any) {
@@ -311,6 +353,17 @@ export async function processDueSends(limit = 20): Promise<{ processed: number; 
         .set({ status: "failed", pausedReason: msg.slice(0, 500), nextSendAt: null })
         .where(eq(outreachEnrollments.id, enrollment.id));
     }
+
+    // Spread real SMTP sends within this batch. Never delays before the first
+    // send (nothing has been sent yet) or after the last one (nothing left to
+    // space out from) — only between two actual transmissions, which is
+    // exactly the "5 emails leaving one mailbox in seconds" shape that drew
+    // the original 30 provider rejections.
+    if (attempt.smtpAttempted && i < due.length - 1) {
+      const gapSeconds = spreadGapSeconds();
+      console.log(`[outreach] spreading next send by ${gapSeconds}s (batch ${i + 1}/${due.length})`);
+      await sleepUntil(nextSpreadSlot(new Date(), gapSeconds));
+    }
   }
 
   return { processed: due.length, sent, failed, throttled };
@@ -323,6 +376,11 @@ async function handleSendFailure(
   enrollment: typeof outreachEnrollments.$inferSelect,
   step: typeof outreachSteps.$inferSelect,
   err: any,
+  // The mailbox that actually sent this message — scopes the spam-reject
+  // downgrade below to that one row. Without this, an unqualified UPDATE
+  // drops EVERY mailbox to recovery the moment a second one exists, which is
+  // wrong the instant this is no longer a single-mailbox system.
+  mailboxAddress: string,
 ): Promise<"retry" | "failed"> {
   const msg = String(err?.message ?? err);
   const kind = classifyFailure(msg);
@@ -340,10 +398,11 @@ async function handleSendFailure(
   });
 
   // The provider is refusing us. Continuing at this rate makes it worse, so
-  // drop the mailbox to the recovery cap and suppress the address that drew it.
+  // drop THIS mailbox to the recovery cap and suppress the address that drew it.
   if (kind === "spam_reject") {
     await db.update(mailboxes)
-      .set({ warmupStage: nextStageAfterSpamReject(), updatedAt: new Date() });
+      .set({ warmupStage: nextStageAfterSpamReject(), updatedAt: new Date() })
+      .where(eq(mailboxes.address, mailboxAddress));
     const [rejectedLead] = await db
       .select({ email: leads.email })
       .from(leads)
@@ -405,7 +464,13 @@ async function holdForConfig(enrollment: typeof outreachEnrollments.$inferSelect
   console.warn(`[outreach] enrollment ${enrollment.id} held: ${reason}`);
 }
 
-async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSelect): Promise<SendOutcome> {
+async function processSingleSend(
+  enrollment: typeof outreachEnrollments.$inferSelect,
+  // Set to true only once we actually reach sendOutreachEmail, so the caller's
+  // batch-spread delay can key off "a real SMTP send happened" rather than
+  // "an enrollment was processed" (which also covers skips/holds/suppression).
+  attempt?: { smtpAttempted: boolean },
+): Promise<SendOutcome> {
   // Get lead and step
   const [lead] = await db.select().from(leads).where(eq(leads.id, enrollment.leadId)).limit(1);
   if (!lead) throw new Error("Lead vanished");   // pre-send, genuinely unexpected → backstop marks failed
@@ -540,20 +605,26 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
     signatureText = buildDefaultSignatureText({});
   }
 
+  // The actual envelope-from address sendOutreachEmail will use (same fallback
+  // it applies itself) — this is the mailbox identity a spam-reject downgrade
+  // must be scoped to, not just "whatever EMAIL_FROM happens to be right now."
+  const fromAddress = process.env.EMAIL_FROM ?? "team@seekersai.org";
+
   // Send. A failure here is caught and routed to the retry/permanent-fail
   // handler — it must NOT bubble up and permanently kill the enrollment, and
   // it must NOT advance the step (so we don't skip a touch on a transient error).
   let result;
+  if (attempt) attempt.smtpAttempted = true;   // reaching here IS the SMTP attempt, success or not
   try {
     result = await sendOutreachEmail({ to: lead.email, subject, body, fromName, signatureHtml, signatureText });
   } catch (sendErr) {
-    return await handleSendFailure(enrollment, step, sendErr);
+    return await handleSendFailure(enrollment, step, sendErr, fromAddress);
   }
 
   // nodemailer can also report a soft rejection without throwing (recipient in
   // the `rejected` array). Treat that the same as a thrown send failure.
   if (result.rejected && result.rejected.length > 0 && (!result.accepted || result.accepted.length === 0)) {
-    return await handleSendFailure(enrollment, step, new Error(`Recipient rejected: ${result.rejected.join(", ")}`));
+    return await handleSendFailure(enrollment, step, new Error(`Recipient rejected: ${result.rejected.join(", ")}`), fromAddress);
   }
 
   // Fire webhook for outreach.sent

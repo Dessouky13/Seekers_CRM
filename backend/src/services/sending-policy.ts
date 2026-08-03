@@ -78,3 +78,32 @@ export function slotsRemainingToday(now: Date): number {
 export function nextStageAfterSpamReject(): WarmupStage {
   return "recovery";
 }
+
+/**
+ * The daily cap actually in force. An explicit stored override (> 0) always
+ * wins over the stage default; 0 (or missing) means "not configured — fall
+ * back to the stage/warmup-ramp default."
+ */
+export function effectiveDailyCap(stage: WarmupStage, storedCap: number, cleanWeeks: number): number {
+  return storedCap > 0 ? storedCap : dailyCapFor(stage, cleanWeeks);
+}
+
+/**
+ * The single release decision the scheduler tick needs on every call: how many
+ * sends may go out right now. Zero whenever the Cairo window is closed OR
+ * today's cap (stored override, or the stage/warmup default) is already used
+ * up — both are "nothing goes out" outcomes, and folding them into one pure
+ * function means both are unit-testable without a DB.
+ */
+export function releaseCountNow(input: {
+  stage:      WarmupStage;
+  storedCap:  number;
+  cleanWeeks: number;
+  sentToday:  number;
+  now:        Date;
+}): number {
+  const slots = slotsRemainingToday(input.now);
+  if (slots === 0) return 0;
+  const cap = effectiveDailyCap(input.stage, input.storedCap, input.cleanWeeks);
+  return releaseCount({ capRemaining: cap - input.sentToday, slotsRemaining: slots });
+}
