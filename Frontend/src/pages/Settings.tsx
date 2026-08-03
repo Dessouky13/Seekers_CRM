@@ -23,8 +23,10 @@ import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { useCurrentUser, useCurrentProfile } from "@/hooks/useAuth";
+import { BrandingPanel } from "@/components/modules/quotations/BrandingPanel";
 import { cn } from "@/lib/utils";
 import type { ApiUser } from "@/lib/types";
+import { QueryError } from "@/components/QueryError";
 
 export default function Settings() {
   const currentUser = useCurrentUser();
@@ -35,7 +37,9 @@ export default function Settings() {
   const qc = useQueryClient();
   const confirm = useConfirm();
 
-  const { data: users = [], isLoading } = useQuery<ApiUser[]>({
+  const {
+    data: users = [], isLoading, isError, error, refetch, isRefetching,
+  } = useQuery<ApiUser[]>({
     queryKey: ["users"],
     queryFn:  () => apiFetch("/users"),
   });
@@ -129,6 +133,9 @@ export default function Settings() {
       {/* Email signature */}
       {profile && <SignatureEditor user={profile} />}
 
+      {/* Branding on every quotation / invoice PDF */}
+      {isAdmin && <BrandingPanel />}
+
       {/* Outbound Webhooks */}
       {isAdmin && <WebhooksPanel />}
 
@@ -220,6 +227,10 @@ export default function Settings() {
 
         {isLoading ? (
           <div className="flex items-center justify-center h-24 text-muted-foreground text-sm">Loading…</div>
+        ) : isError ? (
+          <div className="p-4">
+            <QueryError what="your team members" error={error} onRetry={refetch} isRetrying={isRefetching} />
+          </div>
         ) : users.length === 0 ? (
           <div className="flex items-center justify-center h-24 text-muted-foreground text-sm">No team members yet.</div>
         ) : (
@@ -432,7 +443,9 @@ function SignatureEditor({ user }: { user: ApiUser }) {
 
 // ─── Webhooks Panel ───────────────────────────────────────
 function WebhooksPanel() {
-  const { data: webhooks = [], isLoading } = useWebhooks();
+  const {
+    data: webhooks = [], isLoading, isError, error, refetch, isRefetching,
+  } = useWebhooks();
   const { data: events = [] }              = useWebhookEvents();
   const [isOpen, setIsOpen]                = useState(false);
   const [editing, setEditing]              = useState<WebhookSubscription | null>(null);
@@ -459,6 +472,8 @@ function WebhooksPanel() {
 
       {isLoading ? (
         <p className="text-xs text-muted-foreground italic">Loading…</p>
+      ) : isError ? (
+        <QueryError what="your webhooks" error={error} onRetry={refetch} isRetrying={isRefetching} />
       ) : webhooks.length === 0 ? (
         <div className="rounded-lg bg-muted/20 border border-dashed border-border p-6 text-center">
           <Webhook className="h-6 w-6 mx-auto text-muted-foreground mb-2" />

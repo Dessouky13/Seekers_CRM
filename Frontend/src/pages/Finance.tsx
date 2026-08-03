@@ -28,6 +28,7 @@ import { cairoToday } from "@/lib/dates";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { exportCsv, type CsvColumn } from "@/lib/csv";
 import type { ApiTransaction } from "@/lib/types";
+import { QueryError } from "@/components/QueryError";
 
 const fmt = (n: number) =>
   `EGP ${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n)}`;
@@ -181,14 +182,20 @@ export default function Finance() {
   const allTransactions = allTxRes?.data ?? [];
   const loadingAllTx = needsAllTx && loadingAllTxRaw;
 
-  const { data: txRes, isLoading } = useTransactions({
+  const {
+    data: txRes, isLoading, isError: txError, error: txErrorObj,
+    refetch: refetchTx, isRefetching: refetchingTx,
+  } = useTransactions({
     type:     typeFilter !== "all" ? typeFilter : undefined,
     category: catFilter  !== "all" ? catFilter  : undefined,
     from:     fromDate || undefined,
     to:       toDate   || undefined,
     limit:    500,
   });
-  const { data: summary, isLoading: loadingSummary } = useFinanceSummary({
+  const {
+    data: summary, isLoading: loadingSummary, isError: summaryError,
+    error: summaryErrorObj, refetch: refetchSummary, isRefetching: refetchingSummary,
+  } = useFinanceSummary({
     from: fromDate || undefined,
     to: toDate || undefined,
     mode: dateMode,
@@ -412,6 +419,17 @@ export default function Finance() {
 
         <TabsContent value="overview" className="mt-4 space-y-6">
       {/* KPI cards — placeheld rather than showing EGP 0 before the numbers land */}
+      {/* And, on failure, NOT shown at all: an "EGP 0 net profit" tile that is
+          really a failed request is the single most misleading thing this page
+          could render. */}
+      {summaryError ? (
+        <QueryError
+          what="your P&L totals"
+          error={summaryErrorObj}
+          onRetry={refetchSummary}
+          isRetrying={refetchingSummary}
+        />
+      ) : (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {(loadingSummary || loadingTotals) ? (
           Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
@@ -448,6 +466,7 @@ export default function Finance() {
           </>
         )}
       </div>
+      )}
 
       {/* Category summary row — icons/labels are static, only the totals load */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -563,6 +582,17 @@ export default function Finance() {
 
           {isLoading ? (
             <TableSkeleton columns={TRANSACTION_COLUMNS} rows={8} />
+          ) : txError ? (
+            // Both the phone cards and the desktop table below read from
+            // `transactions`, which defaults to []. Without this branch a failed
+            // ledger fetch says "No transactions match these filters" — and the
+            // user has filters on, so they will believe it.
+            <QueryError
+              what="your transactions"
+              error={txErrorObj}
+              onRetry={refetchTx}
+              isRetrying={refetchingTx}
+            />
           ) : (
             <>
             {/* ── Phone: one card per transaction ──────────

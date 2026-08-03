@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { useGoals, useCreateGoal, useUpdateGoal, useDeleteGoal } from "@/hooks/useGoals";
 import { useCurrentUser } from "@/hooks/useAuth";
 import type { ApiGoal } from "@/lib/types";
+import { QueryError } from "@/components/QueryError";
 
 /** Mirrors a goal card: title block, progress readout, bar, stepper controls. */
 function GoalCardSkeleton() {
@@ -50,7 +51,7 @@ export default function Goals() {
   const currentUser = useCurrentUser();
   const isAdmin     = currentUser?.role === "admin";
 
-  const { data: goals = [], isLoading } = useGoals();
+  const { data: goals = [], isLoading, isError, error, refetch, isRefetching } = useGoals();
   const createGoal = useCreateGoal();
   const updateGoal = useUpdateGoal();
   const deleteGoal = useDeleteGoal();
@@ -140,6 +141,8 @@ export default function Goals() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {Array.from({ length: 4 }).map((_, i) => <GoalCardSkeleton key={i} />)}
         </div>
+      ) : isError ? (
+        <QueryError what="your goals" error={error} onRetry={refetch} isRetrying={isRefetching} />
       ) : goals.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center animate-fade-in">
           <Target className="h-8 w-8 text-muted-foreground mx-auto mb-3" />

@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
 import { exportCsv, type CsvColumn } from "@/lib/csv";
 import type { ApiLead } from "@/lib/types";
+import { QueryError } from "@/components/QueryError";
 
 // Spreadsheet columns for the leads export. Deal value stays numeric so it can
 // be summed; complaint tags collapse into one semicolon-joined cell.
@@ -80,7 +81,9 @@ export default function CRM() {
   const { data: sequencesList = [], isLoading: sequencesLoading } = useSequences();
   const enrollableSequences = sequencesList.filter((s) => s.isActive && s.step_count > 0);
 
-  const { data: rawLeads = [], isLoading } = useLeads({
+  const {
+    data: rawLeads = [], isLoading, isError, error, refetch, isRefetching,
+  } = useLeads({
     search:       debouncedSearch || undefined,
     category:     catFilter || undefined,
     stage:        stageFilter || undefined,
@@ -210,6 +213,12 @@ export default function CRM() {
 
   if (isLoading) {
     return <LeadsPageSkeleton view={view} />;
+  }
+
+  // "No leads match these filters" is a very believable lie when the request
+  // 500s — the user has filters applied and will assume they are the reason.
+  if (isError) {
+    return <QueryError variant="page" what="your leads" error={error} onRetry={refetch} isRetrying={isRefetching} />;
   }
 
   return (

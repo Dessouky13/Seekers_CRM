@@ -15,6 +15,7 @@ import {
   type EnrollmentStatus,
 } from "@/hooks/useOutreach";
 import { cn } from "@/lib/utils";
+import { QueryError } from "@/components/QueryError";
 
 const columns = ["Lead", "Sequence", "Step", "Next send", "Status", ""];
 
@@ -36,7 +37,9 @@ const statusColors: Record<EnrollmentStatus, string> = {
 
 export function EnrollmentsList() {
   const [statusFilter, setStatusFilter] = useState<EnrollmentStatus | "all">("active");
-  const { data: enrollments = [], isLoading } = useEnrollments(
+  const {
+    data: enrollments = [], isLoading, isError, error, refetch, isRefetching,
+  } = useEnrollments(
     statusFilter !== "all" ? { status: statusFilter } : {},
   );
   const pauseE  = usePauseEnrollment();
@@ -63,6 +66,8 @@ export function EnrollmentsList() {
 
       {isLoading ? (
         <EnrollmentsListSkeleton />
+      ) : isError ? (
+        <QueryError what="your enrollments" error={error} onRetry={refetch} isRetrying={isRefetching} />
       ) : enrollments.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center">
           <Activity className="h-8 w-8 mx-auto text-muted-foreground mb-3" />

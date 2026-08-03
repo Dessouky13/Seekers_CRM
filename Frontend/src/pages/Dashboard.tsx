@@ -6,6 +6,7 @@ import { useDashboardSummary } from "@/hooks/useDashboard";
 import { useCrmInsights, useStaleLeads } from "@/hooks/useCRM";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { AgentPanel } from "@/components/modules/AgentPanel";
+import { QueryError } from "@/components/QueryError";
 
 const COLORS = ["hsl(246,90%,60%)", "hsl(255,40%,72%)", "hsl(152,60%,45%)", "hsl(38,92%,55%)", "hsl(0,72%,55%)"];
 const fmt = (n: number) => `EGP ${n.toLocaleString()}`;
@@ -19,7 +20,7 @@ const priorityColors: Record<string, string> = {
 
 export default function Dashboard() {
   const user    = useCurrentUser();
-  const { data, isLoading } = useDashboardSummary();
+  const { data, isLoading, isError, error, refetch, isRefetching } = useDashboardSummary();
   const { data: staleLeads = [] } = useStaleLeads();
   const { data: insights } = useCrmInsights({ period: "weekly", include_ai: true });
 
@@ -41,6 +42,13 @@ export default function Dashboard() {
 
   if (isLoading) {
     return <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">Loading dashboard…</div>;
+  }
+
+  // Without this, every KPI above falls back to 0 and the page reports a
+  // confident, entirely fictional "EGP 0 revenue, 0 leads" for a request that
+  // simply failed.
+  if (isError) {
+    return <QueryError variant="page" what="your dashboard" error={error} onRetry={refetch} isRetrying={isRefetching} />;
   }
 
   return (

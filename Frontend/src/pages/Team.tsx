@@ -20,6 +20,7 @@ import {
 import { useCurrentUser } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import { cairoToday } from "@/lib/dates";
+import { QueryError } from "@/components/QueryError";
 
 const fmt = (n: number) =>
   `EGP ${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n)}`;
@@ -86,7 +87,9 @@ const TIMELINE_STYLE: Record<string, { label: string; icon: React.ElementType; t
 };
 
 export default function Team() {
-  const { data: members = [], isLoading } = useTeamWorkSummary();
+  const {
+    data: members = [], isLoading, isError, error, refetch, isRefetching,
+  } = useTeamWorkSummary();
   const me = useCurrentUser();
   const [addOpen, setAddOpen]   = useState(false);
   const [drillId, setDrillId]   = useState<string | null>(null);
@@ -182,6 +185,10 @@ export default function Team() {
       <div className="space-y-3">
         {isLoading
           ? Array.from({ length: 4 }).map((_, i) => <MemberCardSkeleton key={i} />)
+          : isError
+          // This page has no empty state at all, so a failed request rendered
+          // nothing whatsoever below the header — as if the team had no members.
+          ? <QueryError what="your team" error={error} onRetry={refetch} isRetrying={isRefetching} />
           : members.map((m) => (
             <MemberCard
               key={m.id}

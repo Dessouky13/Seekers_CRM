@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { exportCsv, type CsvColumn } from "@/lib/csv";
 import { Download } from "lucide-react";
 import type { ApiClient } from "@/lib/types";
+import { QueryError } from "@/components/QueryError";
 
 // Spreadsheet columns for the clients export. Revenue stays numeric so it
 // can be summed in Excel.
@@ -374,7 +375,9 @@ export default function Clients() {
   const [isOpen, setIsOpen]             = useState(false);
   const [selectedId, setSelectedId]     = useState<string | null>(null);
 
-  const { data: clients = [], isLoading } = useClients({ status: statusFilter, search });
+  const {
+    data: clients = [], isLoading, isError, error, refetch, isRefetching,
+  } = useClients({ status: statusFilter, search });
   const createClient = useCreateClient();
 
   const activeCount    = clients.filter((c) => c.status === "active").length;
@@ -504,6 +507,8 @@ export default function Clients() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 6 }).map((_, i) => <ClientCardSkeleton key={i} />)}
         </div>
+      ) : isError ? (
+        <QueryError what="your clients" error={error} onRetry={refetch} isRetrying={isRefetching} />
       ) : clients.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center animate-fade-in">
           <p className="text-muted-foreground">No clients found. Add your first client above.</p>

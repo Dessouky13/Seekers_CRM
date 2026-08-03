@@ -24,6 +24,7 @@ import {
 import { useClients } from "@/hooks/useClients";
 import { cn } from "@/lib/utils";
 import type { ApiTask } from "@/lib/types";
+import { QueryError } from "@/components/QueryError";
 
 type TaskStatus   = ApiTask["status"];
 type TaskPriority = ApiTask["priority"];
@@ -57,7 +58,9 @@ export default function Tasks() {
   if (projectFilter !== "all") filterParams.project_id = projectFilter;
   if (clientFilter  !== "all") filterParams.client_id  = clientFilter;
 
-  const { data: tasksRes, isLoading } = useTasks(
+  const {
+    data: tasksRes, isLoading, isError, error, refetch, isRefetching,
+  } = useTasks(
     Object.keys(filterParams).length > 0 ? filterParams : undefined,
   );
   const { data: projects  = [] } = useProjects();
@@ -221,6 +224,12 @@ export default function Tasks() {
         Loading tasks…
       </div>
     );
+  }
+
+  // `tasks` defaults to [], so without this a failed request renders the board
+  // and the table as "No tasks found." — indistinguishable from having none.
+  if (isError) {
+    return <QueryError variant="page" what="your tasks" error={error} onRetry={refetch} isRetrying={isRefetching} />;
   }
 
   return (

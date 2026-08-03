@@ -9,12 +9,18 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recha
 import { useOutreachAnalytics } from "@/hooks/useOutreach";
 import { SequenceAnalyticsDialog } from "@/components/modules/outreach/SequenceAnalyticsDialog";
 import { cn } from "@/lib/utils";
+import { QueryError } from "@/components/QueryError";
 
 export function AnalyticsTab() {
-  const { data, isLoading } = useOutreachAnalytics();
+  const { data, isLoading, isError, error, refetch, isRefetching } = useOutreachAnalytics();
   const [drillSeqId, setDrillSeqId] = useState<string | null>(null);
 
   if (isLoading) return <AnalyticsTabSkeleton />;
+  // Must come before the `!data` branch: on a failed request data is also
+  // undefined, so "No analytics available yet" was what a 500 looked like.
+  if (isError) {
+    return <QueryError what="outreach analytics" error={error} onRetry={refetch} isRetrying={isRefetching} />;
+  }
   if (!data)     return <p className="text-sm text-muted-foreground text-center py-12">No analytics available yet.</p>;
 
   const fmtEgp = (n: number) => `EGP ${n.toLocaleString()}`;

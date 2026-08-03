@@ -13,6 +13,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+import { QueryError } from "@/components/QueryError";
 
 interface VaultEntry {
   id: string;
@@ -120,7 +121,9 @@ export default function Vault() {
   const [catFilter, setCatFilter]   = useState("All");
   const [newCategory, setNewCategory] = useState("");
 
-  const { data: entries = [], isLoading } = useQuery<VaultEntry[]>({
+  const {
+    data: entries = [], isLoading, isError, error, refetch, isRefetching,
+  } = useQuery<VaultEntry[]>({
     queryKey: ["vault"],
     queryFn:  () => apiFetch("/vault"),
   });
@@ -246,6 +249,10 @@ export default function Vault() {
       {/* Entries table */}
       {isLoading ? (
         <TableSkeleton columns={VAULT_COLUMNS} rows={7} className="bg-card" />
+      ) : isError ? (
+        // Especially bad to get wrong here: "No entries yet" for a credential
+        // store reads as "your passwords are gone".
+        <QueryError what="the vault" error={error} onRetry={refetch} isRetrying={isRefetching} />
       ) : filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border p-16 text-center">
           <Lock className="h-8 w-8 text-muted-foreground/40 mx-auto mb-3" />

@@ -10,6 +10,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+import { QueryError } from "@/components/QueryError";
 
 interface NoteResponse { content: string; updatedAt: string | null }
 interface IdeaCard { id: string; content: string; color: string; authorName: string | null; createdAt: string }
@@ -36,7 +37,9 @@ function MyNotes() {
   const [isDirty, setIsDirty] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { data, isLoading } = useQuery<NoteResponse>({
+  const {
+    data, isLoading, isError, error, refetch, isRefetching,
+  } = useQuery<NoteResponse>({
     queryKey: ["notes", "my"],
     queryFn:  () => apiFetch("/notes/my"),
   });
@@ -90,6 +93,13 @@ function MyNotes() {
       <div className="flex-1 rounded-xl border border-border bg-card overflow-hidden">
         {isLoading ? (
           <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
+        ) : isError ? (
+          // Critically, do NOT render the textarea: it is seeded from `data`, so
+          // on a failed load it would show empty and the autosave would then
+          // overwrite the real note with nothing.
+          <div className="p-4">
+            <QueryError what="your notes" error={error} onRetry={refetch} isRetrying={isRefetching} />
+          </div>
         ) : (
           <Textarea
             value={text}
@@ -111,7 +121,9 @@ function TeamBoard() {
   const [newContent, setNewContent] = useState("");
   const [newColor, setNewColor] = useState<ColorKey>("yellow");
 
-  const { data: cards = [], isLoading } = useQuery<IdeaCard[]>({
+  const {
+    data: cards = [], isLoading, isError, error, refetch, isRefetching,
+  } = useQuery<IdeaCard[]>({
     queryKey: ["notes", "board"],
     queryFn:  () => apiFetch("/notes/board"),
     refetchInterval: 30_000, // live refresh every 30s
@@ -154,6 +166,8 @@ function TeamBoard() {
 
       {isLoading ? (
         <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">Loading board…</div>
+      ) : isError ? (
+        <QueryError what="the idea board" error={error} onRetry={refetch} isRetrying={isRefetching} />
       ) : cards.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border p-16 text-center">
           <Lightbulb className="h-8 w-8 text-muted-foreground/50 mx-auto mb-3" />

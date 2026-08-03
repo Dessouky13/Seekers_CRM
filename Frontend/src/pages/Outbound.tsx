@@ -16,6 +16,7 @@ import {
 } from "@/hooks/useOutbound";
 import { DeliverabilityPanel } from "@/components/modules/outbound/DeliverabilityPanel";
 import { cn } from "@/lib/utils";
+import { QueryError } from "@/components/QueryError";
 
 // ══════════════════════════════════════════════════════════
 // Fingerprint → sales talking points
@@ -370,7 +371,10 @@ const INTEL_LEAD_COLUMNS = ["Lead", "Niche", "Stage", "ICP", "Intel", "Updated"]
 function PipelineTab() {
   const [filter, setFilter] = useState<LeadFilter>("all");
   const { data: summary, isLoading: loadingSummary } = useIntelSummary();
-  const { data: leadsRes, isLoading: loadingLeads } = useIntelLeads({
+  const {
+    data: leadsRes, isLoading: loadingLeads, isError: leadsError,
+    error: leadsErrorObj, refetch: refetchLeads, isRefetching: refetchingLeads,
+  } = useIntelLeads({
     limit:    200,
     enriched: filter === "all" ? undefined : filter === "enriched",
   });
@@ -432,6 +436,13 @@ function PipelineTab() {
 
       {loadingLeads ? (
         <TableSkeleton columns={INTEL_LEAD_COLUMNS} rows={8} />
+      ) : leadsError ? (
+        <QueryError
+          what="the intel pipeline"
+          error={leadsErrorObj}
+          onRetry={refetchLeads}
+          isRetrying={refetchingLeads}
+        />
       ) : leads.length === 0 ? (
         <EmptyState
           icon={Radar}
@@ -509,7 +520,9 @@ function IntelCardSkeleton() {
 }
 
 function IntelligenceTab() {
-  const { data: leadsRes, isLoading } = useIntelLeads({ limit: 200, enriched: true });
+  const {
+    data: leadsRes, isLoading, isError, error, refetch, isRefetching,
+  } = useIntelLeads({ limit: 200, enriched: true });
   const [selected, setSelected] = useState<IntelLead | null>(null);
   const leads = leadsRes?.data ?? [];
 
@@ -522,6 +535,10 @@ function IntelligenceTab() {
         </div>
       </div>
     );
+  }
+
+  if (isError) {
+    return <QueryError what="enriched leads" error={error} onRetry={refetch} isRetrying={isRefetching} />;
   }
 
   if (leads.length === 0) {
@@ -669,7 +686,9 @@ function MailboxCardSkeleton() {
 }
 
 function DeliverabilityTab() {
-  const { data: mailboxes = [], isLoading } = useMailboxes();
+  const {
+    data: mailboxes = [], isLoading, isError, error, refetch, isRefetching,
+  } = useMailboxes();
 
   // Two complementary views under one tab: the sending-health panel (caps,
   // DNS auth, suppressions, recent failures) answers "is our sending healthy
@@ -690,6 +709,8 @@ function DeliverabilityTab() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {Array.from({ length: 4 }).map((_, i) => <MailboxCardSkeleton key={i} />)}
           </div>
+        ) : isError ? (
+          <QueryError what="mailbox health" error={error} onRetry={refetch} isRetrying={isRefetching} />
         ) : mailboxes.length === 0 ? (
           <EmptyState
             icon={Inbox}
@@ -798,7 +819,9 @@ function payloadSummary(payload: Record<string, unknown> | null): string | null 
 }
 
 function ActivityTab() {
-  const { data: events = [], isLoading } = useEvents({ limit: 200 });
+  const {
+    data: events = [], isLoading, isError, error, refetch, isRefetching,
+  } = useEvents({ limit: 200 });
 
   if (isLoading) {
     return (
@@ -818,6 +841,10 @@ function ActivityTab() {
         </div>
       </div>
     );
+  }
+
+  if (isError) {
+    return <QueryError what="the activity log" error={error} onRetry={refetch} isRetrying={isRefetching} />;
   }
 
   if (events.length === 0) {

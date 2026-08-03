@@ -7,9 +7,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useSequences } from "@/hooks/useOutreach";
 import { CreateSequenceDialog } from "./CreateSequenceDialog";
 import { cn } from "@/lib/utils";
+import { QueryError } from "@/components/QueryError";
 
 export function SequencesList({ onOpen }: { onOpen: (id: string) => void }) {
-  const { data: sequences = [], isLoading } = useSequences();
+  const {
+    data: sequences = [], isLoading, isError, error, refetch, isRefetching,
+  } = useSequences();
 
   return (
     <div className="space-y-4">
@@ -20,6 +23,8 @@ export function SequencesList({ onOpen }: { onOpen: (id: string) => void }) {
 
       {isLoading ? (
         <SequencesListSkeleton />
+      ) : isError ? (
+        <QueryError what="your sequences" error={error} onRetry={refetch} isRetrying={isRefetching} />
       ) : sequences.length === 0 ? (
         <div className="rounded-xl border border-border bg-card px-6 py-12 text-center">
           <Send className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
