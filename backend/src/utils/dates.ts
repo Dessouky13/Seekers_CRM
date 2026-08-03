@@ -60,3 +60,34 @@ export function cairoMonth(now: Date = new Date()): string {
 export function cairoDaysAgo(days: number, now: Date = new Date()): string {
   return cairoDate(new Date(now.getTime() - days * 86_400_000));
 }
+
+// ── Calendar arithmetic on a date that is already known ─────────────────
+//
+// These take a `YYYY-MM-DD` string and return one. They are NOT "what is today"
+// — the caller has already decided the anchor day (usually with cairoToday()),
+// and these only shift it. They anchor at UTC midnight and read the UTC fields
+// back, so no timezone can move the result: "2026-08-03" + 14 days is
+// "2026-08-17" wherever the server runs. That is the one case where
+// `toISOString().slice(0, 10)` is not the bug this module exists to prevent.
+
+/** Invoice due dates: `addCalendarDays("2026-08-03", 14)` → `"2026-08-17"`. */
+export function addCalendarDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The next month of a retainer: same day-of-month, CLAMPED to the end of a
+ * short month. 31 Jan + 1 month is 28/29 Feb — naive arithmetic produces
+ * 2 or 3 March and silently skips February's invoice.
+ */
+export function addCalendarMonths(isoDate: string, months: number): string {
+  const d   = new Date(`${isoDate}T00:00:00Z`);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);                                  // avoid overflow while shifting
+  d.setUTCMonth(d.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, lastDay));
+  return d.toISOString().slice(0, 10);
+}

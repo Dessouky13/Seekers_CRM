@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { cairoDate, cairoToday, cairoMonth, cairoDaysAgo, CAIRO_TZ } from "./dates";
+import {
+  cairoDate, cairoToday, cairoMonth, cairoDaysAgo, CAIRO_TZ,
+  addCalendarDays, addCalendarMonths,
+} from "./dates";
 
 // These tests are the regression guard for the "three date conventions" bug.
 //
@@ -72,5 +75,57 @@ describe("cairoDaysAgo", () => {
 
   it("crosses a month boundary backwards", () => {
     expect(cairoDaysAgo(14, new Date("2026-08-04T09:00:00Z"))).toBe("2026-07-21");
+  });
+});
+
+// ── Calendar arithmetic (invoice due dates, retainer months) ──────────
+// These shift a day the caller has ALREADY decided, so unlike cairoToday()
+// they must be immune to the host timezone rather than driven by Cairo's.
+
+describe("addCalendarDays", () => {
+  it("adds the standard 14-day invoice term", () => {
+    expect(addCalendarDays("2026-08-03", 14)).toBe("2026-08-17");
+  });
+
+  it("crosses month and year boundaries", () => {
+    expect(addCalendarDays("2026-08-25", 14)).toBe("2026-09-08");
+    expect(addCalendarDays("2026-12-28", 14)).toBe("2027-01-11");
+  });
+
+  it("handles leap day and zero/negative shifts", () => {
+    expect(addCalendarDays("2028-02-28", 1)).toBe("2028-02-29");   // 2028 is a leap year
+    expect(addCalendarDays("2026-02-28", 1)).toBe("2026-03-01");
+    expect(addCalendarDays("2026-08-03", 0)).toBe("2026-08-03");
+    expect(addCalendarDays("2026-08-03", -3)).toBe("2026-07-31");
+  });
+
+  it("does not shift when a DST change falls inside the range", () => {
+    // Cairo moves its clocks in late April; a day-count must still be a day count.
+    expect(addCalendarDays("2026-04-20", 14)).toBe("2026-05-04");
+  });
+});
+
+describe("addCalendarMonths", () => {
+  it("keeps the same day of month for a retainer series", () => {
+    expect(addCalendarMonths("2026-08-03", 1)).toBe("2026-09-03");
+    expect(addCalendarMonths("2026-08-03", 6)).toBe("2027-02-03");
+  });
+
+  it("clamps to the end of a short month instead of overflowing", () => {
+    // The bug this guards: naive arithmetic turns 31 Jan + 1 month into
+    // 3 March, which skips February's invoice entirely.
+    expect(addCalendarMonths("2026-01-31", 1)).toBe("2026-02-28");
+    expect(addCalendarMonths("2028-01-31", 1)).toBe("2028-02-29");   // leap year
+    expect(addCalendarMonths("2026-03-31", 1)).toBe("2026-04-30");
+    expect(addCalendarMonths("2026-05-31", 1)).toBe("2026-06-30");
+  });
+
+  it("does not compound the clamp — each step is measured from the anchor", () => {
+    expect(addCalendarMonths("2026-01-31", 2)).toBe("2026-03-31");
+  });
+
+  it("crosses the year boundary", () => {
+    expect(addCalendarMonths("2026-11-15", 3)).toBe("2027-02-15");
+    expect(addCalendarMonths("2026-12-31", 1)).toBe("2027-01-31");
   });
 });
