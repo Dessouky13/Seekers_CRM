@@ -127,9 +127,15 @@ serve({ fetch: app.fetch, port }, () => {
 const staleLeadSweepMinutes = Number(process.env.STALE_LEAD_SWEEP_MINUTES ?? 10);
 setInterval(async () => {
   try {
-    const count = await runStaleLeadNotificationSweep(Number(process.env.LEAD_NO_RESPONSE_HOURS ?? 48));
-    if (count > 0) {
-      console.log(`[notifications] stale lead sweep processed ${count} leads`);
+    const result = await runStaleLeadNotificationSweep(Number(process.env.LEAD_NO_RESPONSE_HOURS ?? 48));
+    // Only log when the sweep actually wrote something. It runs 144 times a day
+    // and the steady state is "nothing changed" — a line per run is noise that
+    // hides the runs that mattered.
+    if (result.created > 0 || result.refreshed > 0) {
+      console.log(
+        `[notifications] stale-lead digest: ${result.created} created, ${result.refreshed} refreshed ` +
+        `(${result.staleLeads} stale leads across ${result.users} people)`,
+      );
     }
   } catch (error) {
     console.error("[notifications] stale lead sweep failed", error);
