@@ -302,12 +302,14 @@ async function isSuppressedAddress(address: string): Promise<boolean> {
 //
 // Guards against overlapping ticks. The spread delay below can make a single
 // tick take far longer than "a release of 5 at the max 240s gap" (~16 min) —
-// that figure is only true for the recovery-stage cap. releaseCount
-// deliberately dumps the ENTIRE remaining daily allowance into the final
-// hourly slot (see its own doc comment), so at the active-stage ceiling of 40
-// a batch can run ~2.6 hours (39 gaps x up to 240s), and a stored
-// mailboxes.daily_cap override is uncapped by effectiveDailyCap — so with an
-// override in place, the worst case is unbounded. Any of these easily outlive
+// that figure is only true for the recovery-stage cap. releaseCountNow spreads
+// the day's allowance pro-rata across the send window, but its budget reaches
+// the full cap on the last tick inside that window, so one release can still be
+// the whole remaining allowance. The worst case is bounded, and bounded by
+// exactly one number: effectiveDailyCap clamps the stage default AND any stored
+// mailboxes.daily_cap override to ACTIVE_CEILING (40), so the longest possible
+// batch is ~2.6 hours (39 gaps x up to 240s). A network-writable override
+// cannot make it longer than that — but 2.6 hours easily outlives
 // the 5-minute sweep interval — if the next setInterval firing started a
 // second tick while the first was still mid-flight, both could select the
 // SAME due enrollment before either had updated its nextSendAt/status,
@@ -397,11 +399,14 @@ async function runOneTick(limit: number): Promise<{ processed: number; sent: num
 
   for (let i = 0; i < due.length; i++) {
     // Re-check the Cairo window on EVERY iteration, not just once at the top
-    // of the tick. releaseCount can hand back the whole day's remaining
-    // allowance in a single release (it dumps everything into the final
-    // slot), and the spread delay below can stretch that release across
-    // hours of real time — long enough to run well past 17:00 Cairo if this
-    // were only checked once. The moment the window closes, stop and leave
+    // of the tick. releaseCountNow's budget reaches the full cap on the last
+    // tick inside the window, so it can still hand back the whole day's
+    // remaining allowance in one release (up to ACTIVE_CEILING, which is what
+    // effectiveDailyCap clamps every cap and override to), and the spread delay
+    // below can stretch that release across hours of real time — long enough to
+    // run well past 17:00 Cairo if this were only checked once. Being clamped is
+    // not the same as being short: 40 sends at up to 240s apart is ~2.6 hours.
+    // The moment the window closes, stop and leave
     // everything still in `due` exactly as it is: their nextSendAt is still
     // legitimately in the past, so tomorrow's tick will pick them up again —
     // this is throttling, not failure, and must not touch their rows.
