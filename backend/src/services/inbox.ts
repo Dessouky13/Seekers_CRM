@@ -4,6 +4,7 @@ import { db } from "../db/client";
 import { events, leads, profiles } from "../db/schema";
 import { handleReply } from "./outreach";
 import { createNotification } from "./notifications";
+import { suppress } from "./suppressions";
 
 // ── Inbox poller ─────────────────────────────────────────────────────────
 // We SEND over SMTP and APPEND to Sent over IMAP (services/email.ts), but
@@ -230,16 +231,20 @@ async function recordBounce(args: {
 
   // A HARD bounce means the address will never accept mail. Continuing to send
   // to it is the fastest way to burn the sending domain's reputation — and we
-  // have already emailed dead addresses 3-4 times each. Retire the address so
-  // the sequencer's existing "Lead has no email address" guard stops it, and
-  // stash the original in `signals` so nothing is actually lost.
+  // have already emailed dead addresses 3-4 times each. Mark the lead's email
+  // as bounced so the sequencer's existing disqualification guard stops it,
+  // and add a permanent suppression so it is never sent to again — instead of
+  // the old `email: null`, which destroyed the address, made the lead
+  // uncorrectable, and recorded nothing about why it had vanished. The
+  // original is still stashed in `signals` so nothing is lost either way.
   const hard = isHardBounce(args.raw, args.subject);
+  const diagnostic = extractTextPreview(args.raw);
   let suppressed = false;
   if (hard && leadId && recipient) {
     await db
       .update(leads)
       .set({
-        email: null,
+        emailStatus: "bounced",
         signals: sql`COALESCE(${leads.signals}, '{}'::jsonb) || ${JSON.stringify({
           bounced_email: recipient,
           bounced_at:    new Date().toISOString(),
@@ -247,8 +252,14 @@ async function recordBounce(args: {
         updatedAt: new Date(),
       })
       .where(eq(leads.id, leadId));
+    await suppress({
+      address: recipient,
+      reason:  "hard_bounce",
+      source:  "inbox_poller",
+      notes:   diagnostic.slice(0, 400) || undefined,
+    });
     suppressed = true;
-    console.warn(`[inbox] hard bounce — retired address ${recipient} (lead ${leadId})`);
+    console.warn(`[inbox] hard bounce — suppressed address ${recipient} (lead ${leadId})`);
   }
 
   await db.insert(events).values({
@@ -261,7 +272,7 @@ async function recordBounce(args: {
       recipient:  recipient ?? null,
       hard,
       suppressed,
-      preview:    extractTextPreview(args.raw).slice(0, PREVIEW_CHARS) || null,
+      preview:    diagnostic.slice(0, PREVIEW_CHARS) || null,
     },
   });
 }

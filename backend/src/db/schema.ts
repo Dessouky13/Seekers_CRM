@@ -232,7 +232,7 @@ export const leads = pgTable("leads", {
   notes:        text("notes"),
   // ── v2 Lead Intelligence (populated by n8n via /intel/* ingest) ──
   domain:          text("domain"),                        // company website domain, for matching
-  emailStatus:     text("email_status"),                  // verified | risky | invalid | unknown
+  emailStatus:     text("email_status"),                  // verified | risky | invalid | unknown | bounced
   icpScore:        integer("icp_score"),                  // 0-100, computed server-side
   techFingerprint: jsonb("tech_fingerprint"),             // chat widget, booking, CMS, pagespeed…
   reviewStats:     jsonb("review_stats"),                 // rating, count, source
