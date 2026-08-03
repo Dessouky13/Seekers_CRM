@@ -1,12 +1,15 @@
 // Single lead card used by the kanban board: name/company, category + source
 // chips, deal value and the "no activity in 2+ days" staleness flag.
 
+import { memo } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { CATEGORY_CHIP, SOURCE_CHIP, fmt } from "./constants";
 import type { ApiLead } from "@/lib/types";
 
-export function LeadCard({ lead, onSelect }: { lead: ApiLead; onSelect: (id: string) => void }) {
+// memo: the board renders up to 25 of these per column, and a keystroke in the
+// page-level search box used to re-render every one of them.
+export const LeadCard = memo(function LeadCard({ lead, onSelect }: { lead: ApiLead; onSelect: (id: string) => void }) {
   const isStale  = lead.lastActivity
     ? (Date.now() - new Date(lead.lastActivity).getTime()) > 2 * 24 * 60 * 60 * 1000
     : true;
@@ -50,7 +53,7 @@ export function LeadCard({ lead, onSelect }: { lead: ApiLead; onSelect: (id: str
       </div>
     </div>
   );
-}
+});
 
 // Placeholder with the same box, padding and three-band layout as a real card.
 export function LeadCardSkeleton() {

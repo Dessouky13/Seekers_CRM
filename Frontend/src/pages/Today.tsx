@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCurrentUser } from "@/hooks/useAuth";
+import { GettingStarted } from "@/components/GettingStarted";
 import {
   useWorklist, usePipelineHealth,
   type WorklistAction, type ActionType,
@@ -289,6 +290,8 @@ export default function Today() {
           </Button>
         )}
       </div>
+
+      <GettingStarted />
 
       {isAdmin && <SupplyStrip />}
 

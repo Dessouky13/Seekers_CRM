@@ -19,6 +19,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <main
             className={[
               "flex-1 overflow-auto",
+              // Suppresses the browser's own rubber-band at the top so the
+              // pull-to-refresh indicator is the only thing that moves. Done in
+              // CSS rather than preventDefault(), which required a non-passive
+              // touch listener and made every scroll in the app run JS first.
+              "overscroll-y-contain",
+              // Hint the compositor: scrolling this container should not force
+              // layout work on the rest of the tree.
+              "[transform:translateZ(0)] [-webkit-overflow-scrolling:touch]",
               // Tighter gutters on a phone: 24px each side of a 375px screen
               // spends 13% of the width on nothing.
               "p-4 sm:p-6",

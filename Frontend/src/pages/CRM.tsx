@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ScrapeLeadsDialog } from "@/components/modules/ScrapeLeadsDialog";
 import { PipelineStats, PipelineStatsSkeleton } from "@/components/modules/crm/PipelineStats";
@@ -168,12 +168,15 @@ export default function CRM() {
     );
   };
 
-  const handleMove = (itemId: string, _from: string, to: string) => {
+  // useCallback so LeadKanban's memo() actually holds. A new function identity
+  // on every render would make the memo compare unequal and re-render all the
+  // cards anyway — which is what made typing in the search box cost ~2s.
+  const handleMove = useCallback((itemId: string, _from: string, to: string) => {
     updateLead.mutate(
       { id: itemId, stage: to },
       { onError: () => toast.error("Failed to move lead") },
     );
-  };
+  }, [updateLead]);
 
   const handleAdd = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
