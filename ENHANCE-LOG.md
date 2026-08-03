@@ -48,3 +48,77 @@ Root cause was duplicated guards that drifted — I fixed one script first and m
 | Production build | succeeds, 485 kB / 148 kB gzip initial |
 
 **Assumptions logged:** commits on this branch are authored `Dessouky13 <abd.dessouky@gmail.com>` with no co-author trailer, per the brief. No live-DB migration has been applied.
+
+---
+
+## Phase 1 (partial) — Mobile blockers · 2026-08-04
+
+Pushed Phase 0, deployed the API (migration `0014`), then tested **production**
+in Chrome at a true 375×812 viewport with touch, Fast 4G and 4× CPU throttle.
+
+### Deployment
+
+`main` deployed. Migration `0014` applied cleanly and the planner now genuinely
+uses the index at 600 rows — `Index Scan using idx_leads_assignee`, which my
+24-row local copy could not demonstrate. Data verified intact after: 600 leads,
+6 clients, 164 transactions, 3 profiles.
+
+One self-inflicted bug on the way: the `deploy.sh` I had scp'd from Windows
+carried **CRLF endings**, so the server's shell rejected `set -o pipefail`. It
+failed loudly rather than half-running. Stripped on the server.
+
+### Live baseline
+
+All 13 routes on production: render, no horizontal scroll, no error boundary, no
+false-empty states, **zero console errors, zero failed requests**. Every API
+module responds in ~0.24s.
+
+### Fixed and verified on live
+
+| Bug | Evidence before | Verified after |
+|---|---|---|
+| **Stage was a label, not a control.** Kanban DnD is HTML5-only and dead on touch, so moving a lead took 6 taps through an edit form | `hasSelectElement: 0` in the lead sheet | Real `<select>`, 7 stages, **130×44px**, labelled, wired. Mutation proved locally: `new_lead → proposal_sent` + activity logged |
+| **Topbar search never searched records.** Filtered a hardcoded page list while its `aria-label` promised leads/clients/tasks; also stale, and registered a *second* Ctrl+K racing the palette's | Typed "clinic" against 600 leads → **"No results"** | Now a 240×44 button opening the real palette; "clinic" returns **Angie Clinic, Lushelle Clinic** |
+| **Palette results discarded the record id** | `onSelect → go("/crm")` | Search "Angie" → select → `/crm?lead=41449b27-…`, sheet opens on Angie Clinic |
+| **Unlabelled icon buttons** — a screen reader said "button" for *delete lead* | 5 unlabelled, one 12×12 | "Edit this lead"/"Delete this lead" at 44×44; **0 unlabelled remaining** |
+
+### Fixed and verified on the production bundle
+
+| Bug | Evidence before | Verified after |
+|---|---|---|
+| **Marking a task done cost 6 taps** | no control on the card | One-tap checkbox, **44×44**, `aria-pressed`, named per task. Toggled and **persisted**: status `done`, `completed_at` set |
+| **Tab strips clipped their last tabs** | inner Finance strip: **507px of tabs in 343px**, `overflow: hidden` | Now `overflow-x: auto`; scrolled 164px and **"Setup Fees" activates** |
+| **Five dialogs overrode the `dvh` cap** with `vh`, putting Save below the fold on mobile Safari | 5 files | all converted; zero `vh` height caps remain |
+| **Bulk-action bar unreachable** — rendered inside `main`'s `translateZ(0)` containing block, so `fixed` tracked the scroller; `bottom-6` sat under the 56px tab bar; ~420px row in 375px | — | portals to `document.body`, sits above the tab bar + safe-area inset, wraps below `md` |
+
+Desktop (1440×900) re-verified across all 13 routes: no horizontal scroll, no
+clipped tab strips, mobile bar correctly hidden, zero console errors.
+
+### Four findings I disproved rather than "fixed"
+
+Worth recording, because acting on any of them would have been churn:
+
+1. **"Search unmounts the input and dismisses the keyboard."** Sampled every
+   100ms through the debounce window: **0/20 frames showed a skeleton**, the
+   input never lost focus or identity. Does not reproduce.
+2. **"Lead cards aren't tappable."** My synthetic click hit the draggable
+   wrapper; the `onClick` is on a child. A correct hit-test opens the sheet.
+3. **"93% of Team's controls are under 40px."** A crude selector; a screenshot
+   showed the page is fine. Real figure: 11 of 19, and it is button *height*
+   (`h-7` = 28px), not count.
+4. **"Tabs don't switch."** Radix activates on `mousedown`, which my synthetic
+   events omitted. Keyboard and `mousedown` both work.
+
+The recurring lesson: synthetic DOM events are not taps. Three of the four
+false alarms came from dispatching the wrong event on the wrong node.
+
+### Not app bugs
+
+Vercel's **Security Checkpoint** ("Code 21") began blocking the automated
+browser after rapid scripted navigation, which invalidated one desktop run.
+Re-verified against the identical production bundle served locally.
+
+### Verification
+
+Backend **147 tests** / 0 TS errors · Frontend **57 tests** / 0 TS errors · lint
+at its prior baseline · production build succeeds.
