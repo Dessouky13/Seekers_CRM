@@ -522,7 +522,16 @@ export const outreachSends = pgTable("outreach_sends", {
   subject:      text("subject"),
   body:         text("body"),
   sentAt:       timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
-  status:       text("status", { enum: ["sent", "failed"] }).notNull().default("sent"),
+  // "pending" is an INTENT row, written immediately before the message is handed
+  // to SMTP and resolved to sent/failed once the outcome is known. It exists so a
+  // crash, pool timeout or restart in that window is *detectable*: on the next
+  // tick a leftover pending row for the same (enrollment, step) means the message
+  // was probably already delivered, and re-sending it would be the duplicate this
+  // system has a documented history of. See processSingleSend.
+  //
+  // No migration is needed to add it: this is a plain `text` column with no CHECK
+  // constraint in Postgres — the enum is a TypeScript-level narrowing only.
+  status:       text("status", { enum: ["sent", "failed", "pending"] }).notNull().default("sent"),
   messageId:    text("message_id"),
   error:        text("error"),
   // transient | permanent | spam_reject | infra | suppressed — lets the UI say

@@ -359,11 +359,17 @@ async function runOneTick(limit: number): Promise<{ processed: number; sent: num
   // Authoritative count: derived from the sends table for the current Cairo
   // day, never from a stored counter — a counter drifts across restarts and
   // double-sends, and this number decides whether we breach the cap.
+  //
+  // `pending` counts too. A pending row is a message already handed to SMTP
+  // whose outcome was never recorded, so it has almost certainly been delivered
+  // and it must occupy a slot. Counting only "sent" meant every crash between
+  // delivery and the database quietly raised the day's real send volume above
+  // the cap — and the cap is the only volume control this system has.
   const [{ sentTodayCount }] = await db
     .select({ sentTodayCount: sql<number>`COUNT(*)::int` })
     .from(outreachSends)
     .where(and(
-      eq(outreachSends.status, "sent"),
+      inArray(outreachSends.status, ["sent", "pending"]),
       sql`(${outreachSends.sentAt} AT TIME ZONE 'Africa/Cairo')::date
           = (NOW() AT TIME ZONE 'Africa/Cairo')::date`,
     ));
@@ -493,21 +499,33 @@ async function handleSendFailure(
   // drops EVERY mailbox to recovery the moment a second one exists, which is
   // wrong the instant this is no longer a single-mailbox system.
   mailboxAddress: string,
+  // The intent row written just before SMTP. Resolving THAT row rather than
+  // inserting a second one is what keeps "one row per attempt" true — otherwise
+  // a failed attempt leaves a `pending` row behind, which the crash-recovery
+  // check in processSingleSend would later read as "probably delivered" and
+  // silently skip the retry.
+  sendId?: string,
 ): Promise<"retry" | "failed"> {
   const msg = String(err?.message ?? err);
   const kind = classifyFailure(msg);
 
   // Always log the failure to the sends table so it's visible in analytics.
-  await db.insert(outreachSends).values({
-    enrollmentId: enrollment.id,
-    stepId:       step.id,
-    channel:      "email",
-    subject:      null,
-    body:         null,
-    status:       "failed",
-    error:        msg.slice(0, 1000),
-    failureKind:  kind,
-  });
+  if (sendId) {
+    await db.update(outreachSends)
+      .set({ status: "failed", error: msg.slice(0, 1000), failureKind: kind })
+      .where(eq(outreachSends.id, sendId));
+  } else {
+    await db.insert(outreachSends).values({
+      enrollmentId: enrollment.id,
+      stepId:       step.id,
+      channel:      "email",
+      subject:      null,
+      body:         null,
+      status:       "failed",
+      error:        msg.slice(0, 1000),
+      failureKind:  kind,
+    });
+  }
 
   // The provider is refusing us. Continuing at this rate makes it worse, so
   // drop THIS mailbox to the recovery cap and suppress the address that drew it.
@@ -766,6 +784,71 @@ async function processSingleSend(
   // safety downgrade silently updated 0 rows.
   const fromAddress = configuredSenderAddress();
 
+  // ── Crash recovery, checked immediately before we would send ─────────────
+  //
+  // A `pending` row for this exact (enrollment, step) means a previous tick got
+  // as far as handing this message to SMTP and then died — crash, pool timeout,
+  // deploy restart — before it could record the outcome. We cannot know whether
+  // the mail went out, and the two wrong answers are not equally wrong:
+  //
+  //   re-send   → the lead gets the same email twice. This system has already
+  //               done that at scale: 142 leads received up to 4 messages.
+  //   advance   → at worst one touch in a sequence is skipped, silently.
+  //
+  // So we resolve in favour of "probably delivered": advance the step, and leave
+  // the reason on the row so the gap is visible in the sends log rather than
+  // being invented silently.
+  const [orphan] = await db
+    .select({ id: outreachSends.id })
+    .from(outreachSends)
+    .where(and(
+      eq(outreachSends.enrollmentId, enrollment.id),
+      eq(outreachSends.stepId, step.id),
+      eq(outreachSends.status, "pending"),
+    ))
+    .limit(1);
+
+  if (orphan) {
+    console.warn(
+      `[outreach] enrollment ${enrollment.id} step ${enrollment.currentStep + 1}: found an unresolved ` +
+      `send intent — the previous tick died after handing the message to SMTP. ` +
+      `Advancing WITHOUT re-sending.`,
+    );
+    await db.transaction(async (tx) => {
+      await tx.update(outreachSends)
+        .set({
+          status: "sent",
+          error:  "Recovered: process died before the outcome was recorded. Delivery not confirmed.",
+        })
+        .where(eq(outreachSends.id, orphan.id));
+      await advanceStep(enrollment, steps, tx);
+    });
+    return "sent";
+  }
+
+  // ── Intent, written BEFORE the message leaves ────────────────────────────
+  //
+  // Deliberately its own committed statement rather than part of the
+  // transaction below: the whole point is that it survives a crash that happens
+  // after this line. A row inside an open transaction would roll back with it,
+  // which is precisely the state we are trying to make impossible.
+  //
+  // It also makes the daily cap honest. sentTodayCount counts intent rows as
+  // well as confirmed sends, so a message handed to SMTP always occupies a slot
+  // even if the outcome is never recorded — under-counting there was the second
+  // half of this bug, and the cap is the only thing limiting volume.
+  const [intent] = await db
+    .insert(outreachSends)
+    .values({
+      enrollmentId: enrollment.id,
+      stepId:       step.id,
+      channel:      "email",
+      subject,
+      body,
+      status:       "pending",
+    })
+    .returning({ id: outreachSends.id });
+
   // Send. A failure here is caught and routed to the retry/permanent-fail
   // handler — it must NOT bubble up and permanently kill the enrollment, and
   // it must NOT advance the step (so we don't skip a touch on a transient error).
@@ -774,16 +857,71 @@ async function processSingleSend(
   try {
     result = await sendOutreachEmail({ to: lead.email, subject, body, fromName, signatureHtml, signatureText });
   } catch (sendErr) {
-    return await handleSendFailure(enrollment, step, sendErr, fromAddress);
+    return await handleSendFailure(enrollment, step, sendErr, fromAddress, intent.id);
   }
 
   // nodemailer can also report a soft rejection without throwing (recipient in
   // the `rejected` array). Treat that the same as a thrown send failure.
   if (result.rejected && result.rejected.length > 0 && (!result.accepted || result.accepted.length === 0)) {
-    return await handleSendFailure(enrollment, step, new Error(`Recipient rejected: ${result.rejected.join(", ")}`), fromAddress);
+    return await handleSendFailure(
+      enrollment, step, new Error(`Recipient rejected: ${result.rejected.join(", ")}`), fromAddress, intent.id,
+    );
   }
 
-  // Fire webhook for outreach.sent
+  // ── One transaction for every post-send write ────────────────────────────
+  //
+  // These four writes were four separate statements. A crash between the send
+  // record and advanceStep left the email DELIVERED but the enrollment
+  // untouched, so the next tick sent the identical message again — and the same
+  // gap under-counted the daily cap, which is the only volume control there is.
+  // They now commit together or not at all.
+  try {
+    await db.transaction(async (tx) => {
+      await tx.update(outreachSends)
+        .set({ status: "sent", messageId: result.messageId, sentAt: new Date() })
+        .where(eq(outreachSends.id, intent.id));
+
+      // Lead activity timeline
+      await tx.insert(leadActivities).values({
+        leadId:      lead.id,
+        type:        "email",
+        description: `[Sequence] ${subject}\n\n${body}`.slice(0, 4000),
+      });
+
+      await tx.update(leads)
+        .set({ lastActivity: cairoToday(), updatedAt: new Date() })
+        .where(eq(leads.id, lead.id));
+
+      await advanceStep(enrollment, steps, tx);
+    });
+  } catch (writeErr) {
+    // The message is already delivered; only the record of it failed. This must
+    // NOT reach the caller's backstop, which treats a thrown error as "something
+    // went wrong before the send" and marks the enrollment permanently failed —
+    // killing an enrolment whose email the lead has in their inbox.
+    //
+    // Park it instead. The intent row survives (it was committed before SMTP),
+    // so whenever this enrolment next runs, the recovery branch at the top of
+    // this function advances it without sending anything again.
+    const msg = String((writeErr as Error)?.message ?? writeErr);
+    console.error(
+      `[outreach] enrollment ${enrollment.id}: message WAS SENT but recording it failed (${msg}). ` +
+      `Pausing — resuming will continue the sequence without re-sending.`,
+    );
+    await db.update(outreachEnrollments)
+      .set({
+        status:       "paused",
+        pausedReason: `Sent, but recording it failed: ${msg}. Resume to continue — the message will not be sent again.`.slice(0, 500),
+        nextSendAt:   null,
+      })
+      .where(eq(outreachEnrollments.id, enrollment.id));
+    return "retry";
+  }
+
+  // Webhook AFTER the commit, and outside it: it is an outbound HTTP call, so
+  // holding the transaction open for it would put a network round trip inside a
+  // database lock. Firing it before the commit would also announce a send that
+  // could still roll back.
   fireEventAsync("outreach.sent", {
     lead_id:      lead.id,
     lead_name:    lead.name,
@@ -795,40 +933,23 @@ async function processSingleSend(
     sent_at:      new Date().toISOString(),
   });
 
-  // Persist send
-  await db.insert(outreachSends).values({
-    enrollmentId: enrollment.id,
-    stepId:       step.id,
-    channel:      "email",
-    subject,
-    body,
-    status:       "sent",
-    messageId:    result.messageId,
-  });
-
-  // Log to lead activity timeline
-  await db.insert(leadActivities).values({
-    leadId:      lead.id,
-    type:        "email",
-    description: `[Sequence] ${subject}\n\n${body}`.slice(0, 4000),
-  });
-
-  // Update lead.lastActivity
-  await db.update(leads)
-    .set({ lastActivity: cairoToday(), updatedAt: new Date() })
-    .where(eq(leads.id, lead.id));
-
-  await advanceStep(enrollment, steps);
   return "sent";
 }
+
+/**
+ * Anything that can run a query: the pool, or an open transaction. Lets
+ * advanceStep be part of a caller's transaction instead of committing on its own.
+ */
+type Executor = typeof db | Parameters<Parameters<typeof db["transaction"]>[0]>[0];
 
 async function advanceStep(
   enrollment: typeof outreachEnrollments.$inferSelect,
   steps: (typeof outreachSteps.$inferSelect)[],
+  tx: Executor = db,
 ) {
   const nextStepIdx = enrollment.currentStep + 1;
   if (nextStepIdx >= steps.length) {
-    await db.update(outreachEnrollments)
+    await tx.update(outreachEnrollments)
       .set({
         status:               "completed",
         currentStep:          nextStepIdx,
@@ -857,7 +978,7 @@ async function advanceStep(
     // with identical day offsets.
     const gapDays = Math.max(1, (nextStep.dayOffset ?? 0) - (prevStep?.dayOffset ?? 0));
 
-    await db.update(outreachEnrollments)
+    await tx.update(outreachEnrollments)
       .set({
         currentStep:          nextStepIdx,
         lastStepCompletedAt:  new Date(),
