@@ -29,8 +29,19 @@ crm.get("/leads", authMiddleware, async (c) => {
   if (q.category)    conditions.push(eq(leads.category, q.category));
 
   // "Unreachable" means every channel is dead: no usable number, and no email
-  // or an email we must never use. Such a lead cannot be enrolled at all, and
-  // today it is invisible — indistinguishable from one simply waiting its turn.
+  // or an email we must never use. Such a lead cannot be enrolled at all
+  // (services/outreach.ts:assertReachable refuses it), and without this filter
+  // it is invisible — indistinguishable from one simply waiting its turn.
+  //
+  // MUST stay in step with services/channels.ts, which is the authority on
+  // channel eligibility; this is only its SQL projection so the filter can run
+  // in the database. In particular the phone half is `phone_e164 IS NULL`
+  // ALONE. It used to also treat `whatsapp_status = 'no'` as killing the phone
+  // channel, which contradicted channels.ts:callState — a landline, or a mobile
+  // a human has confirmed has no WhatsApp, is still perfectly callable, and this
+  // is an agency that makes calls. The two files disagreed about the very same
+  // lead: one called it unreachable while the other happily routed it to a call.
+  // channels.ts is authoritative, so the whatsapp_status term is gone.
   //
   // email_status is nullable (most leads are "unknown", i.e. NULL). A bare
   // `email_status = 'bounced'` is NULL — not FALSE — for those rows, which
@@ -40,9 +51,10 @@ crm.get("/leads", authMiddleware, async (c) => {
   // coalesce() forces a real boolean so the predicate and its negation are
   // exact complements for every row.
   const UNREACHABLE = sql`(
-    (${leads.phoneE164} IS NULL OR ${leads.whatsappStatus} = 'no')
+    ${leads.phoneE164} IS NULL
     AND (
-      ${leads.email} IS NULL
+      -- blank/whitespace-only counts as no address, same as channels.ts:emailState
+      coalesce(trim(${leads.email}), '') = ''
       OR coalesce(${leads.emailStatus}, '') = 'bounced'
       OR EXISTS (SELECT 1 FROM suppressions s WHERE s.address = lower(trim(${leads.email})))
     )

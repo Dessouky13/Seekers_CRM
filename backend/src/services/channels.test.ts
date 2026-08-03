@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { resolveChannels, preferredChannel, isUnreachable, type ChannelInput } from "./channels";
+import {
+  resolveChannels, preferredChannel, isUnreachable,
+  unreachableReason, manualTouchRouting, type ChannelInput,
+} from "./channels";
 
 const lead = (over: Partial<ChannelInput> = {}): ChannelInput => ({
   email:           "a@b.test",
@@ -99,5 +102,90 @@ describe("isUnreachable", () => {
 
   it("returns null from preferredChannel when unreachable", () => {
     expect(preferredChannel(lead({ email: null, phoneE164: null, phoneType: null }))).toBeNull();
+  });
+});
+
+describe("unreachableReason", () => {
+  it("is null for a lead that can be reached", () => {
+    expect(unreachableReason(lead())).toBeNull();
+  });
+
+  it("names every dead channel so the refusal is actionable", () => {
+    // enrollLead surfaces this string straight to whoever tried to enrol, who
+    // still has the lead on screen and can fix the field it names.
+    const reason = unreachableReason(lead({
+      email: null, phoneE164: null, phoneType: null,
+    }));
+    expect(reason).toMatch(/no usable number/i);
+    expect(reason).toMatch(/no email address/i);
+  });
+
+  it("does not repeat the shared phone reason twice", () => {
+    // whatsapp and call both fail on "no usable number"; saying it once reads
+    // like a sentence, saying it twice reads like a bug.
+    const reason = unreachableReason(lead({ email: null, phoneE164: null, phoneType: null }))!;
+    expect(reason.match(/no usable number/gi)).toHaveLength(1);
+  });
+
+  it("explains a suppressed address rather than just calling it missing", () => {
+    expect(unreachableReason(lead({
+      emailSuppressed: true, phoneE164: null, phoneType: null,
+    }))).toMatch(/suppressed/i);
+  });
+});
+
+describe("manualTouchRouting — WhatsApp must never target a landline", () => {
+  const phone = {
+    phoneE164:      "+201234567890",
+    phoneType:      "mobile" as const,
+    whatsappStatus: "unknown" as const,
+  };
+
+  it("keeps a whatsapp step on WhatsApp for a mobile", () => {
+    expect(manualTouchRouting({ stepChannel: "whatsapp", ...phone }))
+      .toEqual({ channel: "whatsapp", note: null });
+  });
+
+  it("downgrades a whatsapp step on a landline to a call, with the reason", () => {
+    // THE guarantee. Before this, worklist.ts raised a whatsapp card regardless
+    // of phone_type, and the Today queue rendered a wa.me link for a Cairo
+    // landline that can never receive one.
+    const out = manualTouchRouting({
+      stepChannel: "whatsapp", ...phone, phoneType: "landline",
+    });
+    expect(out.channel).toBe("call");
+    expect(out.note).toMatch(/landline/i);
+  });
+
+  it("downgrades to a call when a human already found no WhatsApp there", () => {
+    const out = manualTouchRouting({
+      stepChannel: "whatsapp", ...phone, whatsappStatus: "no",
+    });
+    expect(out.channel).toBe("call");
+    expect(out.note).toMatch(/not on WhatsApp/i);
+  });
+
+  it("trusts a human confirmation over the dialling-plan classification", () => {
+    // This is what rescues +1 numbers, which cannot be classified at all.
+    expect(manualTouchRouting({
+      stepChannel: "whatsapp", phoneE164: "+12122851110",
+      phoneType: "unknown", whatsappStatus: "yes",
+    }).channel).toBe("whatsapp");
+  });
+
+  it("still raises a card when there is no number at all", () => {
+    // Never drop it: the enrollment is parked in awaiting_action and this card is
+    // the only thing that can clear it. The human records wrong_number and the
+    // sequence re-routes.
+    const out = manualTouchRouting({
+      stepChannel: "whatsapp", phoneE164: null, phoneType: null, whatsappStatus: null,
+    });
+    expect(out.channel).toBe("call");
+    expect(out.note).toMatch(/record the outcome/i);
+  });
+
+  it("leaves a call step alone", () => {
+    expect(manualTouchRouting({ stepChannel: "call", ...phone, phoneType: "landline" }))
+      .toEqual({ channel: "call", note: null });
   });
 });
