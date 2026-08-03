@@ -30,7 +30,21 @@ export interface TeamMemberWork extends ApiUser {
 export function useTeamWorkSummary() {
   return useQuery<TeamMemberWork[]>({
     queryKey: ["team-work-summary"],
-    queryFn:  () => apiFetch("/users/work-summary"),
+    queryFn:  async () => {
+      const rows = await apiFetch<TeamMemberWork[]>("/users/work-summary");
+      // The frontend deploys from git while the API is restarted separately, so
+      // for a minute or two after release the browser can be running new code
+      // against the previous API. `session` would be undefined there and every
+      // read of it would throw. Fill it in rather than crash the page.
+      return rows.map((r) => ({
+        ...r,
+        session: r.session ?? {
+          last_login_at: null, last_seen_at: null,
+          logins_total: 0, logins_30d: 0, logins_7d: 0,
+          failed_24h: 0, is_online: false, never_logged_in: false,
+        },
+      }));
+    },
     staleTime: 30_000,
     // Presence goes stale on its own, so the dot has to be refreshed on a timer
     // or "online now" quietly becomes "was online when you opened the page".

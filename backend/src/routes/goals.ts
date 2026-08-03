@@ -9,6 +9,23 @@ import type { AppEnv } from "../types";
 
 const goalsRouter = new Hono<AppEnv>();
 
+/** Capped at 100 so an overshoot renders as a full bar rather than 137%. */
+function progressPct(current: unknown, target: unknown): number {
+  const c = Number(current ?? 0);
+  const t = Number(target);
+  if (!Number.isFinite(t) || t <= 0) return 0;
+  return Math.min(Math.round((c / t) * 100), 100);
+}
+
+/** Shared shape so create, update and list all return the same fields. */
+function withProgress<T extends { current: unknown; target: unknown }>(goal: T, ownerName?: string | null) {
+  return {
+    ...goal,
+    ...(ownerName !== undefined ? { owner_name: ownerName } : {}),
+    progress_pct: progressPct(goal.current, goal.target),
+  };
+}
+
 // GET /goals
 goalsRouter.get("/", authMiddleware, async (c) => {
   const rows = await db
@@ -17,17 +34,7 @@ goalsRouter.get("/", authMiddleware, async (c) => {
     .leftJoin(profiles, eq(goals.ownerId, profiles.id))
     .orderBy(goals.createdAt);
 
-  return c.json(
-    rows.map(({ goal, ownerName }) => {
-      const current = Number(goal.current ?? 0);
-      const target  = Number(goal.target);
-      return {
-        ...goal,
-        owner_name:   ownerName,
-        progress_pct: target > 0 ? Math.min(Math.round((current / target) * 100), 100) : 0,
-      };
-    }),
-  );
+  return c.json(rows.map(({ goal, ownerName }) => withProgress(goal, ownerName)));
 });
 
 // POST /goals
@@ -48,27 +55,37 @@ goalsRouter.post("/", authMiddleware, async (c) => {
     })
     .returning();
 
-  return c.json(goal, 201);
+  return c.json(withProgress(goal), 201);
 });
 
 // PATCH /goals/:id
 goalsRouter.patch("/:id", authMiddleware, async (c) => {
   const body = updateGoalSchema.parse(await c.req.json());
 
+  // Built field by field rather than spreading `body`.
+  //
+  // The previous version used `body.current ? String(body.current) : undefined`,
+  // and 0 is falsy — so setting a goal's progress back to zero was silently
+  // dropped and the old value stayed. It also spread the snake_case `owner_id`
+  // straight into the column set, which only went unnoticed because of the
+  // `as any`.
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (body.title       !== undefined) patch.title       = body.title;
+  if (body.description !== undefined) patch.description = body.description;
+  if (body.unit        !== undefined) patch.unit        = body.unit;
+  if (body.period      !== undefined) patch.period      = body.period;
+  if (body.current     !== undefined) patch.current     = String(body.current);
+  if (body.target      !== undefined) patch.target      = String(body.target);
+  if (body.owner_id    !== undefined) patch.ownerId     = body.owner_id;
+
   const [updated] = await db
     .update(goals)
-    .set({
-      ...body,
-      current:  body.current ? String(body.current) : undefined,
-      target:   body.target  ? String(body.target)  : undefined,
-      ownerId:  body.owner_id ?? undefined,
-      updatedAt: new Date(),
-    } as any)
+    .set(patch)
     .where(eq(goals.id, c.req.param("id")))
     .returning();
 
   if (!updated) return c.json({ error: "Goal not found" }, 404);
-  return c.json(updated);
+  return c.json(withProgress(updated));
 });
 
 // DELETE /goals/:id — admin only
