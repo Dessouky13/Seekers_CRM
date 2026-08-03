@@ -109,16 +109,24 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
                     <UserCheck className="h-3.5 w-3.5" />
                   </Button>
                 )}
+                {/* These were unlabelled icon-only buttons, so a screen reader
+                    announced "button" for the control that DELETES a lead. The
+                    min-h/min-w give a 44px touch box without changing the visual
+                    size — they were 40x28, roughly half the recommended target. */}
                 <Button
                   variant="ghost" size="sm"
-                  className="h-7 text-primary hover:text-primary"
+                  className="h-7 min-h-11 min-w-11 text-primary hover:text-primary"
+                  aria-label={editMode ? "Stop editing this lead" : "Edit this lead"}
+                  title={editMode ? "Stop editing" : "Edit lead"}
                   onClick={() => setEditMode(!editMode)}
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   variant="ghost" size="sm"
-                  className="h-7 text-destructive hover:text-destructive"
+                  className="h-7 min-h-11 min-w-11 text-destructive hover:text-destructive"
+                  aria-label="Delete this lead"
+                  title="Delete lead"
                   onClick={() => setDeleteConfirm(true)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -148,11 +156,42 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
                 </div>}
                 <div className="flex justify-between"><span className="text-muted-foreground">Deal Value</span><span className="font-semibold text-primary">{fmt(lead.dealValue)}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Assigned</span><span>{lead.assignee_name ?? "—"}</span></div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Stage</span>
-                  <span className="capitalize px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
-                    {lead.stage.replace(/_/g, " ")}
-                  </span>
+                {/* Stage is a CONTROL, not a label.
+                    It used to render as plain text, and the kanban board it
+                    mirrors uses HTML5 drag-and-drop, which touch browsers do not
+                    synthesise from a finger. So on a phone the only way to move a
+                    lead through the pipeline was: tap the pencil, scroll the edit
+                    form, change a <select>, then Save — six taps for the single
+                    most common action in a CRM. This commits on change, using the
+                    optimistic mutation that already existed. */}
+                <div className="flex items-center justify-between gap-3">
+                  <label htmlFor="lead-stage-quick" className="text-muted-foreground">Stage</label>
+                  <select
+                    id="lead-stage-quick"
+                    value={lead.stage}
+                    disabled={updateLead.isPending}
+                    onChange={(e) => {
+                      const stage = e.target.value;
+                      if (stage === lead.stage) return;
+                      updateLead.mutate(
+                        { id: lead.id, stage },
+                        {
+                          onSuccess: () =>
+                            toast.success(
+                              `Moved to ${LEAD_STAGES.find((s) => s.key === stage)?.label ?? stage}`,
+                            ),
+                          onError: (err) => toast.error(err.message),
+                        },
+                      );
+                    }}
+                    className="min-h-11 rounded-full bg-primary/10 px-3 text-xs font-medium capitalize text-primary
+                               disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2
+                               focus-visible:ring-ring"
+                  >
+                    {LEAD_STAGES.map((s) => (
+                      <option key={s.key} value={s.key}>{s.label}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

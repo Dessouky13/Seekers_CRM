@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { OPEN_COMMAND_PALETTE } from "@/lib/command-palette";
 import {
   Search, Users, Building2, CheckSquare, StickyNote, LayoutDashboard,
   DollarSign, Send, Target, Lock, Settings, Sparkles, Sun, Radar,
@@ -48,7 +49,12 @@ export function CommandPalette() {
   const debounced         = useDebouncedValue(query, 200);
   const navigate          = useNavigate();
 
-  // Cmd+K / Ctrl+K toggle
+  // Cmd+K / Ctrl+K toggle, plus an event any component can fire.
+  //
+  // The keyboard shortcut was the ONLY way in, which meant the one search that
+  // actually queries leads, clients and tasks was unreachable on a phone. An
+  // event keeps this component the owner of its own state — no context, no
+  // prop-drilling through AppLayout — so a button anywhere can open it.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
@@ -56,8 +62,13 @@ export function CommandPalette() {
         setOpen((o) => !o);
       }
     };
+    const onOpenRequest = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener(OPEN_COMMAND_PALETTE, onOpenRequest);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(OPEN_COMMAND_PALETTE, onOpenRequest);
+    };
   }, []);
 
   // Search leads (server-side, supports the existing ?search= param)
@@ -127,7 +138,7 @@ export function CommandPalette() {
               <CommandItem
                 key={l.id}
                 value={`lead-${l.id}-${l.name}-${l.company}`}
-                onSelect={() => go(`/crm`)}
+                onSelect={() => go(`/crm?lead=${l.id}`)}
               >
                 <Users className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
                 <div className="flex flex-col">
@@ -165,7 +176,7 @@ export function CommandPalette() {
               <CommandItem
                 key={t.id}
                 value={`task-${t.id}-${t.title}`}
-                onSelect={() => go(`/tasks`)}
+                onSelect={() => go(`/tasks?task=${t.id}`)}
               >
                 <CheckSquare className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
                 <div className="flex flex-col">

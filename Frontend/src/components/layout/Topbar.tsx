@@ -9,15 +9,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useCurrentUser, useLogout } from "@/hooks/useAuth";
 import { useNotifications, useMarkAllRead, useDeleteNotification, useMarkRead } from "@/hooks/useNotifications";
+import { openCommandPalette } from "@/lib/command-palette";
 import { cn } from "@/lib/utils";
 
 export function Topbar() {
   const user    = useCurrentUser();
   const logout  = useLogout();
   const navigate = useNavigate();
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const searchRef = useRef<HTMLDivElement>(null);
 
   const { data: notifications = [] } = useNotifications();
   const markAllRead = useMarkAllRead();
@@ -32,83 +30,41 @@ export function Topbar() {
 
   const initials = user?.avatar ?? user?.name?.slice(0, 2).toUpperCase() ?? "?";
 
-  const NAV_ITEMS = [
-    { label: "Dashboard", path: "/", keywords: "home overview kpis" },
-    { label: "Finance", path: "/finance", keywords: "transactions income expense money" },
-    { label: "Tasks", path: "/tasks", keywords: "kanban todo projects work" },
-    { label: "Clients", path: "/clients", keywords: "customers contacts company" },
-    { label: "CRM", path: "/crm", keywords: "leads pipeline sales deals" },
-    { label: "Goals", path: "/goals", keywords: "okr targets progress" },
-    { label: "Notes", path: "/notes", keywords: "team notes board" },
-    { label: "Vault", path: "/vault", keywords: "passwords secrets secure" },
-    { label: "Settings", path: "/settings", keywords: "team users profile account" },
-  ];
-
-  const filtered = searchQuery.trim()
-    ? NAV_ITEMS.filter((item) =>
-        `${item.label} ${item.keywords}`.toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-    : NAV_ITEMS;
-
-  // Close search on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
-        setSearchOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  // Keyboard shortcut: Ctrl+K to open search
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
-        e.preventDefault();
-        setSearchOpen(true);
-      }
-      if (e.key === "Escape") setSearchOpen(false);
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, []);
-
+  // NAV_ITEMS, its filter and a second Ctrl+K handler used to live here. All
+  // three are gone with the fake search box: the hardcoded page list never
+  // searched records, and its Ctrl+K listener competed with the command
+  // palette's own — two handlers racing for the same shortcut, one of which
+  // opened a dropdown that could not find a lead.
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-background/80 backdrop-blur-sm px-4">
       <SidebarTrigger className="text-muted-foreground hover:text-foreground">
         <Menu className="h-4 w-4" />
       </SidebarTrigger>
 
-      <div className="relative flex-1 max-w-md" ref={searchRef}>
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-        <Input
-          placeholder="Search pages… (Ctrl+K)"
-          aria-label="Search pages, leads, clients and tasks"
-          value={searchQuery}
-          onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(true); }}
-          onFocus={() => setSearchOpen(true)}
-          className="pl-9 h-8 bg-muted/50 border-transparent text-sm placeholder:text-muted-foreground/60 focus:bg-muted focus:border-border"
-        />
-        {searchOpen && (
-          <div className="absolute top-full left-0 right-0 mt-1 rounded-lg border border-border bg-popover shadow-lg z-50 overflow-hidden">
-            {filtered.length === 0 ? (
-              <div className="px-4 py-3 text-sm text-muted-foreground">No results</div>
-            ) : (
-              filtered.map((item) => (
-                <button
-                  key={item.path}
-                  onClick={() => { navigate(item.path); setSearchOpen(false); setSearchQuery(""); }}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors text-left"
-                >
-                  <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  {item.label}
-                </button>
-              ))
-            )}
-          </div>
-        )}
-      </div>
+      {/* Opens the command palette rather than being its own search.
+          This box used to filter a hardcoded NAV_ITEMS list and nothing else,
+          while claiming via aria-label to "Search pages, leads, clients and
+          tasks". Typing "clinic" against 600 real leads returned "No results".
+          It was also stale — "Dashboard" pointed at "/", which is Today, and
+          Today, Outreach, Outbound and Team were missing entirely.
+          The palette already searches all three record types server-side; it
+          just had no way in except Cmd+K, which a phone does not have. */}
+      <button
+        type="button"
+        onClick={openCommandPalette}
+        aria-label="Search leads, clients and tasks"
+        className="group relative flex min-h-11 flex-1 max-w-md items-center gap-2 rounded-md border
+                   border-transparent bg-muted/50 px-3 text-left text-sm text-muted-foreground/70
+                   transition-colors hover:bg-muted hover:border-border
+                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Search className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate">Search leads, clients, tasks…</span>
+        <kbd className="ml-auto hidden shrink-0 rounded border border-border px-1.5 py-0.5
+                        font-mono text-[10px] text-muted-foreground/70 sm:inline-block">
+          ⌘K
+        </kbd>
+      </button>
 
       <div className="ml-auto flex items-center gap-2">
         {/* Notifications bell */}
