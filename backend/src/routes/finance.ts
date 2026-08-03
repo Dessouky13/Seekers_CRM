@@ -104,8 +104,17 @@ finance.get("/transactions", authMiddleware, async (c) => {
 
   const conditions = [];
   if (q.type && q.type !== "all")     conditions.push(eq(transactions.type, q.type as "income" | "expense"));
-  // Category filter matches ANY of the transaction's categories, not just the primary.
-  if (q.category)                     conditions.push(sql`${q.category} = ANY(${transactions.categories})`);
+  // Matches ANY of the transaction's categories, and falls back to the legacy
+  // scalar column. Checking only the array meant filtering by category returned
+  // zero rows for every transaction created before the multi-select shipped —
+  // the filter looked functional and silently emptied the table.
+  if (q.category) {
+    conditions.push(sql`(
+      ${q.category} = ANY(${transactions.categories})
+      OR (cardinality(${transactions.categories}) = 0 AND ${transactions.category} = ${q.category})
+      OR (${transactions.categories} IS NULL       AND ${transactions.category} = ${q.category})
+    )`);
+  }
   if (q.tool_id)                      conditions.push(eq(transactions.toolId, q.tool_id));
   if (q.held_by)                      conditions.push(eq(transactions.heldBy, q.held_by));
   if (q.unsettled === "true")         conditions.push(and(sql`${transactions.heldBy} IS NOT NULL`, isNull(transactions.settledAt))!);
@@ -355,11 +364,19 @@ finance.get("/summary", authMiddleware, async (c) => {
 
 // GET /finance/categories — every distinct category across all of categories[]
 finance.get("/categories", authMiddleware, async (c) => {
+  // Falls back to the legacy scalar `category`. Reading only the array column
+  // meant every row created before the multi-select was invisible here, so on a
+  // database of older transactions the category filter listed nothing and was
+  // effectively dead.
   const rows = await db.execute(sql`
-    SELECT DISTINCT unnest(categories) AS category
-    FROM transactions
-    WHERE cardinality(categories) > 0
-    ORDER BY category
+    SELECT DISTINCT cat AS category
+      FROM transactions t
+      CROSS JOIN LATERAL unnest(
+        CASE WHEN cardinality(t.categories) > 0 THEN t.categories
+             WHEN t.category IS NOT NULL       THEN ARRAY[t.category]
+             ELSE ARRAY[]::text[] END
+      ) AS cat
+     ORDER BY category
   `);
   return c.json((rows.rows as { category: string }[]).map((r) => r.category));
 });

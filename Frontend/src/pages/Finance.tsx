@@ -470,79 +470,92 @@ export default function Finance() {
 
         {/* ── ALL TRANSACTIONS ── */}
         <TabsContent value="all">
-          <div className="flex gap-3 flex-wrap items-center mb-4">
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-36 h-8 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="income">Income</SelectItem>
-                <SelectItem value="expense">Expense</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={catFilter} onValueChange={setCatFilter}>
-              <SelectTrigger className="w-48 h-8 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-            
-            {/* Date Mode Toggle */}
-            <div className="flex gap-1 rounded-md border border-border p-0.5 bg-muted/30">
-              <button
-                onClick={() => setDateMode("range")}
-                className={cn(
-                  "px-2.5 py-1 text-xs font-medium rounded transition-colors",
-                  dateMode === "range" 
-                    ? "bg-primary text-primary-foreground shadow-sm" 
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                Range
-              </button>
-              <button
-                onClick={() => setDateMode("cumulative")}
-                className={cn(
-                  "px-2.5 py-1 text-xs font-medium rounded transition-colors",
-                  dateMode === "cumulative" 
-                    ? "bg-primary text-primary-foreground shadow-sm" 
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                Cumulative
-              </button>
+          {/* The category <SelectContent> used to contain the date-mode toggle
+              and a set of date inputs instead of its options, so the category
+              filter rendered zero options and was a dead control, while the
+              Range/Cumulative toggle was trapped inside a dropdown popover and
+              could not be reached. A second, duplicate pair of date inputs
+              below it was the only one visible, and ignored the mode. */}
+          <div className="mb-4 flex flex-wrap items-end gap-3">
+            <div>
+              <Label htmlFor="fin-type" className="text-[11px] text-muted-foreground">Type</Label>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger id="fin-type" aria-label="Filter by type" className="mt-1 h-8 w-36 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All types</SelectItem>
+                  <SelectItem value="income">Income</SelectItem>
+                  <SelectItem value="expense">Expense</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            {dateMode === "range" ? (
-              <>
-                <Input 
-                  type="date" 
-                  value={fromDate} 
-                  onChange={(e) => setFromDate(e.target.value)} 
-                  className="h-8 text-sm w-36" 
-                  placeholder="From date"
+            <div>
+              <Label htmlFor="fin-cat" className="text-[11px] text-muted-foreground">Category</Label>
+              <Select value={catFilter} onValueChange={setCatFilter}>
+                <SelectTrigger id="fin-cat" aria-label="Filter by category" className="mt-1 h-8 w-48 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All categories</SelectItem>
+                  {categories.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Date mode — a two-option choice, so radio semantics rather than
+                two buttons whose selected state a screen reader cannot infer. */}
+            <div>
+              <span className="text-[11px] text-muted-foreground">Dates</span>
+              <div role="radiogroup" aria-label="Date filter mode" className="mt-1 flex gap-1 rounded-md border border-border bg-muted/30 p-0.5">
+                {([["range", "Range"], ["cumulative", "Cumulative"]] as const).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="radio"
+                    aria-checked={dateMode === mode}
+                    onClick={() => setDateMode(mode)}
+                    className={cn(
+                      "rounded px-2.5 py-1 text-xs font-medium transition-colors",
+                      dateMode === mode
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {dateMode === "range" && (
+              <div>
+                <Label htmlFor="fin-from" className="text-[11px] text-muted-foreground">From</Label>
+                <Input
+                  id="fin-from" type="date" value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="mt-1 h-8 w-36 text-sm"
                 />
-                <Input 
-                  type="date" 
-                  value={toDate} 
-                  onChange={(e) => setToDate(e.target.value)} 
-                  className="h-8 text-sm w-36" 
-                  placeholder="To date"
-                />
-              </>
-            ) : (
-              <Input 
-                type="date" 
-                value={toDate} 
-                onChange={(e) => setToDate(e.target.value)} 
-                className="h-8 text-sm w-36" 
-                placeholder="Until date"
-              />
+              </div>
             )}
-            
-              </SelectContent>
-            </Select>
-            <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-8 text-sm w-36" />
-            <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-8 text-sm w-36" />
+            <div>
+              <Label htmlFor="fin-to" className="text-[11px] text-muted-foreground">
+                {dateMode === "range" ? "To" : "Up to"}
+              </Label>
+              <Input
+                id="fin-to" type="date" value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="mt-1 h-8 w-36 text-sm"
+              />
+            </div>
+
             {(fromDate || toDate || catFilter !== "all" || typeFilter !== "all") && (
-              <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setFromDate(""); setToDate(""); setCatFilter("all"); setTypeFilter("all"); }}>
-                Clear
+              <Button
+                variant="ghost" size="sm" className="h-8 text-xs"
+                onClick={() => { setFromDate(""); setToDate(""); setCatFilter("all"); setTypeFilter("all"); }}
+              >
+                Clear filters
               </Button>
             )}
           </div>

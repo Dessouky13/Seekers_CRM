@@ -36,13 +36,24 @@
     --secondary-foreground: 244 48% 10%;
 
     --muted: 244 40% 16%;
-    --muted-foreground: 250 15% 55%;
+    /* 55% measured 4.24:1 against --muted (inactive tab labels, table captions)
+       and failed WCAG AA. 62% gives 5.54:1 on the worst surface in the app
+       while keeping the hierarchy against --foreground. */
+    --muted-foreground: 250 15% 62%;
 
     /* Accent — Soft Violet Accent */
     --accent: 255 91% 76%;
     --accent-foreground: 244 48% 10%;
 
-    --destructive: 0 72% 55%;
+    /* Two tokens, because one value cannot serve both uses on a dark theme:
+       as red text it must be light enough to read against the background, and
+       as a filled button it must be dark enough for white text. At the old
+       single value of 55% both directions failed (3.89:1 as text, 4.37:1 for
+       white on it).
+         --destructive       66%  → 5.39:1 as text on --muted     (90 uses)
+         --destructive-solid 45%  → 5.83:1 for white on it        (13 uses) */
+    --destructive: 0 72% 66%;
+    --destructive-solid: 0 72% 45%;
     --destructive-foreground: 0 0% 100%;
 
     --border: 244 35% 18%;

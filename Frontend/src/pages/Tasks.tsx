@@ -229,13 +229,21 @@ export default function Tasks() {
           {/* View toggle */}
           <div className="flex border border-border rounded-md">
             <button
+              type="button"
               onClick={() => setView("kanban")}
+              aria-label="Kanban view"
+              aria-pressed={view === "kanban"}
+              title="Kanban view"
               className={cn("p-1.5", view === "kanban" ? "bg-muted text-foreground" : "text-muted-foreground")}
             >
               <Columns3 className="h-4 w-4" />
             </button>
             <button
+              type="button"
               onClick={() => setView("list")}
+              aria-label="List view"
+              aria-pressed={view === "list"}
+              title="List view"
               className={cn("p-1.5", view === "list" ? "bg-muted text-foreground" : "text-muted-foreground")}
             >
               <List className="h-4 w-4" />
@@ -531,7 +539,7 @@ export default function Tasks() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive-solid text-destructive-foreground hover:bg-destructive-solid/90"
               onClick={() => {
                 if (deleteConfirmId) {
                   deleteTask.mutate(deleteConfirmId, {

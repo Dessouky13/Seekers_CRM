@@ -67,6 +67,8 @@ export function MotivationalBanner() {
         </div>
         <button
           onClick={() => setDismissed(true)}
+          type="button"
+          aria-label="Dismiss message"
           className="absolute top-2 right-2 p-1 text-muted-foreground hover:text-foreground transition-colors"
         >
           <X className="h-3 w-3" />

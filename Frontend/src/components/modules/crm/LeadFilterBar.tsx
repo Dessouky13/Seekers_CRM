@@ -30,6 +30,7 @@ export function LeadFilterBar({
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
         <Input
           placeholder="Search by name or company…"
+          aria-label="Search leads by name or company"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           className="pl-8 h-8 text-sm border-border/60 bg-transparent focus-visible:bg-background"
@@ -42,6 +43,7 @@ export function LeadFilterBar({
           <select
             value={stageFilter}
             onChange={(e) => onStageFilterChange(e.target.value)}
+            aria-label="Filter by stage"
             className={cn(
               "h-8 appearance-none rounded-md pl-7 pr-7 text-xs cursor-pointer transition-colors",
               "border bg-transparent",
@@ -59,6 +61,7 @@ export function LeadFilterBar({
           <select
             value={catFilter}
             onChange={(e) => onCatFilterChange(e.target.value)}
+            aria-label="Filter by category"
             className={cn(
               "h-8 appearance-none rounded-md pl-7 pr-7 text-xs cursor-pointer transition-colors",
               "border bg-transparent",

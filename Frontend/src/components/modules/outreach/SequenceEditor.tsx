@@ -384,7 +384,7 @@ export function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onB
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive-solid text-destructive-foreground hover:bg-destructive-solid/90"
               onClick={confirmDeleteStep}
             >
               {deleteStep.isPending ? "Deleting…" : "Delete step"}
@@ -407,7 +407,7 @@ export function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onB
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive-solid text-destructive-foreground hover:bg-destructive-solid/90"
               onClick={() => deleteSeq.mutate(sequenceId, {
                 onSuccess: () => { toast.success("Sequence deleted"); onBack(); },
                 onError:   (err) => toast.error(err.message),

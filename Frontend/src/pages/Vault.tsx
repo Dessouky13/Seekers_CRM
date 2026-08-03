@@ -211,6 +211,7 @@ export default function Vault() {
             value={newCategory}
             onChange={(e) => setNewCategory(e.target.value)}
             placeholder="Add vault category"
+            aria-label="New vault category name"
             className="h-8 w-56"
           />
           <Button
@@ -329,7 +330,7 @@ export default function Vault() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive-solid text-destructive-foreground hover:bg-destructive-solid/90"
               onClick={() => deleteId && remove.mutate(deleteId)}
             >
               {remove.isPending ? "Deleting…" : "Delete"}

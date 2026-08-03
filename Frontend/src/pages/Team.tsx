@@ -299,6 +299,7 @@ function MemberCard({ m, isSelf, onOpen, onToggleRole, onDelete, busy }: {
               </Button>
               <Button
                 size="sm" variant="ghost" className="h-7 w-7 p-0 max-sm:h-10 max-sm:w-10 text-destructive"
+                aria-label={`Remove ${m.name}`} title={`Remove ${m.name}`}
                 onClick={onDelete} disabled={busy}
               >
                 <Trash2 className="h-3.5 w-3.5" />

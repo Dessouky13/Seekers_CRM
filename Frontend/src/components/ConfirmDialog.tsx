@@ -73,7 +73,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
             <AlertDialogAction
               onClick={() => settle(true)}
               className={cn(opts?.destructive &&
-                "bg-destructive text-destructive-foreground hover:bg-destructive/90")}
+                "bg-destructive-solid text-destructive-foreground hover:bg-destructive-solid/90")}
             >
               {opts?.confirmLabel ?? "Confirm"}
             </AlertDialogAction>

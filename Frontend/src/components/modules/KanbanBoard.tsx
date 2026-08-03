@@ -38,7 +38,7 @@ export function KanbanBoard<T>({ columns, renderCard, onMoveItem, getItemId }: K
           }}
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{col.label}</h3>
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{col.label}</h2>
             <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-medium text-muted-foreground tabular-nums">
               {col.items.length}
             </span>

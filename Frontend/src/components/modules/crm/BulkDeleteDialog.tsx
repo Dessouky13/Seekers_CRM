@@ -53,7 +53,7 @@ export function BulkDeleteDialog({
           <AlertDialogAction
             onClick={(e) => { e.preventDefault(); onConfirm(); }}
             disabled={deleteCount === null || deleteCount === 0 || isPending}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            className="bg-destructive-solid text-destructive-foreground hover:bg-destructive-solid/90"
           >
             {isPending
               ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Deleting…</>

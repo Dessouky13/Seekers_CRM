@@ -334,7 +334,7 @@ function ClientDetailSheet({ clientId, onClose }: { clientId: string | null; onC
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            className="bg-destructive-solid text-destructive-foreground hover:bg-destructive-solid/90"
             onClick={handleDelete}
           >
             {deleteClient.isPending ? "Deleting…" : "Delete"}
@@ -482,6 +482,7 @@ export default function Clients() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search clients…"
+            aria-label="Search clients"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9 h-8 text-sm"

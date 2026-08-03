@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { Plus, Target, Pencil, Trash2, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -193,37 +193,36 @@ export default function Goals() {
                     <span className="text-sm font-semibold text-primary">{g.progress_pct}%</span>
                   </div>
                   <Progress value={g.progress_pct} className="h-2" />
-                  <div className="flex items-center gap-2 mt-2">
+                  <div className="mt-2 flex items-center gap-2">
                     <button
+                      type="button"
                       onClick={() => updateGoal.mutate({ id: g.id, current: Math.max(0, current - 1) }, {
-                        onSuccess: () => toast.success("Progress updated"),
                         onError: (err) => toast.error(err.message),
                       })}
                       disabled={current <= 0}
-                      className="h-7 w-7 rounded-md border border-border bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40 transition-colors"
+                      aria-label={`Decrease progress on ${g.title}`}
+                      title="Decrease by 1"
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-border bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40 sm:h-7 sm:w-7"
                     >
                       <Minus className="h-3 w-3" />
                     </button>
-                    <Input
-                      type="number"
+                    <GoalProgressInput
+                      goalId={g.id}
+                      title={g.title}
                       value={current}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        if (!isNaN(val) && val >= 0) {
-                          updateGoal.mutate({ id: g.id, current: val }, {
-                            onError: (err) => toast.error(err.message),
-                          });
-                        }
-                      }}
-                      className="h-7 w-20 text-center text-xs"
-                      min={0}
+                      onCommit={(val) => updateGoal.mutate({ id: g.id, current: val }, {
+                        onSuccess: () => toast.success("Progress updated"),
+                        onError:   (err) => toast.error(err.message),
+                      })}
                     />
                     <button
+                      type="button"
                       onClick={() => updateGoal.mutate({ id: g.id, current: current + 1 }, {
-                        onSuccess: () => toast.success("Progress updated"),
                         onError: (err) => toast.error(err.message),
                       })}
-                      className="h-7 w-7 rounded-md border border-border bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                      aria-label={`Increase progress on ${g.title}`}
+                      title="Increase by 1"
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-border bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:h-7 sm:w-7"
                     >
                       <Plus className="h-3 w-3" />
                     </button>
@@ -238,5 +237,52 @@ export default function Goals() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Progress field that commits on blur or Enter rather than on every keystroke.
+ *
+ * The previous version fired a PATCH from onChange, so typing "150" sent three
+ * requests (1, then 15, then 150) and every intermediate value was persisted —
+ * clearing the field to retype it wrote a 0 to the database. It also raced:
+ * whichever response landed last won, which was not necessarily the last value
+ * typed.
+ */
+function GoalProgressInput({ goalId, title, value, onCommit }: {
+  goalId: string;
+  title: string;
+  value: number;
+  onCommit: (val: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+
+  // Follow the server value when it changes underneath us (the +/- buttons, or
+  // another tab), but never while the field is being edited.
+  const [focused, setFocused] = useState(false);
+  useEffect(() => { if (!focused) setDraft(String(value)); }, [value, focused]);
+
+  const commit = () => {
+    const n = Number(draft);
+    if (!Number.isFinite(n) || n < 0) { setDraft(String(value)); return; }
+    if (n !== value) onCommit(n);
+  };
+
+  return (
+    <Input
+      id={`goal-progress-${goalId}`}
+      type="number"
+      min={0}
+      value={draft}
+      aria-label={`Current progress on ${title}`}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { setFocused(false); commit(); }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { e.currentTarget.blur(); }
+        if (e.key === "Escape") { setDraft(String(value)); e.currentTarget.blur(); }
+      }}
+      className="h-9 w-20 text-center text-xs sm:h-7"
+    />
   );
 }

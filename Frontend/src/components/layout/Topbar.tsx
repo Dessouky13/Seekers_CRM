@@ -84,6 +84,7 @@ export function Topbar() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
         <Input
           placeholder="Search pages… (Ctrl+K)"
+          aria-label="Search pages, leads, clients and tasks"
           value={searchQuery}
           onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(true); }}
           onFocus={() => setSearchOpen(true)}
@@ -113,7 +114,7 @@ export function Topbar() {
         {/* Notifications bell */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative h-8 w-8 text-muted-foreground hover:text-foreground">
+            <Button variant="ghost" size="icon" aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"} className="relative h-8 w-8 text-muted-foreground hover:text-foreground">
               <Bell className="h-4 w-4" />
               {unreadCount > 0 && (
                 <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-primary" />

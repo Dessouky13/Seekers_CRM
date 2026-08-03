@@ -41,7 +41,7 @@ export function LeadKanbanSkeleton() {
           className="flex-shrink-0 w-72 rounded-xl border border-border bg-muted/30"
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{stage.label}</h3>
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{stage.label}</h2>
             <Skeleton className="h-5 w-5 rounded-full" />
           </div>
           <div className="p-2 space-y-2 min-h-[200px]">

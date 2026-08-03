@@ -32,7 +32,10 @@ export default {
           foreground: "hsl(var(--secondary-foreground))",
         },
         destructive: {
+          // Light: for `text-destructive` / `border-destructive` on dark surfaces.
           DEFAULT: "hsl(var(--destructive))",
+          // Dark: for filled `bg-destructive-solid` buttons carrying white text.
+          solid: "hsl(var(--destructive-solid))",
           foreground: "hsl(var(--destructive-foreground))",
         },
         muted: {
