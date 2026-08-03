@@ -350,3 +350,85 @@ queue and the existing WhatsApp digest are how that stays in front of someone.
 **Deep links depend on the device.** `wa.me` needs WhatsApp installed on
 whatever device the CRM is open on. The copy-to-clipboard fallback covers the
 desktop case.
+
+---
+
+## Outcome — shipped 2026-08-03
+
+37 commits. Backend tests 31 → **147**, frontend 0 → **57**. Deployed to the VPS
+(migrations 0012 + 0013) and Vercel, verified against production.
+
+### Production state after rollout
+
+| Check | Result |
+|---|---|
+| Suppressions backfilled | **29**, exactly the predicted count from `signals->>'bounced_email'` |
+| Mailbox rows | **1**, `team@seekersai.org`, cap 0 (policy decides), stage `recovery` |
+| Phones normalised | 575 examined, 572 updated — 287 mobile, 131 landline, 154 unknown, 3 refused |
+| Data integrity | 600 leads / 577 enrollments / 1042 sends — identical to the pre-deploy baseline |
+| Migration re-run | `UPDATE 0 / DELETE 0 / UPDATE 0` — genuinely idempotent |
+| Live policy | window 09:00–17:00 Cairo, gaps 90–240s, recovery 5/day, ceiling 40, a 5000 override clamps to 40 |
+| DNS | SPF pass, DKIM pass, DMARC **"could not check (ESERVFAIL)"** — not "no record", which is the point |
+
+The `+1` inference was the rollout's main risk (it accepts any 10 digits starting
+2-9). Verified benign: 136 of the 154 `unknown` are genuinely `+1`, and all 127
+"no + but now +1" rows are real NANP bracket numbers like `(801) 748-1600`. The
+three refusals were correct — `030 28633607` (German local, no country code) and
+`215-551-MILK` (a vanity number) were declined rather than guessed.
+
+### Four things the spec got wrong
+
+- **Its SQL was NULL-unsafe.** `email_status = 'bounced'` unwrapped meant the
+  reachability predicate and its negation summed to 25, not 735. Needed
+  `coalesce(email_status,'')`.
+- **Its mailbox `UPDATE` had no `WHERE`.** Would have reset every mailbox row to
+  `recovery`. Shipped in the first pass; caught later.
+- **It hardcoded `cleanWeeks: 0`** in the deliverability endpoint, so the panel
+  displayed a lower cap than the scheduler enforced during warmup.
+- **It required a subject line on WhatsApp steps**, which would have made every
+  WhatsApp sequence permanently un-sendable.
+
+### Three defects that only running the code found
+
+- **Nothing normalised phones on write.** `normalisePhone` had exactly one caller
+  in the repo — a one-off script. Every lead created after deploy would have been
+  WhatsApp- and call-ineligible, and a phone-only lead with a valid mobile was
+  flagged *unreachable*. Fixed at all seven write paths.
+- **`channels.ts` was dead code** — zero non-test callers, so "WhatsApp must never
+  target a landline" was enforced nowhere. The worklist would have rendered a
+  `wa.me` link to a Cairo landline.
+- **`SEND_WINDOW_END_HOUR = 23 // TEMP`** was left in the shipped constant by an
+  agent testing outside business hours. It would have sent cold email until 11pm —
+  the exact signal this work exists to remove. **The 17:00 boundary test caught
+  it.** That test had been logged as a deferred minor ("no test asserts the
+  literal constants"); it earned its place.
+
+### The subtlest bug, which the fix itself created
+
+Downgrading a landline's WhatsApp step to a call was correct. But
+`touch-outcome` still read the channel from the *step*, so when the human pressed
+"Sent" — the only success button left after the card correctly hid "No WhatsApp" —
+it stamped `whatsapp_status = 'yes'` on a **landline**. `channels.ts` checks `'yes'`
+before the landline check, so that permanently overrode the classification and the
+next step would have produced a `wa.me` link to that landline. Now gated on the
+routed channel, with `channels.ts` kept as the sole authority.
+
+The same principle then closed a latent case: editing a lead's number resets
+`whatsapp_status`, because a human's finding must not outlive the number it
+described.
+
+### Known limitations, deliberately not fixed
+
+- **Email remains a capped, low-ceiling channel by design.** Sending stays on the
+  existing Namecheap mailbox, so the ToS position is unchanged and
+  `seekersai.org` keeps absorbing the reputation cost of 871 prior sends. This
+  work makes email *safer*, not *effective*. WhatsApp is the engine.
+- **WhatsApp presence cannot be pre-verified** without a paid API. Landlines are
+  excluded deterministically by dialling plan; the rest is learned from outcomes.
+- `cleanWeeksFor` reads `mailboxes.updated_at`, which every health post bumps, so
+  `warmup` never ramps past 10/day. Wrong in the safe direction; a real fix needs
+  a `stage_changed_at` column.
+- A manual touch ranked 9th or lower is not rendered in Today (`live.slice(1,8)`),
+  though it is cancellable from the Enrollments screen.
+- No DB-backed test harness exists, so the wiring of `worklist.ts` and the
+  outcome handler rests on extracted pure functions plus live verification.
