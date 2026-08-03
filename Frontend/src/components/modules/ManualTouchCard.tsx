@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { renderTemplate, whatsappLink, telLink } from "@/lib/whatsapp";
 import { useRecordTouchOutcome, type TouchOutcome } from "@/hooks/useManualTouch";
 import type { WorklistAction } from "@/hooks/useWorklist";
@@ -32,6 +33,12 @@ export function ManualTouchCard({ action }: { action: WorklistAction }) {
     company: action.subtitle ?? undefined,
   });
   const phone = action.phoneE164 ?? "";
+
+  // The backend guarantees this on every manual_touch action (and has a
+  // regression test for it), so this only matters if that ever regresses.
+  // A button that looks pressable but silently does nothing is worse than one
+  // that is visibly disabled with an explanation.
+  const missingEnrollment = !action.enrollmentId;
 
   const submit = (outcome: TouchOutcome) => {
     if (!action.enrollmentId) return;
@@ -71,9 +78,25 @@ export function ManualTouchCard({ action }: { action: WorklistAction }) {
       {action.subtitle && <p className="text-sm text-muted-foreground">{action.subtitle}</p>}
       {phone && <p className="mt-0.5 font-mono text-xs text-muted-foreground">{phone}</p>}
 
-      {isWhatsapp && message && (
-        <div className="mt-4 rounded-lg border-l-2 border-emerald-500/60 bg-emerald-500/5 px-4 py-3">
-          <p className="whitespace-pre-line text-sm text-foreground/90">{message}</p>
+      {/* The backend fills `message` identically for whatsapp and call steps
+          (both read the step's body_template) — a call step's body is a
+          script to read, not a WhatsApp message, so it gets its own label
+          and the amber tone the call badge above already uses. Withholding
+          this for calls left the person about to dial with nothing to say. */}
+      {message && (
+        <div className={cn(
+          "mt-4 rounded-lg border-l-2 px-4 py-3",
+          isWhatsapp ? "border-emerald-500/60 bg-emerald-500/5" : "border-amber-500/60 bg-amber-500/5",
+        )}>
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {isWhatsapp ? "Message to send" : "Call script"}
+          </p>
+          <p
+            className="whitespace-pre-line text-sm text-foreground/90"
+            aria-label={isWhatsapp ? "WhatsApp message" : "Call script"}
+          >
+            {message}
+          </p>
         </div>
       )}
 
@@ -111,7 +134,10 @@ export function ManualTouchCard({ action }: { action: WorklistAction }) {
               key={o.key}
               size="sm"
               variant={o.key === "sent" ? "default" : "outline"}
-              disabled={record.isPending}
+              disabled={record.isPending || missingEnrollment}
+              title={missingEnrollment
+                ? "Can't record an outcome — this card is missing its enrollment id. Reload, or report this as a bug."
+                : undefined}
               onClick={() => submit(o.key)}
               className={o.destructive ? "text-destructive" : undefined}
             >
@@ -120,7 +146,9 @@ export function ManualTouchCard({ action }: { action: WorklistAction }) {
           ))}
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          The sequence stays paused until you record an outcome.
+          {missingEnrollment
+            ? "This card is missing its enrollment id, so no outcome can be recorded. Reload, or report this as a bug."
+            : "The sequence stays paused until you record an outcome."}
         </p>
       </div>
     </Card>

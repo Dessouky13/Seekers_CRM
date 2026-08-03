@@ -134,7 +134,7 @@ describe("checkSequence", () => {
     const issues = checkSequence(seq({
       steps: [
         step({ position: 0, dayOffset: 0, channel: "email" }),
-        step({ position: 1, dayOffset: 3, channel: "whatsapp", id: "b", subjectTemplate: null, bodyTemplate: "Hi" }),
+        step({ position: 1, dayOffset: 3, channel: "whatsapp", id: "b", subjectTemplate: null, bodyTemplate: "Hi there, quick question." }),
       ],
     }));
     expect(issues.some((i) => /waits for a person/i.test(i.message))).toBe(true);

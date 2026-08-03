@@ -148,14 +148,25 @@ export function StepFlow({
                   )}
                 </div>
 
-                <p className={cn(
-                  "mt-1 truncate text-xs font-medium",
-                  step.subjectTemplate ? "text-foreground" : "italic text-destructive/80",
-                )}>
-                  {step.subjectTemplate || "No subject line"}
-                </p>
+                {/* Only email has a subject line (matches CHANNEL_NEEDS_SUBJECT in
+                    sequence-readiness.ts). Rendering "No subject line" in red for
+                    whatsapp/call/linkedin/note flagged a concept those channels
+                    don't have — a permanent false alarm the readiness panel never
+                    raised, which undermined the very distinction this card exists
+                    to draw between channels. */}
+                {step.channel === "email" && (
+                  <p className={cn(
+                    "mt-1 truncate text-xs font-medium",
+                    step.subjectTemplate ? "text-foreground" : "italic text-destructive/80",
+                  )}>
+                    {step.subjectTemplate || "No subject line"}
+                  </p>
+                )}
 
-                <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
+                <p className={cn(
+                  "line-clamp-2 text-[11px] text-muted-foreground",
+                  step.channel === "email" ? "mt-0.5" : "mt-1",
+                )}>
                   {step.agentId
                     ? `Body written per lead by ${step.agentId}`
                     : step.bodyTemplate || "No body yet"}
