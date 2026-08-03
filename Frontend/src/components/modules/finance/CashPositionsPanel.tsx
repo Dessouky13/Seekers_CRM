@@ -1,4 +1,5 @@
 import { Wallet, ArrowRight, Check, Loader2 } from "lucide-react";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -20,6 +21,7 @@ export function CashPositionsPanel() {
   const { data, isLoading } = useCashPositions();
   const settleAll = useSettleAllForUser();
   const settleOne = useSettleTransaction();
+  const confirm   = useConfirm();
 
   // The individual unsettled entries behind the totals.
   const { data: unsettledRes } = useTransactions({ unsettled: true, limit: 200 });
@@ -29,10 +31,13 @@ export function CashPositionsPanel() {
 
   const positions = data?.positions ?? [];
 
-  const handleSettleAll = (userId: string, name: string, net: number) => {
-    if (!confirm(
-      `Settle everything for ${name}?\n\nThis marks all their outstanding entries as handed over / reimbursed (net ${fmt(net)}).`,
-    )) return;
+  const handleSettleAll = async (userId: string, name: string, net: number) => {
+    const ok = await confirm({
+      title: `Settle everything for ${name}?`,
+      description: `Marks all their outstanding entries as handed over or reimbursed (net ${fmt(net)}).`,
+      confirmLabel: "Settle all",
+    });
+    if (!ok) return;
     settleAll.mutate(userId, {
       onSuccess: (r) => toast.success(`Settled ${r.settled} entr${r.settled === 1 ? "y" : "ies"} for ${name}`),
       onError:   (e) => toast.error(e.message),

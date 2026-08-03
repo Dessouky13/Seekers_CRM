@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Plus, Trash2, Search, Loader2, Users, X, Mail, Phone, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,9 +39,18 @@ export function EnrolledLeadsPanel({ sequenceId, sequenceName }: Props) {
   const { data: enrollments = [], isLoading } = useEnrollments({ sequence_id: sequenceId });
   const deleteEnrollment = useDeleteEnrollment();
   const [addOpen, setAddOpen] = useState(false);
+  const confirm = useConfirm();
 
-  const handleRemove = (enrollmentId: string, leadName: string) => {
-    if (!confirm(`Remove ${leadName} from "${sequenceName}"?`)) return;
+  const handleRemove = async (enrollmentId: string, leadName: string) => {
+    const ok = await confirm({
+      title: `Remove ${leadName} from this sequence?`,
+      description:
+        `They stop receiving “${sequenceName}” immediately. Emails already sent stay ` +
+        "in the history, and the lead itself is not deleted.",
+      confirmLabel: "Remove",
+      destructive: true,
+    });
+    if (!ok) return;
     deleteEnrollment.mutate(enrollmentId, {
       onSuccess: () => toast.success("Removed from sequence"),
       onError:   (err) => toast.error(err.message),

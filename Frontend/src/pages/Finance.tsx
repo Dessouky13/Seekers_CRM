@@ -24,6 +24,7 @@ import { MonthlyAnalytics } from "@/components/modules/finance/MonthlyAnalytics"
 import { ToolsPanel } from "@/components/modules/finance/ToolsPanel";
 import { CashPositionsPanel } from "@/components/modules/finance/CashPositionsPanel";
 import { cn } from "@/lib/utils";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { exportCsv, type CsvColumn } from "@/lib/csv";
 import type { ApiTransaction } from "@/lib/types";
 
@@ -157,6 +158,7 @@ export default function Finance() {
   const [formToolId, setFormToolId] = useState<string>("");
   const [formHeldBy, setFormHeldBy] = useState<string>("");
   const [section,    setSection]    = useState("overview");
+  const confirm = useConfirm();
 
   // Which sub-tab of the overview is showing. Lifted out of the inner <Tabs>
   // so the expensive full-ledger fetch below can be tied to it.
@@ -250,9 +252,18 @@ export default function Finance() {
     }
   };
 
-  const handleDelete = (id: string) => {
-    if (!confirm("Delete this transaction?")) return;
-    deleteTx.mutate(id, {
+  const handleDelete = async (t: ApiTransaction) => {
+    const ok = await confirm({
+      title: "Delete this transaction?",
+      description:
+        `${t.type === "income" ? "Income" : "Expense"} of ${fmt(Number(t.amount))} ` +
+        `on ${t.date}${t.clientName ? ` for ${t.clientName}` : ""}.\n` +
+        "It is removed from every total and report. This cannot be undone.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    deleteTx.mutate(t.id, {
       onSuccess: () => toast.success("Transaction deleted"),
       onError:   (err) => toast.error(err.message),
     });
@@ -590,11 +601,25 @@ export default function Finance() {
                         </td>
                         <td className="px-4 py-3 text-muted-foreground text-xs max-w-[160px] truncate" title={t.notes ?? ""}>{t.notes ?? "—"}</td>
                         <td className="px-4 py-3">
+                          {/* Were bare 22px <button>s with no accessible name.
+                              Sized to a usable touch target and labelled. */}
                           <div className="flex gap-1">
-                            <button onClick={() => openDialog(t)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+                            <button
+                              type="button"
+                              onClick={() => openDialog(t)}
+                              aria-label={`Edit transaction of ${fmt(Number(t.amount))} on ${t.date}`}
+                              title="Edit"
+                              className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-7 sm:w-7"
+                            >
                               <Pencil className="h-3.5 w-3.5" />
                             </button>
-                            <button onClick={() => handleDelete(t.id)} className="p-1 text-muted-foreground hover:text-destructive transition-colors">
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(t)}
+                              aria-label={`Delete transaction of ${fmt(Number(t.amount))} on ${t.date}`}
+                              title="Delete"
+                              className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive sm:h-7 sm:w-7"
+                            >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 import {
   UserPlus, Shield, User as UserIcon, Trash2, Target, CheckSquare,
   Send, AlertTriangle, Eye, EyeOff, LogIn, Receipt, Sparkles, ShieldAlert,
@@ -91,25 +92,36 @@ export default function Team() {
 
   const deleteMember = useDeleteTeamMember();
   const updateRole   = useUpdateTeamMemberRole();
+  const confirm      = useConfirm();
 
-  const handleDelete = (m: TeamMemberWork) => {
+  const handleDelete = async (m: TeamMemberWork) => {
     if (m.id === me?.id) { toast.error("You can't remove your own account"); return; }
-    if (!confirm(
-      `Remove ${m.name}?\n\nThey lose access immediately. Their leads and tasks stay in the system but become unassigned.`,
-    )) return;
+    const ok = await confirm({
+      title: `Remove ${m.name}?`,
+      description:
+        "They lose access immediately. Their leads and tasks stay in the system " +
+        "but become unassigned.",
+      confirmLabel: "Remove",
+      destructive: true,
+    });
+    if (!ok) return;
     deleteMember.mutate(m.id, {
       onSuccess: () => toast.success(`${m.name} removed`),
       onError:   (e) => toast.error(e.message),
     });
   };
 
-  const toggleRole = (m: TeamMemberWork) => {
+  const toggleRole = async (m: TeamMemberWork) => {
     const next = m.role === "admin" ? "member" : "admin";
-    if (!confirm(
-      next === "admin"
-        ? `Make ${m.name} an ADMIN?\n\nThey will see all finance, clients, the vault and every lead & task.`
-        : `Restrict ${m.name} to MEMBER?\n\nThey will only see leads and tasks assigned to them, plus their own notes.`,
-    )) return;
+    const ok = await confirm({
+      title: next === "admin" ? `Make ${m.name} an admin?` : `Restrict ${m.name} to member?`,
+      description: next === "admin"
+        ? "They will see all finance, clients, the credentials vault, and every lead and task."
+        : "They will only see leads and tasks assigned to them, plus their own notes.",
+      confirmLabel: next === "admin" ? "Promote to admin" : "Restrict to member",
+      destructive: next !== "admin",
+    });
+    if (!ok) return;
     updateRole.mutate({ id: m.id, role: next }, {
       onSuccess: () => toast.success(`${m.name} is now ${next}`),
       onError:   (e) => toast.error(e.message),

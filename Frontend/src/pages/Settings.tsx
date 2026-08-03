@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 import {
   UserPlus, Shield, User, Trash2, KeyRound, Pencil, Save,
   Webhook, Plus, Send, Loader2, CheckCircle2, XCircle, Power,
@@ -32,6 +33,7 @@ export default function Settings() {
   const [inviteOpen,  setInviteOpen]  = useState(false);
   const [createOpen,  setCreateOpen]  = useState(false);
   const qc = useQueryClient();
+  const confirm = useConfirm();
 
   const { data: users = [], isLoading } = useQuery<ApiUser[]>({
     queryKey: ["users"],
@@ -240,8 +242,20 @@ export default function Settings() {
                   </Badge>
                   {isAdmin && u.id !== currentUser?.id && (
                     <button
-                      onClick={() => { if (confirm(`Remove ${u.name}?`)) removeUser.mutate(u.id); }}
-                      className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                      type="button"
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: `Remove ${u.name}?`,
+                          description:
+                            "They lose access immediately. Their leads and tasks stay in the " +
+                            "system but become unassigned.",
+                          confirmLabel: "Remove",
+                          destructive: true,
+                        });
+                        if (ok) removeUser.mutate(u.id);
+                      }}
+                      className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive sm:h-7 sm:w-7"
+                      aria-label={`Remove ${u.name}`}
                       title="Remove user"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -465,9 +479,10 @@ function WebhooksPanel() {
 }
 
 function WebhookRow({ hook, onEdit }: { hook: WebhookSubscription; onEdit: () => void }) {
-  const update = useUpdateWebhook();
-  const del    = useDeleteWebhook();
-  const test   = useTestWebhook();
+  const update  = useUpdateWebhook();
+  const del     = useDeleteWebhook();
+  const test    = useTestWebhook();
+  const confirm = useConfirm();
 
   const handleTest = () => {
     test.mutate(hook.id, {
@@ -516,8 +531,14 @@ function WebhookRow({ hook, onEdit }: { hook: WebhookSubscription; onEdit: () =>
           </Button>
           <Button
             size="sm" variant="ghost" className="h-7 w-7 p-0 max-sm:h-10 max-sm:w-10 text-destructive"
-            onClick={() => {
-              if (!confirm(`Delete webhook "${hook.name}"?`)) return;
+            onClick={async () => {
+              const ok = await confirm({
+                title: `Delete webhook “${hook.name}”?`,
+                description: `Nothing will be posted to ${hook.url} on ${hook.event} any more.`,
+                confirmLabel: "Delete webhook",
+                destructive: true,
+              });
+              if (!ok) return;
               del.mutate(hook.id, {
                 onSuccess: () => toast.success("Webhook deleted"),
                 onError:   (err) => toast.error(err.message),

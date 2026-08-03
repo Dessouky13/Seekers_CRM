@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Wrench, Plus, Pencil, Trash2, TrendingUp, TrendingDown, Minus, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,9 +32,16 @@ export function ToolsPanel() {
 
   const [editing, setEditing] = useState<Tool | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const confirm = useConfirm();
 
-  const handleDelete = (t: Tool) => {
-    if (!confirm(`Delete "${t.name}"?\n\nIts ${t.tx_count} transaction(s) stay intact — they just lose the tool link.`)) return;
+  const handleDelete = async (t: Tool) => {
+    const ok = await confirm({
+      title: `Delete “${t.name}”?`,
+      description: `Its ${t.tx_count} transaction${t.tx_count === 1 ? "" : "s"} stay intact — they just lose the tool link.`,
+      confirmLabel: "Delete tool",
+      destructive: true,
+    });
+    if (!ok) return;
     deleteTool.mutate(t.id, {
       onSuccess: () => toast.success(`${t.name} deleted`),
       onError:   (e) => toast.error(e.message),

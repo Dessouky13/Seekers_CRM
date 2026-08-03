@@ -7,6 +7,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { SeekersBackground } from "@/components/SeekersBackground";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { RouteFallback } from "@/components/RouteFallback";
+import { ConfirmProvider } from "@/components/ConfirmDialog";
 import { isAuthenticated } from "@/lib/auth";
 import { AdminOnly } from "./components/AdminOnly";
 
@@ -82,6 +83,7 @@ function AppRoutes() {
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
+      <ConfirmProvider>
       <Sonner />
       <SeekersBackground />
       {/* Opt in to the v7 behaviours now. Both were logging warnings on every
@@ -102,6 +104,7 @@ const App = () => (
           />
         </Routes>
       </BrowserRouter>
+      </ConfirmProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );

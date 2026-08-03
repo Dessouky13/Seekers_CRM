@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Plus, Target, Pencil, Trash2, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,9 +54,16 @@ export default function Goals() {
   const createGoal = useCreateGoal();
   const updateGoal = useUpdateGoal();
   const deleteGoal = useDeleteGoal();
+  const confirm    = useConfirm();
 
-  const handleDelete = (id: string) => {
-    if (!confirm("Delete this goal? This cannot be undone.")) return;
+  const handleDelete = async (id: string, title?: string) => {
+    const ok = await confirm({
+      title: title ? `Delete “${title}”?` : "Delete this goal?",
+      description: "The goal and its recorded progress are removed. This cannot be undone.",
+      confirmLabel: "Delete goal",
+      destructive: true,
+    });
+    if (!ok) return;
     deleteGoal.mutate(id, {
       onSuccess: () => toast.success("Goal deleted"),
       onError:   (err) => toast.error(err.message),
@@ -155,11 +163,23 @@ export default function Goals() {
                     {g.description && <p className="text-xs text-muted-foreground mt-1">{g.description}</p>}
                   </div>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => openEdit(g)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+                    <button
+                      type="button"
+                      onClick={() => openEdit(g)}
+                      aria-label={`Edit goal: ${g.title}`}
+                      title="Edit"
+                      className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-7 sm:w-7"
+                    >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     {isAdmin && (
-                      <button onClick={() => handleDelete(g.id)} className="p-1 text-muted-foreground hover:text-destructive transition-colors">
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(g.id, g.title)}
+                        aria-label={`Delete goal: ${g.title}`}
+                        title="Delete"
+                        className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive sm:h-7 sm:w-7"
+                      >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     )}
