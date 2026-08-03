@@ -1,32 +1,15 @@
 {
-  "//": [
-    "The SPA rewrite must NOT swallow /assets/. Vercel applies rewrites after",
-    "the filesystem check, so a request for a build artefact that no longer",
-    "exists — which is what a browser holding a cached index.html asks for",
-    "after a deploy — fell through to /index.html and came back 200 with",
-    "Content-Type: text/html. The browser then tried to parse HTML as a",
-    "JavaScript module, the dynamic import threw, and the route rendered",
-    "nothing.",
-    "",
-    "That was invisible while the app shipped as a single bundle, because",
-    "index.html always referenced the one current hash. Code-splitting the",
-    "routes made every page a separate hashed chunk and turned it into a real",
-    "failure mode. Excluding /assets/ lets a stale chunk 404 honestly, which is",
-    "what the reload handler in main.tsx detects and recovers from."
-  ],
   "rewrites": [
     { "source": "/((?!assets/).*)", "destination": "/index.html" }
   ],
   "headers": [
     {
-      "//": "Content-hashed filenames, so they can never go stale — cache hard.",
       "source": "/assets/(.*)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     },
     {
-      "//": "The entry point names the current chunk hashes and must always be revalidated.",
       "source": "/",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
