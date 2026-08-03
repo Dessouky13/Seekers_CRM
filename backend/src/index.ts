@@ -29,6 +29,8 @@ import { db } from "./db/client";
 import { tasks } from "./db/schema";
 import { runStaleLeadNotificationSweep } from "./services/notifications";
 import { processDueSends } from "./services/outreach";
+import { sweepIntervalMinutes } from "./services/sending-policy";
+import { configuredSenderAddress } from "./services/mailbox";
 import { pollInbox } from "./services/inbox";
 import { maybeSendDailyDigest } from "./services/digest";
 import type { AppEnv } from "./types";
@@ -174,7 +176,10 @@ if (taskRetentionDays > 0) {
 }
 
 // ── Outreach scheduler: send due sequence steps every N minutes ─────
-const outreachSweepMinutes = Number(process.env.OUTREACH_SWEEP_MINUTES ?? 5);
+// The interval comes from sending-policy, not from a local read of the env var:
+// the release budget is computed from how many sweeps remain before the Cairo
+// window shuts, so the policy and the timer must agree by construction.
+const outreachSweepMinutes = sweepIntervalMinutes();
 setInterval(async () => {
   try {
     const result = await processDueSends(50);
@@ -204,9 +209,16 @@ if (process.env.DIGEST_ENABLED === "true") {
 
 // The mailboxes table exists but ships empty, and the daily cap has nowhere to
 // live without a row. Idempotent: only ever inserts the configured sender.
+//
+// The address MUST be the canonical (lowercased) form. Seeding
+// process.env.EMAIL_FROM verbatim — production is `Team@seekersai.org` — put a
+// mixed-case row in a table whose unique index is on raw text, so the first
+// POST /mailboxes/health from n8n (which lowercases) inserted a SECOND row for
+// the same mailbox and the daily cap started coming from whichever row a
+// `LIMIT 1` happened to return.
 void (async () => {
-  const address = process.env.EMAIL_FROM;
-  if (!address) return;
+  if (!process.env.EMAIL_FROM) return;
+  const address = configuredSenderAddress();
   try {
     await db.execute(sql`
       INSERT INTO mailboxes (address, daily_cap, warmup_stage)
