@@ -30,7 +30,7 @@ export async function fetchWorklist(
   const mine  = admin ? sql`TRUE` : sql`l.assignee_id = ${user.id}`;
   const empty = Promise.resolve({ rows: [] as any[] });
 
-  const [replies, hotLeads, blocked, dueTasks, staleLeads, unassigned] = await Promise.all([
+  const [replies, hotLeads, blocked, dueTasks, staleLeads, unassigned, manualTouches] = await Promise.all([
     // A reply needs a human until a human actually does something about it.
     // "Something" = any activity logged BY A PERSON (created_by IS NOT NULL —
     // the sequencer and the inbox poller both write with a null author) after
@@ -120,6 +120,30 @@ export async function fetchWorklist(
              AND l.stage NOT IN ('closed_won','closed_lost')
            ORDER BY l.created_at DESC LIMIT 50`)
       : empty,
+
+    // Enrollments blocked on a human, with the step's message already rendered
+    // so the card can show what to say without a second round trip. `since` is
+    // when the enrollment arrived at this step (last advance, or enrollment
+    // itself if it's the first step) — that's what "blocked for three days"
+    // means, not when it was enrolled in the sequence.
+    db.execute(sql`
+      SELECT e.id                                            AS "enrollmentId",
+             l.id                                             AS "leadId",
+             l.name                                           AS "leadName",
+             l.company                                        AS "leadCompany",
+             l.phone_e164                                     AS "phoneE164",
+             l.deal_value                                     AS "dealValue",
+             s.channel                                        AS channel,
+             s.body_template                                  AS message,
+             COALESCE(e.last_step_completed_at, e.enrolled_at) AS since
+        FROM outreach_enrollments e
+        JOIN leads l          ON l.id = e.lead_id
+        JOIN outreach_steps s ON s.sequence_id = e.sequence_id
+                             AND s.position    = e.current_step
+       WHERE e.status = 'awaiting_action'
+         AND ${mine}
+       ORDER BY e.enrolled_at
+       LIMIT 50`),
   ]);
 
   const num  = (v: unknown) => Number(v ?? 0);
@@ -151,6 +175,13 @@ export async function fetchWorklist(
     unassigned: (unassigned.rows as any[]).map((r) => ({
       leadId: r.id, name: r.name, company: r.company,
       dealValue: num(r.deal_value), createdAt: date(r.created_at),
+    })),
+    manualTouches: (manualTouches.rows as any[]).map((r) => ({
+      enrollmentId: r.enrollmentId, leadId: r.leadId,
+      leadName: r.leadName, leadCompany: r.leadCompany,
+      channel: r.channel as "whatsapp" | "call",
+      message: r.message, phoneE164: r.phoneE164,
+      dealValue: num(r.dealValue), since: date(r.since),
     })),
   };
 }

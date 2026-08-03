@@ -171,6 +171,9 @@ export async function enrollLead(opts: EnrollOptions) {
   return { enrollment, alreadyEnrolled: false };
 }
 
+/** Channels that require a person. The scheduler raises a task instead of sending. */
+const MANUAL_CHANNELS = new Set(["whatsapp", "call"]);
+
 // Max delivery attempts for a single step before we give up and mark the
 // enrollment failed. Transient SMTP errors (greylisting, timeouts, rate-limit)
 // are retried with a day of backoff between attempts.
@@ -360,6 +363,7 @@ async function runOneTick(limit: number): Promise<{ processed: number; sent: num
     try {
       const outcome = await processSingleSend(enrollment, attempt);
       if (outcome === "failed") failed++;
+      else if (outcome === "awaiting_action") throttled++;   // handed to a human, not sent
       else sent++;   // "sent", "advanced" (non-email skip), "completed", "retry" all count as handled
     } catch (err: any) {
       // Backstop for errors thrown BEFORE the send — most often the AI step
@@ -502,7 +506,7 @@ async function handleSendFailure(
   return "retry";
 }
 
-type SendOutcome = "sent" | "advanced" | "completed" | "retry" | "failed";
+type SendOutcome = "sent" | "advanced" | "completed" | "retry" | "failed" | "awaiting_action";
 
 // Pause an enrollment because of a fixable configuration problem (e.g. step
 // wired to a non-email agent, or no body). Distinct from a send failure: this
@@ -557,7 +561,26 @@ async function processSingleSend(
     return "completed";
   }
 
-  // Skip non-email steps for now (they show up as suggestions in activity timeline but don't send)
+  // Manual channels do not send. They raise a task and STOP.
+  //
+  // Previously any non-email step was silently advanced past, so a sequence
+  // containing a LinkedIn or note step quietly skipped it — the cadence the
+  // author designed was not the cadence that ran. A manual step now blocks:
+  // the next step does not fire until a human records an outcome.
+  if (MANUAL_CHANNELS.has(step.channel)) {
+    await db.update(outreachEnrollments)
+      .set({
+        status:       "awaiting_action",
+        pausedReason: `Waiting on a human: ${step.channel} step (day ${step.dayOffset})`,
+        nextSendAt:   null,
+      })
+      .where(eq(outreachEnrollments.id, enrollment.id));
+    return "awaiting_action";
+  }
+
+  // note/linkedin keep their historical behaviour of advancing automatically,
+  // because existing sequences rely on it and changing that silently would
+  // alter live cadences.
   if (step.channel !== "email") {
     await advanceStep(enrollment, steps);
     return "advanced";

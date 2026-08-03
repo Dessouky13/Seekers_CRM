@@ -11,7 +11,8 @@ export type ActionType =
   | "sequence_blocked"
   | "task_due"
   | "stale_lead"
-  | "unassigned_lead";
+  | "unassigned_lead"
+  | "manual_touch";
 
 /** How fast this rots. Drives grouping in the UI and WhatsApp urgency. */
 export type Urgency = "now" | "today" | "week";
@@ -62,6 +63,21 @@ export interface WorklistInputs {
     leadId: string; name: string; company: string | null;
     dealValue: number; createdAt: Date;
   }[];
+  manualTouches?: ManualTouchRow[];
+}
+
+/** An enrollment blocked on a whatsapp/call step, waiting on a human to act. */
+export interface ManualTouchRow {
+  enrollmentId: string;
+  leadId:       string;
+  leadName:     string | null;
+  leadCompany:  string | null;
+  channel:      "whatsapp" | "call";
+  message:      string | null;
+  phoneE164:    string | null;
+  dealValue:    string | number | null;
+  /** When the enrollment arrived at this step — drives ageHours, same as `blocked`'s `since`. */
+  since:        Date;
 }
 
 // ── Scoring ───────────────────────────────────────────────
@@ -75,6 +91,7 @@ export interface WorklistInputs {
 
 const BASE: Record<ActionType, number> = {
   reply_waiting:    1000,
+  manual_touch:      900,
   hot_lead:          800,
   sequence_blocked:  520,
   task_due:          420,
@@ -116,6 +133,26 @@ export function rankWorklist(input: WorklistInputs): WorklistAction[] {
       detail: r.preview,
       deepLink: `/crm?lead=${r.leadId}`,
       leadId: r.leadId, taskId: null, dealValue: r.dealValue, ageHours: age,
+    });
+  }
+
+  // Enrollments blocked on a human. Ranked with replies, because a sequence
+  // stalled waiting for someone is costing the same as an unanswered reply.
+  for (const m of input.manualTouches ?? []) {
+    const age = hoursBetween(now, m.since);
+    out.push({
+      id: `manual:${m.enrollmentId}`,
+      type: "manual_touch",
+      urgency: "now",
+      score: BASE.manual_touch,
+      title: m.leadName ?? "Lead",
+      subtitle: m.leadCompany ?? null,
+      reason: m.channel === "whatsapp"
+        ? "WhatsApp message ready to send"
+        : "Call this lead",
+      detail: m.message ?? null,
+      deepLink: `/crm?lead=${m.leadId}`,
+      leadId: m.leadId, taskId: null, dealValue: Number(m.dealValue ?? 0), ageHours: age,
     });
   }
 

@@ -373,7 +373,7 @@ const sequenceSchema = z.object({
 // it before that point; kept structurally identical.
 const seedStepsSchema = z.array(z.object({
   day_offset:       z.number().int().min(0).max(365),
-  channel:          z.enum(["email", "linkedin", "note"]).default("email"),
+  channel:          z.enum(["email", "linkedin", "note", "whatsapp", "call"]).default("email"),
   subject_template: z.string().max(300).optional().nullable(),
   body_template:    z.string().max(8000).optional().nullable(),
   agent_id:         z.string().max(100).optional().nullable(),
@@ -511,7 +511,7 @@ outreach.delete("/sequences/:id", authMiddleware, adminOnly, async (c) => {
 // ── STEPS ─────────────────────────────────────────────────
 const stepSchema = z.object({
   day_offset:       z.number().int().min(0).max(365),
-  channel:          z.enum(["email", "linkedin", "note"]).default("email"),
+  channel:          z.enum(["email", "linkedin", "note", "whatsapp", "call"]).default("email"),
   subject_template: z.string().max(300).optional().nullable(),
   body_template:    z.string().max(8000).optional().nullable(),
   agent_id:         z.string().max(100).optional().nullable(),

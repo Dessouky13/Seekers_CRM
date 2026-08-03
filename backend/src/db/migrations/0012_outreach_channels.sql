@@ -47,3 +47,16 @@ SELECT DISTINCT lower(trim(signals->>'bounced_email')), 'hard_bounce', 'migratio
  WHERE signals->>'bounced_email' IS NOT NULL
    AND length(trim(signals->>'bounced_email')) > 0
 ON CONFLICT ("address") DO NOTHING;
+
+-- ── Manual channels ───────────────────────────────────────
+-- status and channel are text columns with Drizzle-side enums, so widening the
+-- allowed values needs no DDL. Recorded here so the intent is not invisible:
+--   outreach_steps.channel        += whatsapp | call
+--   outreach_enrollments.status   += awaiting_action
+--
+-- awaiting_action is deliberately distinct from paused: a sequence waiting on a
+-- human is not a sequence that has failed, and conflating them made a stalled
+-- enrollment look like a broken one.
+CREATE INDEX IF NOT EXISTS "idx_enrollments_awaiting"
+  ON "outreach_enrollments" ("status", "next_send_at")
+  WHERE "status" = 'awaiting_action';

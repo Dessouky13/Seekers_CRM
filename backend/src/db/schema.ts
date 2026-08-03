@@ -468,7 +468,11 @@ export const outreachSteps = pgTable("outreach_steps", {
   sequenceId:      uuid("sequence_id").notNull().references(() => outreachSequences.id, { onDelete: "cascade" }),
   position:        integer("position").notNull(),                              // 0,1,2,... for ordering
   dayOffset:       integer("day_offset").notNull(),                            // days after enrollment to send
-  channel:         text("channel", { enum: ["email", "linkedin", "note"] }).notNull().default("email"),
+  channel:         text("channel", {
+    // whatsapp and call are MANUAL: the scheduler raises a task instead of
+    // sending, because a human has to press send.
+    enum: ["email", "linkedin", "note", "whatsapp", "call"],
+  }).notNull().default("email"),
   subjectTemplate: text("subject_template"),
   bodyTemplate:    text("body_template"),                                      // mustache-style {{name}}, {{company}}
   agentId:         text("agent_id"),                                           // if set, agent generates body per-lead
@@ -483,7 +487,11 @@ export const outreachEnrollments = pgTable("outreach_enrollments", {
   leadId:              uuid("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
   sequenceId:          uuid("sequence_id").notNull().references(() => outreachSequences.id, { onDelete: "cascade" }),
   currentStep:         integer("current_step").notNull().default(0),
-  status:              text("status", { enum: ["active", "paused", "completed", "failed", "replied"] }).notNull().default("active"),
+  status:              text("status", {
+    // awaiting_action: blocked on a human completing a manual step. Distinct
+    // from paused, which means something went wrong.
+    enum: ["active", "paused", "completed", "failed", "replied", "awaiting_action"],
+  }).notNull().default("active"),
   enrolledAt:          timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
   nextSendAt:          timestamp("next_send_at", { withTimezone: true }),
   lastStepCompletedAt: timestamp("last_step_completed_at", { withTimezone: true }),
