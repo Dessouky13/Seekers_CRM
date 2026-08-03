@@ -33,13 +33,17 @@ CREATE INDEX IF NOT EXISTS "idx_suppressions_reason" ON "suppressions" ("reason"
 ALTER TABLE "outreach_sends" ADD COLUMN IF NOT EXISTS "failure_kind" text;
 CREATE INDEX IF NOT EXISTS "idx_sends_failure_kind" ON "outreach_sends" ("failure_kind");
 
--- Backfill the suppression list from the damage already done: any lead whose
--- email was nulled by the old hard-bounce path is unrecoverable, but any lead
--- already marked bounced still has its address and should be suppressed rather
--- than silently retried.
+-- Backfill the suppression list from the damage already done. The OLD
+-- hard-bounce path (backend/src/services/inbox.ts) never wrote a
+-- leads.email_status of 'bounced' — that value is never written anywhere in
+-- this codebase. What it actually did was set leads.email = NULL and stash the
+-- original address in leads.signals->>'bounced_email' so it wasn't lost. That
+-- JSON key is therefore the only surviving record of a bounced address, and is
+-- the correct (and only) source to backfill from.
 INSERT INTO "suppressions" ("address", "reason", "source", "notes")
-SELECT DISTINCT lower(trim(email)), 'hard_bounce', 'migration',
-       'backfilled from leads.email_status'
+SELECT DISTINCT lower(trim(signals->>'bounced_email')), 'hard_bounce', 'migration',
+       'backfilled from leads.signals bounced_email key'
   FROM "leads"
- WHERE email IS NOT NULL AND email_status = 'bounced'
+ WHERE signals->>'bounced_email' IS NOT NULL
+   AND length(trim(signals->>'bounced_email')) > 0
 ON CONFLICT ("address") DO NOTHING;
