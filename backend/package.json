@@ -29,6 +29,7 @@
     "nodemailer": "^6",
     "openai": "^4",
     "pdf-parse": "^1",
+    "pdfkit": "^0.19.1",
     "pg": "^8",
     "uuid": "^9",
     "zod": "^3"
@@ -39,6 +40,7 @@
     "@types/node": "^20",
     "@types/nodemailer": "^6",
     "@types/pdf-parse": "^1",
+    "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8",
     "drizzle-kit": "^0.20",
     "tsup": "^8",
