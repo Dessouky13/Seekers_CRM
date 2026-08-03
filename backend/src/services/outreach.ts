@@ -146,10 +146,34 @@ export const LIVE_ENROLLMENT_STATUSES = ["active", "paused", "awaiting_action"] 
 const isLiveEnrollment = () =>
   inArray(outreachEnrollments.status, [...LIVE_ENROLLMENT_STATUSES]);
 
+/**
+ * The partial unique index that makes "one live enrollment per (lead, sequence)"
+ * a database guarantee rather than a hope. Declared in schema.ts and created by
+ * migration 0017, over exactly LIVE_ENROLLMENT_STATUSES.
+ */
+export const LIVE_ENROLLMENT_UNIQUE_INDEX = "idx_enrollments_live_unique";
+
+/** Postgres unique_violation. */
+const PG_UNIQUE_VIOLATION = "23505";
+
 export interface EnrollOptions {
   leadId:      string;
   sequenceId:  string;
   enrolledBy?: string | null;
+}
+
+/** The one live enrollment for this pair, if there is one. */
+async function findLiveEnrollment(leadId: string, sequenceId: string) {
+  const [row] = await db
+    .select({ id: outreachEnrollments.id, status: outreachEnrollments.status })
+    .from(outreachEnrollments)
+    .where(and(
+      eq(outreachEnrollments.leadId, leadId),
+      eq(outreachEnrollments.sequenceId, sequenceId),
+      isLiveEnrollment(),
+    ))
+    .limit(1);
+  return row;
 }
 
 export async function enrollLead(opts: EnrollOptions) {
@@ -164,16 +188,13 @@ export async function enrollLead(opts: EnrollOptions) {
   // Dedupe: only block re-enrollment if there is a LIVE enrollment (see
   // LIVE_ENROLLMENT_STATUSES — this must include awaiting_action).
   // Completed/failed/replied enrollments are historical — we allow re-enrolling.
-  const [existing] = await db
-    .select({ id: outreachEnrollments.id, status: outreachEnrollments.status })
-    .from(outreachEnrollments)
-    .where(and(
-      eq(outreachEnrollments.leadId, opts.leadId),
-      eq(outreachEnrollments.sequenceId, opts.sequenceId),
-      isLiveEnrollment(),
-    ))
-    .limit(1);
-
+  //
+  // This check is for the ANSWER, not for the guarantee. It is a plain
+  // check-then-insert: two concurrent callers both reach it, both see nothing,
+  // and both proceed. What stops them is the partial unique index below; this
+  // read is what lets the common, uncontended case return a friendly
+  // "already enrolled" without provoking an error in the log.
+  const existing = await findLiveEnrollment(opts.leadId, opts.sequenceId);
   if (existing) {
     return { enrollment: { id: existing.id, status: existing.status }, alreadyEnrolled: true };
   }
@@ -187,20 +208,36 @@ export async function enrollLead(opts: EnrollOptions) {
   const now = new Date();
   const nextSendAt = computeNextSendAt(now, steps[0].dayOffset);
 
-  const [enrollment] = await db
-    .insert(outreachEnrollments)
-    .values({
-      leadId:      opts.leadId,
-      sequenceId:  opts.sequenceId,
-      currentStep: 0,
-      status:      "active",
-      enrolledAt:  now,
-      nextSendAt,
-      enrolledBy:  opts.enrolledBy ?? null,
-    })
-    .returning();
+  try {
+    const [enrollment] = await db
+      .insert(outreachEnrollments)
+      .values({
+        leadId:      opts.leadId,
+        sequenceId:  opts.sequenceId,
+        currentStep: 0,
+        status:      "active",
+        enrolledAt:  now,
+        nextSendAt,
+        enrolledBy:  opts.enrolledBy ?? null,
+      })
+      .returning();
 
-  return { enrollment, alreadyEnrolled: false };
+    return { enrollment, alreadyEnrolled: false };
+  } catch (err) {
+    // Lost the race. Another caller inserted the live enrollment between our
+    // SELECT above and this INSERT — a double-tapped button, an n8n retry, a
+    // bulk enroll racing auto-enrolment on lead creation. The index refused the
+    // second row, which is exactly what we want; the caller still gets the same
+    // answer it would have got had it arrived a millisecond later.
+    if ((err as { code?: string })?.code !== PG_UNIQUE_VIOLATION) throw err;
+
+    const winner = await findLiveEnrollment(opts.leadId, opts.sequenceId);
+    // A 23505 with no live enrollment to point at is a different constraint
+    // entirely, and swallowing it would hide a real bug.
+    if (!winner) throw err;
+
+    return { enrollment: { id: winner.id, status: winner.status }, alreadyEnrolled: true };
+  }
 }
 
 /**

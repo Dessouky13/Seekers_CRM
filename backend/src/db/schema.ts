@@ -1,6 +1,6 @@
 import {
   pgTable, uuid, text, numeric, boolean,
-  timestamp, date, integer, index, jsonb,
+  timestamp, date, integer, index, uniqueIndex, jsonb,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -505,12 +505,38 @@ export const outreachEnrollments = pgTable("outreach_enrollments", {
 }, (t) => ({
   leadIdx:     index("idx_enrollments_lead").on(t.leadId),
   statusIdx:   index("idx_enrollments_status").on(t.status, t.nextSendAt),
-  // Lookup index, NOT a uniqueness constraint — and it must stay that way.
-  // enrollLead() deliberately allows re-enrolling a lead in the same sequence
-  // once the previous run is completed/failed/replied, which means several rows
-  // legitimately share (lead_id, sequence_id). Only ACTIVE/PAUSED duplicates are
-  // blocked, and that check lives in the service layer.
+  // Plain lookup index over ALL rows, live or historical. Deliberately not
+  // unique: re-enrolling a lead whose previous run is completed/failed/replied
+  // is a legitimate action, so several rows may legitimately share
+  // (lead_id, sequence_id).
   leadSequenceIdx: index("idx_enrollments_unique").on(t.leadId, t.sequenceId),
+  // The uniqueness that DOES hold, and it is now the database's job rather than
+  // only the service layer's.
+  //
+  // enrollLead() was check-then-insert with no lock and no constraint, so two
+  // concurrent enrols — a double-tapped button, an n8n retry, a bulk enroll
+  // racing auto-enrolment — both read "not enrolled" and both inserted, giving
+  // one lead two parallel message streams from the same sequence. That is the
+  // shape of the incident where 142 leads received up to 4 messages each.
+  //
+  // PARTIAL, over exactly LIVE_ENROLLMENT_STATUSES (services/outreach.ts):
+  // active, paused AND awaiting_action. awaiting_action must be in the set —
+  // omitting it is what re-opened this hole once already, because a lead parked
+  // on a manual WhatsApp step then reads as "not enrolled".
+  //
+  // Migration 0017 is AUTHORITATIVE — it also retires any pre-existing duplicate
+  // live rows, which a bare `db:push` would not, and drizzle-kit 0.20 is not
+  // trusted to emit the WHERE clause. Without the predicate this index would be
+  // a full unique constraint and would refuse to build over legitimate
+  // historical re-enrollments.
+  //
+  // The literal status list is spelled out here because Drizzle needs a SQL
+  // fragment, not a TypeScript array; that it still matches
+  // LIVE_ENROLLMENT_STATUSES and the migration is asserted by a unit test in
+  // outreach-enrollment.test.ts.
+  liveUniqueIdx: uniqueIndex("idx_enrollments_live_unique")
+    .on(t.leadId, t.sequenceId)
+    .where(sql`${t.status} IN ('active', 'paused', 'awaiting_action')`),
 }));
 
 // ── Outreach Sends (audit log of every email sent) ───────
