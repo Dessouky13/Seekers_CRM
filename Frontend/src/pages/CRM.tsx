@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ScrapeLeadsDialog } from "@/components/modules/ScrapeLeadsDialog";
 import { PipelineStats, PipelineStatsSkeleton } from "@/components/modules/crm/PipelineStats";
 import { LeadsPageSkeleton } from "@/components/modules/crm/LeadsPageSkeleton";
@@ -52,6 +53,27 @@ export default function CRM() {
   const [stageFilter, setStageFilter] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const debouncedSearch = useDebouncedValue(search.trim(), 350);
+
+  // Deep link from the Today queue: /crm?lead=<id> must open THAT lead, not
+  // just land on the page. The backend has been emitting these links all along
+  // but nothing here read the param, so every item from Today meant hunting
+  // for the record by hand.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkedLeadId = searchParams.get("lead");
+
+  useEffect(() => {
+    if (deepLinkedLeadId) setSelectedId(deepLinkedLeadId);
+  }, [deepLinkedLeadId]);
+
+  // Closing the sheet clears the param, so a refresh or a back-navigation
+  // doesn't silently reopen the lead the user just dismissed.
+  const closeDetail = () => {
+    setSelectedId(null);
+    if (deepLinkedLeadId) {
+      searchParams.delete("lead");
+      setSearchParams(searchParams, { replace: true });
+    }
+  };
 
   const bulkEnroll = useBulkEnroll();
   const { data: sequencesList = [], isLoading: sequencesLoading } = useSequences();
@@ -257,7 +279,7 @@ export default function CRM() {
         />
       )}
 
-      <LeadDetailSheet leadId={selectedId} onClose={() => setSelectedId(null)} />
+      <LeadDetailSheet leadId={selectedId} onClose={closeDetail} />
 
       {/* Bulk-action floating bar */}
       {selectedIds.size > 0 && (

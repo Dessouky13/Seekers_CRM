@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Plus, List, Columns3, Trash2, Pencil, FolderPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -70,6 +71,26 @@ export default function Tasks() {
   const deleteTask    = useDeleteTask();
 
   const tasks = tasksRes?.data ?? [];
+
+  // Deep link from the Today queue: /tasks?task=<id> must open THAT task.
+  // The link has always been generated; nothing here consumed it, so the user
+  // landed on the board and had to find the card themselves. Resolved against
+  // the loaded list, so it waits for data rather than firing on an empty array.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkedTaskId = searchParams.get("task");
+
+  useEffect(() => {
+    if (!deepLinkedTaskId) return;
+    const match = tasks.find((t) => t.id === deepLinkedTaskId);
+    if (match) setDetailTask(match);
+  }, [deepLinkedTaskId, tasks]);
+
+  // Clear the param when the dialog closes so a refresh does not reopen it.
+  const clearTaskParam = () => {
+    if (!deepLinkedTaskId) return;
+    searchParams.delete("task");
+    setSearchParams(searchParams, { replace: true });
+  };
 
   const columns = statusColumns.map((col) => ({
     key:   col.key,
@@ -358,7 +379,7 @@ export default function Tasks() {
       )}
 
       {/* Task detail dialog */}
-      <Dialog open={!!detailTask} onOpenChange={(o) => { if (!o) { setDetailTask(null); setEditMode(false); } }}>
+      <Dialog open={!!detailTask} onOpenChange={(o) => { if (!o) { setDetailTask(null); setEditMode(false); clearTaskParam(); } }}>
         <DialogContent className="max-w-lg">
           {detailTask && !editMode && (
             <>

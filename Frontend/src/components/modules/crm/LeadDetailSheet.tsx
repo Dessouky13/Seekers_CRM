@@ -3,7 +3,7 @@
 // dialog and the single-lead delete confirmation. Owns its own data hooks.
 
 import { useState } from "react";
-import { Mail, Phone, FileText, Trash2, Pencil, UserCheck } from "lucide-react";
+import { Mail, Phone, FileText, Trash2, Pencil, UserCheck, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -25,7 +25,7 @@ import { toast } from "sonner";
 import {
   useLeadDetail, useUpdateLead, useDeleteLead, useAddLeadActivity,
 } from "@/hooks/useCRM";
-import { useUsers } from "@/hooks/useTasks";
+import { useUsers, useCreateTask } from "@/hooks/useTasks";
 import { useCreateClient } from "@/hooks/useClients";
 import { LEAD_STAGES, LEAD_SOURCES, LEAD_CATEGORIES, activityIcons, fmt } from "./constants";
 
@@ -37,6 +37,12 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
   const createClient = useCreateClient();
   const { data: users = [] } = useUsers();
   const [activityOpen,  setActivityOpen]  = useState(false);
+  // Today -> lead -> reply -> TASK was a dead end: the sheet could enrol,
+  // log activity and run an agent, but there was no way to turn a reply into
+  // a follow-up task without leaving for the Tasks page and retyping the
+  // context. This closes that loop.
+  const [taskOpen, setTaskOpen] = useState(false);
+  const createTask = useCreateTask();
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [editMode,      setEditMode]      = useState(false);
 
@@ -157,6 +163,18 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
                 </div>
               )}
 
+              {/* The action you most often want after reading a reply. Sits
+                  above the timeline so it's reachable without scrolling the
+                  sheet on a phone. */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full gap-1.5"
+                onClick={() => setTaskOpen(true)}
+              >
+                <Plus className="h-3.5 w-3.5" /> Create follow-up task
+              </Button>
+
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Activity Timeline</p>
@@ -275,6 +293,64 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
               </div>
             </form>
           )}
+
+          {/* Create Task Dialog — pre-filled with the lead's context */}
+          <Dialog open={taskOpen} onOpenChange={setTaskOpen}>
+            <DialogContent>
+              <DialogHeader><DialogTitle>New task for {lead.name}</DialogTitle></DialogHeader>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const fd = new FormData(e.currentTarget);
+                  createTask.mutate(
+                    {
+                      title:       fd.get('title') as string,
+                      description: (fd.get('description') as string) || undefined,
+                      due_date:    (fd.get('due_date') as string) || undefined,
+                      priority:    (fd.get('priority') as string) || 'medium',
+                      assignee_id: lead.assigneeId || undefined,
+                    },
+                    {
+                      onSuccess: () => { setTaskOpen(false); toast.success('Task created'); },
+                      onError:   (err) => toast.error(err.message),
+                    },
+                  );
+                }}
+                className="space-y-4"
+              >
+                <div>
+                  <Label>Title</Label>
+                  <Input
+                    name="title"
+                    required
+                    className="mt-1"
+                    defaultValue={'Follow up: ' + lead.company}
+                  />
+                </div>
+                <div><Label>Notes</Label><Input name="description" className="mt-1" placeholder="Optional" /></div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div><Label>Due date</Label><Input name="due_date" type="date" className="mt-1" /></div>
+                  <div>
+                    <Label>Priority</Label>
+                    <select name="priority" defaultValue="medium" className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
+                      {['low', 'medium', 'high', 'critical'].map((pr) => (
+                        <option key={pr} value={pr}>{pr}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Assigned to whoever owns this lead.
+                </p>
+                <DialogFooter>
+                  <DialogClose asChild><Button variant="ghost" type="button">Cancel</Button></DialogClose>
+                  <Button type="submit" disabled={createTask.isPending}>
+                    {createTask.isPending ? 'Creating…' : 'Create task'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
 
           {/* Add Activity Dialog */}
           <Dialog open={activityOpen} onOpenChange={setActivityOpen}>
