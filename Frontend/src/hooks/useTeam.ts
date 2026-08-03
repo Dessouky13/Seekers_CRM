@@ -13,6 +13,17 @@ export interface TeamMemberWork extends ApiUser {
   };
   outreach: { enrolled: number; replied: number; sends: number };
   activity: { last_at: string | null; logged_last_7d: number };
+  /** Real sign-in telemetry — distinct from `activity`, which measures output. */
+  session: {
+    last_login_at: string | null;
+    last_seen_at:  string | null;
+    logins_total:  number;
+    logins_30d:    number;
+    logins_7d:     number;
+    failed_24h:    number;
+    is_online:     boolean;
+    never_logged_in: boolean;
+  };
 }
 
 /** Per-person workload + output. Admin only. */
@@ -21,6 +32,9 @@ export function useTeamWorkSummary() {
     queryKey: ["team-work-summary"],
     queryFn:  () => apiFetch("/users/work-summary"),
     staleTime: 30_000,
+    // Presence goes stale on its own, so the dot has to be refreshed on a timer
+    // or "online now" quietly becomes "was online when you opened the page".
+    refetchInterval: 60_000,
   });
 }
 
@@ -37,6 +51,20 @@ export interface MemberWorkDetail {
   activity: {
     id: string; type: string; description: string; date: string;
     createdAt: string; lead_name: string | null; lead_company: string | null;
+  }[];
+  logins: {
+    id: string; success: boolean; ip: string | null;
+    userAgent: string | null; createdAt: string;
+  }[];
+  /** Unified action feed, newest first, across every table that records authorship. */
+  timeline: {
+    at: string;
+    kind: "lead_activity" | "task_created" | "task_completed" | "enrolled"
+        | "transaction" | "agent_run" | "login";
+    detail:  string | null;
+    subject: string | null;
+    body:    string | null;
+    link_id: string | null;
   }[];
 }
 

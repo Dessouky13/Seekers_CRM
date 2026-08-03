@@ -5,7 +5,19 @@
     <link rel="icon" type="image/png" href="/logo-symbol.png" />
     <link rel="apple-touch-icon" href="/logo-symbol.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0B0A1F" />
     <title>AI Agency OS — Seekers AI</title>
+
+    <!-- Fonts load here, not from an @import in index.css. That @import sat
+         after the @tailwind directives, which CSS forbids, so it was being
+         dropped and the whole app silently rendered in system fonts. Declaring
+         them here also avoids the serial css -> @import -> font round trip. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+    />
     <meta name="description" content="Internal operations platform for Seekers AI Automation Solutions" />
     <meta name="author" content="Seekers AI" />
 

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client";
-import { profiles, teamInvites } from "../db/schema";
+import { profiles, teamInvites, loginEvents } from "../db/schema";
 import {
   hashPassword,
   comparePassword,
@@ -48,12 +48,32 @@ auth.post("/login", async (c) => {
     ? await comparePassword(body.password, profile.password)
     : await comparePassword(body.password, dummyHash).then(() => false);
 
+  // Recorded for both outcomes. Failures are the interesting half: several in a
+  // row against one address is the only signal an admin gets that an account is
+  // being guessed at. Logging must never block the response, hence catch().
+  const recordLogin = (userId: string | null, success: boolean) =>
+    db.insert(loginEvents).values({
+      userId,
+      email:     body.email,
+      success,
+      ip:        c.req.header("x-forwarded-for")?.split(",")[0].trim()
+                 ?? c.req.header("x-real-ip") ?? null,
+      userAgent: c.req.header("user-agent")?.slice(0, 500) ?? null,
+    }).catch((e) => console.error("[auth] login event not recorded:", e?.message));
+
   if (!profile || !passwordMatch) {
+    await recordLogin(profile?.id ?? null, false);
     return c.json({ error: "Invalid credentials" }, 401);
   }
 
   const access_token  = await signAccessToken(profile.id);
   const refresh_token = await createRefreshToken(profile.id);
+
+  await recordLogin(profile.id, true);
+  await db.update(profiles)
+    .set({ lastSeenAt: new Date() })
+    .where(eq(profiles.id, profile.id))
+    .catch(() => { /* presence is best-effort; never fail a login over it */ });
 
   return c.json({ access_token, refresh_token, user: toSafeProfile(profile) }, 200);
 });

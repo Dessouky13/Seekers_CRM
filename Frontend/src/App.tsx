@@ -1,33 +1,82 @@
+import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SeekersBackground } from "@/components/SeekersBackground";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { RouteFallback } from "@/components/RouteFallback";
 import { isAuthenticated } from "@/lib/auth";
-import Today from "./pages/Today";
-import Dashboard from "./pages/Dashboard";
-import Finance from "./pages/Finance";
-import Tasks from "./pages/Tasks";
-import CRM from "./pages/CRM";
-import Clients from "./pages/Clients";
-import Outreach from "./pages/Outreach";
-import Outbound from "./pages/Outbound";
-import Login from "./pages/Login";
-import Goals from "./pages/Goals";
-import Notes from "./pages/Notes";
-import Vault from "./pages/Vault";
-import Settings from "./pages/Settings";
-import NotFound from "./pages/NotFound";
 import { AdminOnly } from "./components/AdminOnly";
-import Team from "./pages/Team";
+
+// Today and Login are eager: one of them is always the first paint, so lazily
+// loading them would only add a round trip before anything appears.
+import Today from "./pages/Today";
+import Login from "./pages/Login";
+
+// Everything else is split per route. The app shipped as a single 1.4 MB chunk,
+// so opening Today downloaded Finance, the KB and every chart library with it.
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Finance   = lazy(() => import("./pages/Finance"));
+const Tasks     = lazy(() => import("./pages/Tasks"));
+const CRM       = lazy(() => import("./pages/CRM"));
+const Clients   = lazy(() => import("./pages/Clients"));
+const Outreach  = lazy(() => import("./pages/Outreach"));
+const Outbound  = lazy(() => import("./pages/Outbound"));
+const Goals     = lazy(() => import("./pages/Goals"));
+const Notes     = lazy(() => import("./pages/Notes"));
+const Vault     = lazy(() => import("./pages/Vault"));
+const Settings  = lazy(() => import("./pages/Settings"));
+const Team      = lazy(() => import("./pages/Team"));
+const NotFound  = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      staleTime: 30_000,
+      // The default refetch-on-focus fires a full page's worth of queries every
+      // time the user alt-tabs back. With a 30s staleTime the data is fresh
+      // anyway, so this was pure duplicate traffic.
+      refetchOnWindowFocus: false,
+    },
+  },
 });
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   return isAuthenticated() ? <>{children}</> : <Navigate to="/login" replace />;
+}
+
+/** Boundary + suspense per route, reset by pathname so navigating away recovers. */
+function AppRoutes() {
+  const { pathname } = useLocation();
+  return (
+    <ErrorBoundary resetKeys={[pathname]} label="This page">
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          {/* Everyone lands on Today — the ranked "what needs you now"
+              queue. Members previously got bounced off / to /crm, so
+              they had nowhere that answered that question. The admin
+              financial dashboard moved to /dashboard. */}
+          <Route path="/"          element={<Today />} />
+          <Route path="/dashboard" element={<AdminOnly><Dashboard /></AdminOnly>} />
+          <Route path="/finance"  element={<AdminOnly><Finance /></AdminOnly>} />
+          <Route path="/tasks"    element={<Tasks />} />
+          <Route path="/clients"  element={<AdminOnly><Clients /></AdminOnly>} />
+          <Route path="/crm"      element={<CRM />} />
+          <Route path="/outreach" element={<Outreach />} />
+          <Route path="/outbound" element={<AdminOnly><Outbound /></AdminOnly>} />
+          <Route path="/goals"    element={<AdminOnly><Goals /></AdminOnly>} />
+          <Route path="/notes"    element={<Notes />} />
+          <Route path="/vault"    element={<AdminOnly><Vault /></AdminOnly>} />
+          <Route path="/team"     element={<AdminOnly><Team /></AdminOnly>} />
+          <Route path="/settings" element={<AdminOnly><Settings /></AdminOnly>} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+    </ErrorBoundary>
+  );
 }
 
 const App = () => (
@@ -43,26 +92,7 @@ const App = () => (
             element={
               <RequireAuth>
                 <AppLayout>
-                  <Routes>
-                    {/* Everyone lands on Today — the ranked "what needs you now"
-                        queue. Members previously got bounced off / to /crm, so
-                        they had nowhere that answered that question. The admin
-                        financial dashboard moved to /dashboard. */}
-                    <Route path="/"          element={<Today />} />
-                    <Route path="/dashboard" element={<AdminOnly><Dashboard /></AdminOnly>} />
-                    <Route path="/finance"  element={<AdminOnly><Finance /></AdminOnly>} />
-                    <Route path="/tasks"    element={<Tasks />} />
-                    <Route path="/clients"  element={<AdminOnly><Clients /></AdminOnly>} />
-                    <Route path="/crm"      element={<CRM />} />
-                    <Route path="/outreach" element={<Outreach />} />
-                    <Route path="/outbound" element={<AdminOnly><Outbound /></AdminOnly>} />
-                    <Route path="/goals"    element={<AdminOnly><Goals /></AdminOnly>} />
-                    <Route path="/notes"    element={<Notes />} />
-                    <Route path="/vault"    element={<AdminOnly><Vault /></AdminOnly>} />
-                    <Route path="/team"     element={<AdminOnly><Team /></AdminOnly>} />
-                    <Route path="/settings" element={<AdminOnly><Settings /></AdminOnly>} />
-                    <Route path="*" element={<NotFound />} />
-                  </Routes>
+                  <AppRoutes />
                 </AppLayout>
               </RequireAuth>
             }

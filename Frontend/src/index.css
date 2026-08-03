@@ -2,8 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Seekers AI — Primary: SF Pro Display, Mono: IBM Plex Mono */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+/* Fonts (Inter + IBM Plex Mono) are linked from index.html. They used to be
+   @imported here, but an @import after the @tailwind directives is invalid CSS
+   and was silently discarded — the app rendered in system fonts. */
 
 /*
  * Seekers AI brand palette (dark theme — app is dark-only)

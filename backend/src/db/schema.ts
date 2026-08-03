@@ -36,9 +36,34 @@ export const profiles = pgTable("profiles", {
   phone:     text("phone"),
   // Custom email signature HTML or plain text. If null, a default is built from name/title.
   signature: text("signature"),
+  // Last authenticated request, refreshed at most once every few minutes by the
+  // auth middleware. This is what "online now" and "last active" on the Team
+  // page read — previously that was inferred from when someone last logged a
+  // lead note, which said nothing about whether they had opened the app.
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ── Login Events ──────────────────────────────────────────
+// One row per sign-in attempt. Gives the Team page a real last-login, a login
+// count and a history, and gives an admin a way to spot a member being
+// brute-forced (repeated `success = false` against one email).
+//
+// Failed attempts store the submitted email rather than a user id, because the
+// account may not exist — that is exactly the case worth seeing.
+export const loginEvents = pgTable("login_events", {
+  id:        uuid("id").primaryKey().defaultRandom(),
+  userId:    uuid("user_id").references(() => profiles.id, { onDelete: "cascade" }),
+  email:     text("email").notNull(),
+  success:   boolean("success").notNull(),
+  ip:        text("ip"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  userIdx:  index("idx_login_events_user").on(t.userId, t.createdAt),
+  emailIdx: index("idx_login_events_email").on(t.email, t.createdAt),
+}));
 
 // ── Refresh Tokens ────────────────────────────────────────
 export const refreshTokens = pgTable("refresh_tokens", {

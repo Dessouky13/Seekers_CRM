@@ -4,7 +4,7 @@ import { eq, and, sql, desc } from "drizzle-orm";
 import { db } from "../db/client";
 import {
   profiles, teamInvites, leads, tasks, leadActivities,
-  outreachEnrollments, outreachSends,
+  outreachEnrollments, outreachSends, loginEvents,
 } from "../db/schema";
 import { authMiddleware, adminOnly } from "../middleware/auth";
 import { updateProfileSchema, inviteUserSchema, emailInput } from "../utils/validators";
@@ -28,7 +28,7 @@ users.get("/", authMiddleware, async (c) => {
 users.get("/work-summary", authMiddleware, adminOnly, async (c) => {
   const staleCutoff = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
 
-  const [people, leadRows, taskRows, enrollRows, sendRows, activityRows] = await Promise.all([
+  const [people, leadRows, taskRows, enrollRows, sendRows, activityRows, loginRows] = await Promise.all([
     db.select().from(profiles).orderBy(profiles.createdAt),
 
     // Leads per assignee
@@ -75,12 +75,29 @@ users.get("/work-summary", authMiddleware, adminOnly, async (c) => {
       .where(and(sql`${leads.assigneeId} IS NOT NULL`, eq(outreachSends.status, "sent")))
       .groupBy(leads.assigneeId),
 
-    // Last logged activity by that person (proxy for "last active")
+    // Last logged activity by that person — output, not presence. Kept
+    // separate from the session block below: "logged 6 notes this week" and
+    // "signed in twice this week" answer different management questions.
     db.select({
       userId: leadActivities.createdBy,
-      last:   sql<string>`MAX(${leadActivities.createdAt})::text`,
+      // ISO for the same Safari reason as the login timestamp below.
+      last:   sql<string>`TO_CHAR(MAX(${leadActivities.createdAt}) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
       count7: sql<number>`COUNT(CASE WHEN ${leadActivities.createdAt} > NOW() - INTERVAL '7 days' THEN 1 END)::int`,
     }).from(leadActivities).where(sql`${leadActivities.createdBy} IS NOT NULL`).groupBy(leadActivities.createdBy),
+
+    // Sign-in history. Failures are counted over 24h only — that is the window
+    // where "someone is trying to get into this account" is actionable.
+    db.select({
+      userId:     loginEvents.userId,
+      // ISO, not ::text. A bare ::text cast yields Postgres' "2026-08-03
+      // 03:47:37+03" form, which `new Date()` rejects in Safari and returns
+      // Invalid Date — the timestamp would render as "never" on iOS only.
+      lastLogin:  sql<string>`TO_CHAR(MAX(CASE WHEN ${loginEvents.success} THEN ${loginEvents.createdAt} END) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
+      total:      sql<number>`COUNT(CASE WHEN ${loginEvents.success} THEN 1 END)::int`,
+      last30:     sql<number>`COUNT(CASE WHEN ${loginEvents.success} AND ${loginEvents.createdAt} > NOW() - INTERVAL '30 days' THEN 1 END)::int`,
+      last7:      sql<number>`COUNT(CASE WHEN ${loginEvents.success} AND ${loginEvents.createdAt} > NOW() - INTERVAL '7 days'  THEN 1 END)::int`,
+      failed24:   sql<number>`COUNT(CASE WHEN NOT ${loginEvents.success} AND ${loginEvents.createdAt} > NOW() - INTERVAL '24 hours' THEN 1 END)::int`,
+    }).from(loginEvents).where(sql`${loginEvents.userId} IS NOT NULL`).groupBy(loginEvents.userId),
   ]);
 
   const byId = <T extends { userId: string | null }>(rows: T[]) =>
@@ -91,6 +108,13 @@ users.get("/work-summary", authMiddleware, adminOnly, async (c) => {
   const enrollMap   = byId(enrollRows);
   const sendMap     = byId(sendRows);
   const activityMap = byId(activityRows);
+  const loginMap    = byId(loginRows);
+
+  // "Online" is a 5-minute window on last_seen_at, which the auth middleware
+  // refreshes every 3 minutes — so an idle-but-open tab stops counting as
+  // online shortly after the person actually stops making requests.
+  const ONLINE_MS = 5 * 60_000;
+  const now = Date.now();
 
   return c.json(people.map((p) => {
     const l = leadMap.get(p.id);
@@ -98,6 +122,8 @@ users.get("/work-summary", authMiddleware, adminOnly, async (c) => {
     const e = enrollMap.get(p.id);
     const s = sendMap.get(p.id);
     const a = activityMap.get(p.id);
+    const g = loginMap.get(p.id);
+    const lastSeen = p.lastSeenAt ? new Date(p.lastSeenAt).getTime() : 0;
     const taskTotal = Number(t?.total ?? 0);
     const taskDone  = Number(t?.done ?? 0);
     return {
@@ -128,6 +154,19 @@ users.get("/work-summary", authMiddleware, adminOnly, async (c) => {
         last_at:         a?.last ?? null,
         logged_last_7d:  Number(a?.count7 ?? 0),
       },
+      session: {
+        last_login_at:    g?.lastLogin ?? null,
+        last_seen_at:     p.lastSeenAt ? new Date(p.lastSeenAt).toISOString() : null,
+        logins_total:     Number(g?.total ?? 0),
+        logins_30d:       Number(g?.last30 ?? 0),
+        logins_7d:        Number(g?.last7 ?? 0),
+        failed_24h:       Number(g?.failed24 ?? 0),
+        is_online:        lastSeen > 0 && now - lastSeen < ONLINE_MS,
+        // Distinct from "has not logged in recently": an account created and
+        // never used is an onboarding failure, and the page should say so
+        // rather than showing a blank timestamp.
+        never_logged_in:  Number(g?.total ?? 0) === 0,
+      },
     };
   }));
 });
@@ -139,7 +178,7 @@ users.get("/:id/work", authMiddleware, adminOnly, async (c) => {
   const [person] = await db.select().from(profiles).where(eq(profiles.id, id)).limit(1);
   if (!person) return c.json({ error: "User not found" }, 404);
 
-  const [theirLeads, theirTasks, recentActivity] = await Promise.all([
+  const [theirLeads, theirTasks, recentActivity, logins, timeline] = await Promise.all([
     db.select({
       id: leads.id, name: leads.name, company: leads.company, stage: leads.stage,
       dealValue: leads.dealValue, lastActivity: leads.lastActivity, category: leads.category,
@@ -160,6 +199,83 @@ users.get("/:id/work", authMiddleware, adminOnly, async (c) => {
       .where(eq(leadActivities.createdBy, id))
       .orderBy(desc(leadActivities.createdAt))
       .limit(40),
+
+    // Sign-in history, successes and failures interleaved.
+    db.select({
+      id:        loginEvents.id,
+      success:   loginEvents.success,
+      ip:        loginEvents.ip,
+      userAgent: loginEvents.userAgent,
+      createdAt: loginEvents.createdAt,
+    })
+      .from(loginEvents)
+      .where(eq(loginEvents.userId, id))
+      .orderBy(desc(loginEvents.createdAt))
+      .limit(25),
+
+    // Unified "what did this person actually do" feed.
+    //
+    // Built as a UNION over the tables that already record authorship rather
+    // than by adding a write-time audit log: an audit table would start empty
+    // and take months to become useful, whereas this has full history from the
+    // day it ships. The cost is that only authored actions appear — edits that
+    // overwrite a row in place leave no trace, which is called out in the UI.
+    db.execute(sql`
+      SELECT * FROM (
+        SELECT la.created_at            AS at,
+               'lead_activity'          AS kind,
+               la.type                  AS detail,
+               COALESCE(l.company, l.name, '—') AS subject,
+               la.description           AS body,
+               l.id::text               AS link_id
+          FROM lead_activities la
+          LEFT JOIN leads l ON l.id = la.lead_id
+         WHERE la.created_by = ${id}
+
+        UNION ALL
+        SELECT t.created_at, 'task_created', t.priority, t.title, NULL, t.id::text
+          FROM tasks t WHERE t.created_by = ${id}
+
+        UNION ALL
+        SELECT t.completed_at, 'task_completed', t.priority, t.title, NULL, t.id::text
+          FROM tasks t WHERE t.assignee_id = ${id} AND t.completed_at IS NOT NULL
+
+        UNION ALL
+        SELECT e.enrolled_at, 'enrolled', s.name, COALESCE(l.company, l.name, '—'), NULL, l.id::text
+          FROM outreach_enrollments e
+          JOIN leads l              ON l.id = e.lead_id
+          LEFT JOIN outreach_sequences s ON s.id = e.sequence_id
+         WHERE e.enrolled_by = ${id}
+
+        UNION ALL
+        SELECT tr.created_at, 'transaction', tr.type, tr.category,
+               tr.amount::text, tr.id::text
+          FROM transactions tr WHERE tr.created_by = ${id}
+
+        UNION ALL
+        SELECT ar.created_at, 'agent_run', ar.agent_id,
+               COALESCE(ar.context_label, ar.scope), ar.status, ar.id::text
+          FROM agent_runs ar WHERE ar.created_by = ${id}
+
+        UNION ALL
+        SELECT le.created_at, 'login',
+               CASE WHEN le.success THEN 'success' ELSE 'failed' END,
+               COALESCE(le.ip, 'unknown IP'), le.user_agent, NULL
+          FROM login_events le WHERE le.user_id = ${id}
+      ) feed
+      WHERE at IS NOT NULL
+      ORDER BY at DESC
+      LIMIT 60
+    `).then((res) => ({
+      ...res,
+      // The UNION collapses the timestamptz columns to a driver-formatted
+      // string ("2026-08-03 03:48:12+03"), which Safari's Date parser rejects.
+      // Normalise to ISO here rather than in six places inside the query.
+      rows: (res.rows ?? []).map((r: Record<string, unknown>) => ({
+        ...r,
+        at: r.at ? new Date(r.at as string).toISOString() : null,
+      })),
+    })),
   ]);
 
   return c.json({
@@ -167,6 +283,15 @@ users.get("/:id/work", authMiddleware, adminOnly, async (c) => {
     leads:    theirLeads,
     tasks:    theirTasks,
     activity: recentActivity,
+    logins,
+    timeline: (timeline.rows ?? []).map((r: Record<string, unknown>) => ({
+      at:      r.at,
+      kind:    r.kind,
+      detail:  r.detail,
+      subject: r.subject,
+      body:    r.body,
+      link_id: r.link_id,
+    })),
   });
 });
 

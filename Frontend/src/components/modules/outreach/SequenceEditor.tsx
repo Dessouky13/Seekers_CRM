@@ -76,7 +76,7 @@ export function SequenceEditor({ sequenceId, onBack }: { sequenceId: string; onB
       agent_id:         stepAgentId || undefined,                 // from controlled state
     };
     const mutation = editingStep
-      ? updateStep.mutateAsync({ sequenceId, stepId: editingStep.id, ...payload })
+      ? updateStep.mutateAsync({ ...payload, sequenceId, stepId: editingStep.id })
       : addStep.mutateAsync(payload);
 
     mutation

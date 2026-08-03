@@ -2,7 +2,33 @@ import { createMiddleware } from "hono/factory";
 import { jwtVerify } from "jose";
 import { db } from "../db/client";
 import { profiles } from "../db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+
+// How stale presence is allowed to get before we spend a write refreshing it.
+// Every authenticated request could touch last_seen_at, but a busy page fires a
+// dozen queries at once and none of them need second-level accuracy — the Team
+// page renders "online now" from a 5-minute window anyway.
+const PRESENCE_REFRESH_MS = 3 * 60_000;
+
+/** userId -> last time we wrote presence, to avoid a write per request. */
+const presenceTouched = new Map<string, number>();
+
+function touchPresence(userId: string, lastSeenAt: Date | null) {
+  const now = Date.now();
+  const localLast = presenceTouched.get(userId) ?? 0;
+  if (now - localLast < PRESENCE_REFRESH_MS) return;
+
+  // The in-process map is only a fast path; the WHERE clause is what actually
+  // guarantees one write per interval across restarts and multiple workers.
+  presenceTouched.set(userId, now);
+  if (presenceTouched.size > 5_000) presenceTouched.clear();  // unbounded-growth guard
+
+  void db.update(profiles)
+    .set({ lastSeenAt: new Date() })
+    .where(sql`${profiles.id} = ${userId} AND (${profiles.lastSeenAt} IS NULL
+               OR ${profiles.lastSeenAt} < NOW() - INTERVAL '3 minutes')`)
+    .catch(() => { /* presence is best-effort and must never fail a request */ });
+}
 
 function getSecret(): Uint8Array {
   const secret = process.env.JWT_SECRET;
@@ -43,6 +69,7 @@ export const authMiddleware = createMiddleware(async (c, next) => {
     }
 
     c.set("user", profile);
+    touchPresence(profile.id, profile.lastSeenAt);
     await next();
   } catch {
     return c.json({ error: "Unauthorized", message: "Invalid or expired token" }, 401);

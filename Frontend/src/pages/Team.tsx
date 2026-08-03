@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   UserPlus, Shield, User as UserIcon, Trash2, Target, CheckSquare,
-  Send, AlertTriangle, Clock, ChevronRight, Eye, EyeOff,
+  Send, AlertTriangle, Eye, EyeOff, LogIn, Receipt, Sparkles, ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +39,49 @@ function relativeTime(iso: string | null): string {
   if (days < 30) return `${days}d ago`;
   return new Date(iso).toLocaleDateString();
 }
+
+/** Coarse device label from a user-agent, for the login history rows. */
+function deviceOf(ua: string | null): string {
+  if (!ua) return "unknown device";
+  if (/iPhone|Android.*Mobile/i.test(ua)) return "mobile";
+  if (/iPad|Tablet/i.test(ua))            return "tablet";
+  const browser = /Edg\//.test(ua) ? "Edge"
+    : /OPR\//.test(ua) ? "Opera"
+    : /Chrome\//.test(ua) ? "Chrome"
+    : /Safari\//.test(ua) ? "Safari"
+    : /Firefox\//.test(ua) ? "Firefox" : "browser";
+  const os = /Windows/.test(ua) ? "Windows"
+    : /Mac OS X/.test(ua) ? "macOS"
+    : /Linux/.test(ua) ? "Linux" : "";
+  return os ? `${browser} · ${os}` : browser;
+}
+
+/** Green when seen in the last 5 minutes, amber within the day, else grey. */
+function PresenceDot({ online, lastSeen }: { online: boolean; lastSeen: string | null }) {
+  const recent = !online && lastSeen
+    && Date.now() - new Date(lastSeen).getTime() < 24 * 3600_000;
+  const tone  = online ? "bg-emerald-500" : recent ? "bg-amber-500" : "bg-muted-foreground/40";
+  const title = online ? "Online now"
+    : lastSeen ? `Last active ${relativeTime(lastSeen)}` : "Never signed in";
+  return (
+    <span className="relative flex h-2 w-2 shrink-0" title={title} aria-label={title}>
+      {online && (
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-70" />
+      )}
+      <span className={cn("relative inline-flex h-2 w-2 rounded-full", tone)} />
+    </span>
+  );
+}
+
+const TIMELINE_STYLE: Record<string, { label: string; icon: React.ElementType; tone: string }> = {
+  lead_activity:  { label: "Lead activity", icon: Target,      tone: "text-primary" },
+  task_created:   { label: "Created task",  icon: CheckSquare, tone: "text-info" },
+  task_completed: { label: "Completed",     icon: CheckSquare, tone: "text-emerald-400" },
+  enrolled:       { label: "Enrolled",      icon: Send,        tone: "text-violet-400" },
+  transaction:    { label: "Finance",       icon: Receipt,     tone: "text-amber-400" },
+  agent_run:      { label: "AI agent",      icon: Sparkles,    tone: "text-fuchsia-400" },
+  login:          { label: "Signed in",     icon: LogIn,       tone: "text-muted-foreground" },
+};
 
 export default function Team() {
   const { data: members = [], isLoading } = useTeamWorkSummary();
@@ -193,6 +236,7 @@ function MemberCard({ m, isSelf, onOpen, onToggleRole, onDelete, busy }: {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
+            <PresenceDot online={m.session.is_online} lastSeen={m.session.last_seen_at} />
             <span className="text-sm font-semibold text-foreground">{m.name}</span>
             <Badge variant="outline" className={cn(
               "text-[9px]", isAdmin ? "border-primary/40 text-primary" : "border-info/40 text-info",
@@ -200,9 +244,31 @@ function MemberCard({ m, isSelf, onOpen, onToggleRole, onDelete, busy }: {
               {isAdmin ? "ADMIN" : "MEMBER"}
             </Badge>
             {isSelf && <Badge variant="outline" className="text-[9px]">YOU</Badge>}
+            {/* An account that exists but has never been used is an onboarding
+                failure, not just "inactive" — it needs its own label. */}
+            {m.session.never_logged_in && (
+              <Badge variant="outline" className="text-[9px] border-warning/40 text-warning">
+                NEVER SIGNED IN
+              </Badge>
+            )}
+            {m.session.failed_24h >= 3 && (
+              <Badge
+                variant="outline"
+                className="text-[9px] border-destructive/40 text-destructive gap-0.5"
+                title={`${m.session.failed_24h} failed sign-in attempts in the last 24 hours`}
+              >
+                <ShieldAlert className="h-2.5 w-2.5" />
+                {m.session.failed_24h} FAILED
+              </Badge>
+            )}
           </div>
           <p className="text-[11px] text-muted-foreground truncate">
-            {m.email} · active {relativeTime(m.activity.last_at)}
+            {m.email} ·{" "}
+            {m.session.is_online
+              ? <span className="text-emerald-400">online now</span>
+              : m.session.never_logged_in
+                ? "never signed in"
+                : `last seen ${relativeTime(m.session.last_seen_at)}`}
           </p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -249,10 +315,16 @@ function MemberCard({ m, isSelf, onOpen, onToggleRole, onDelete, busy }: {
           value={`${m.outreach.sends} sent`}
           sub={`${m.outreach.enrolled} enrolled · ${m.outreach.replied} replied`}
         />
+        {/* Was "N logged in the last 7 days", counted from lead notes — which
+            told you nothing about whether the person had opened the app. This
+            is the real sign-in record. */}
         <Stat
-          icon={Clock} label="Activity"
-          value={`${m.activity.logged_last_7d} logged`}
-          sub="in the last 7 days"
+          icon={LogIn} label="Sign-ins"
+          value={m.session.never_logged_in ? "never" : `${m.session.logins_30d} · 30d`}
+          sub={m.session.never_logged_in
+            ? "account not yet used"
+            : `last ${relativeTime(m.session.last_login_at)} · ${m.session.logins_total} total`}
+          warn={m.session.failed_24h >= 3 ? `${m.session.failed_24h} failed today` : undefined}
         />
       </div>
     </div>
@@ -495,20 +567,94 @@ function MemberWorkDialog({ userId, onClose }: { userId: string | null; onClose:
               )}
             </Section>
 
-            <Section title={`Recent activity (${data.activity.length})`}>
-              {data.activity.length === 0 ? <Empty>Nothing logged yet.</Empty> : (
-                <div className="space-y-1.5 max-h-72 overflow-y-auto">
-                  {data.activity.map((a) => (
-                    <div key={a.id} className="rounded-md border border-border/60 bg-muted/10 px-3 py-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-medium text-foreground truncate">
-                          {a.lead_name ?? "—"}{a.lead_company ? ` · ${a.lead_company}` : ""}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground shrink-0">{relativeTime(a.createdAt)}</span>
+            {/* One feed across leads, tasks, outreach, finance, AI runs and
+                sign-ins — the question "what has this person been doing" was
+                previously only answerable for lead notes. */}
+            <Section title={`Activity timeline (${data.timeline?.length ?? 0})`}>
+              {!data.timeline?.length ? (
+                <Empty>No recorded actions yet.</Empty>
+              ) : (
+                <div className="relative max-h-80 space-y-0 overflow-y-auto pl-1">
+                  {data.timeline.map((t, i) => {
+                    const s = TIMELINE_STYLE[t.kind] ?? TIMELINE_STYLE.lead_activity;
+                    const Icon = s.icon;
+                    const last = i === data.timeline.length - 1;
+                    return (
+                      <div key={`${t.at}-${i}`} className="flex gap-2.5">
+                        {/* Rail: icon plus the connector to the next entry. */}
+                        <div className="flex flex-col items-center">
+                          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border bg-card">
+                            <Icon className={cn("h-3 w-3", s.tone)} />
+                          </div>
+                          {!last && <div className="w-px flex-1 bg-border/60" />}
+                        </div>
+                        <div className={cn("min-w-0 flex-1", last ? "pb-0" : "pb-3")}>
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="truncate text-[11px] font-medium text-foreground">
+                              {s.label}
+                              {t.subject ? <span className="text-muted-foreground"> · {t.subject}</span> : null}
+                            </span>
+                            <span
+                              className="shrink-0 text-[10px] tabular-nums text-muted-foreground"
+                              title={new Date(t.at).toLocaleString()}
+                            >
+                              {relativeTime(t.at)}
+                            </span>
+                          </div>
+                          {(t.body || t.detail) && (
+                            <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
+                              {t.kind === "login"
+                                ? `${t.detail === "failed" ? "Failed attempt" : "Signed in"} from ${t.subject} · ${deviceOf(t.body)}`
+                                : t.body || t.detail}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                      <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{a.description}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-[10px] text-muted-foreground/70">
+                Built from authored records. Edits made in place to an existing
+                row are not attributed and so do not appear here.
+              </p>
+            </Section>
+
+            <Section title={`Sign-in history (${data.logins?.length ?? 0})`}>
+              {!data.logins?.length ? (
+                <Empty>This account has never been signed in to.</Empty>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full min-w-[520px] text-xs">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/30">
+                        {["When", "Result", "IP", "Device"].map((h) => (
+                          <th key={h} className="px-3 py-1.5 text-left font-semibold uppercase tracking-wider text-muted-foreground">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.logins.map((g) => (
+                        <tr key={g.id} className="border-b border-border/40 last:border-0">
+                          <td className="px-3 py-1.5 tabular-nums text-muted-foreground" title={new Date(g.createdAt).toLocaleString()}>
+                            {relativeTime(g.createdAt)}
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <Badge
+                              variant="outline"
+                              className={cn("text-[9px]", g.success
+                                ? "border-emerald-500/40 text-emerald-400"
+                                : "border-destructive/40 text-destructive")}
+                            >
+                              {g.success ? "OK" : "FAILED"}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-1.5 font-mono text-[10px] text-muted-foreground">{g.ip ?? "—"}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground">{deviceOf(g.userAgent)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </Section>

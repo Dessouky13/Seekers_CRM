@@ -294,10 +294,13 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
             </form>
           )}
 
-          {/* Create Task Dialog — pre-filled with the lead's context */}
-          <Dialog open={taskOpen} onOpenChange={setTaskOpen}>
+          {/* Create Task Dialog — pre-filled with the lead's context.
+              Guarded on `lead`: this sits outside the view-mode block, so while
+              the detail query is in flight `lead` is undefined. Dereferencing it
+              here threw and took the whole CRM page down with it. */}
+          <Dialog open={taskOpen && !!lead} onOpenChange={setTaskOpen}>
             <DialogContent>
-              <DialogHeader><DialogTitle>New task for {lead.name}</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>New task for {lead?.name}</DialogTitle></DialogHeader>
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -308,7 +311,7 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
                       description: (fd.get('description') as string) || undefined,
                       due_date:    (fd.get('due_date') as string) || undefined,
                       priority:    (fd.get('priority') as string) || 'medium',
-                      assignee_id: lead.assigneeId || undefined,
+                      assignee_id: lead?.assigneeId || undefined,
                     },
                     {
                       onSuccess: () => { setTaskOpen(false); toast.success('Task created'); },
@@ -324,7 +327,7 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
                     name="title"
                     required
                     className="mt-1"
-                    defaultValue={'Follow up: ' + lead.company}
+                    defaultValue={'Follow up: ' + (lead?.company ?? '')}
                   />
                 </div>
                 <div><Label>Notes</Label><Input name="description" className="mt-1" placeholder="Optional" /></div>

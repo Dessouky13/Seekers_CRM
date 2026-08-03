@@ -23,6 +23,12 @@
     },
     "skipLibCheck": true,
     "strict": false,
+    // Null safety is enforced even though full `strict` is not. A blank-page
+    // crash shipped because `lead.name` was read while the detail query was
+    // still in flight; with this on, that is a compile error. Cost to enable
+    // across the whole app was a single pre-existing bug, so there is no
+    // backlog of suppressions to pay down.
+    "strictNullChecks": true,
     "target": "ES2020",
     "types": [
       "vitest/globals"
