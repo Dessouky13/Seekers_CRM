@@ -1,0 +1,98 @@
+import { describe, it, expect } from "vitest";
+import {
+  dailyCapFor, releaseCount, spreadGapSeconds, slotsRemainingToday,
+  nextStageAfterSpamReject, nextSpreadSlot,
+  MIN_GAP_SECONDS, MAX_GAP_SECONDS,
+  SEND_WINDOW_START_HOUR, SEND_WINDOW_END_HOUR,
+} from "./sending-policy";
+
+describe("dailyCapFor", () => {
+  it("starts at 5 a day in recovery", () => {
+    // The domain is already burned by 871 sends, so recovery is the START state,
+    // not a punishment reached later.
+    expect(dailyCapFor("recovery", 0)).toBe(5);
+    expect(dailyCapFor("recovery", 8)).toBe(5);
+  });
+
+  it("ramps warmup by 5 per clean week from a base of 10", () => {
+    expect(dailyCapFor("warmup", 0)).toBe(10);
+    expect(dailyCapFor("warmup", 1)).toBe(15);
+    expect(dailyCapFor("warmup", 2)).toBe(20);
+  });
+
+  it("never lets warmup exceed the active ceiling", () => {
+    expect(dailyCapFor("warmup", 100)).toBe(40);
+  });
+
+  it("caps active sending at 40 a day", () => {
+    expect(dailyCapFor("active", 0)).toBe(40);
+    expect(dailyCapFor("active", 50)).toBe(40);
+  });
+});
+
+describe("releaseCount", () => {
+  it("spreads the remaining allowance across the remaining slots", () => {
+    expect(releaseCount({ capRemaining: 20, slotsRemaining: 4 })).toBe(5);
+  });
+
+  it("releases everything in the final slot", () => {
+    expect(releaseCount({ capRemaining: 7, slotsRemaining: 1 })).toBe(7);
+  });
+
+  it("rounds down so the cap is never exceeded", () => {
+    expect(releaseCount({ capRemaining: 7, slotsRemaining: 4 })).toBe(1);
+  });
+
+  it("still releases one when the allowance is thinner than the slots", () => {
+    // Rounding down to 0 would stall sending entirely for the rest of the day.
+    expect(releaseCount({ capRemaining: 2, slotsRemaining: 8 })).toBe(1);
+  });
+
+  it("releases nothing once the cap is used up", () => {
+    expect(releaseCount({ capRemaining: 0, slotsRemaining: 5 })).toBe(0);
+    expect(releaseCount({ capRemaining: -3, slotsRemaining: 5 })).toBe(0);
+  });
+
+  it("releases nothing when there are no slots left", () => {
+    expect(releaseCount({ capRemaining: 10, slotsRemaining: 0 })).toBe(0);
+  });
+});
+
+describe("spreadGapSeconds", () => {
+  it("stays inside the configured bounds", () => {
+    expect(spreadGapSeconds(() => 0)).toBe(MIN_GAP_SECONDS);
+    expect(spreadGapSeconds(() => 0.999)).toBeLessThanOrEqual(MAX_GAP_SECONDS);
+    expect(spreadGapSeconds(() => 0.5)).toBeGreaterThan(MIN_GAP_SECONDS);
+  });
+});
+
+describe("nextSpreadSlot", () => {
+  it("adds the gap to the given instant", () => {
+    const from = new Date("2026-08-03T09:00:00Z");
+    expect(nextSpreadSlot(from, 120).getTime() - from.getTime()).toBe(120_000);
+  });
+});
+
+describe("slotsRemainingToday", () => {
+  it("counts whole hours left in the Cairo send window", () => {
+    // 09:00 Cairo = 06:00 UTC in summer (UTC+3).
+    const nineCairo = new Date("2026-08-03T06:00:00Z");
+    expect(slotsRemainingToday(nineCairo)).toBe(SEND_WINDOW_END_HOUR - SEND_WINDOW_START_HOUR);
+  });
+
+  it("returns 0 before the window opens", () => {
+    const sixCairo = new Date("2026-08-03T03:00:00Z");
+    expect(slotsRemainingToday(sixCairo)).toBe(0);
+  });
+
+  it("returns 0 after the window closes", () => {
+    const eighteenCairo = new Date("2026-08-03T15:00:00Z");
+    expect(slotsRemainingToday(eighteenCairo)).toBe(0);
+  });
+});
+
+describe("nextStageAfterSpamReject", () => {
+  it("drops straight to recovery", () => {
+    expect(nextStageAfterSpamReject()).toBe("recovery");
+  });
+});
