@@ -1364,21 +1364,30 @@ outreach.get("/deliverability", authMiddleware, adminOnly, async (c) => {
   });
 });
 
+// Handle type for the `tx` parameter of `db.transaction(async (tx) => ...)`.
+// Threading this through resumeAndAdvance (instead of it closing over the
+// outer `db`) is what keeps its writes inside the caller's transaction.
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /**
  * Put a manual-step enrollment back into the running sequence.
  *
  * Sets status back to active and schedules the next step, so the cadence
  * resumes from now rather than from the original enrolment date — otherwise a
  * step actioned three days late would fire the remaining steps in a burst.
+ *
+ * Takes the transaction handle from the caller's `db.transaction(...)` block —
+ * every write here must land in the SAME transaction as the rest of the
+ * touch-outcome mutation, or the row lock taken there buys nothing.
  */
-async function resumeAndAdvance(enrollment: typeof outreachEnrollments.$inferSelect) {
-  const steps = await db.select().from(outreachSteps)
+async function resumeAndAdvance(tx: Tx, enrollment: typeof outreachEnrollments.$inferSelect) {
+  const steps = await tx.select().from(outreachSteps)
     .where(eq(outreachSteps.sequenceId, enrollment.sequenceId))
     .orderBy(outreachSteps.position);
 
   const nextIdx = enrollment.currentStep + 1;
   if (nextIdx >= steps.length) {
-    await db.update(outreachEnrollments)
+    await tx.update(outreachEnrollments)
       .set({ status: "completed", completedAt: new Date(), nextSendAt: null })
       .where(eq(outreachEnrollments.id, enrollment.id));
     return;
@@ -1388,7 +1397,7 @@ async function resumeAndAdvance(enrollment: typeof outreachEnrollments.$inferSel
   const next = steps[nextIdx];
   const gapDays = Math.max(1, (next.dayOffset ?? 0) - (prev?.dayOffset ?? 0));
 
-  await db.update(outreachEnrollments)
+  await tx.update(outreachEnrollments)
     .set({
       status:              "active",
       currentStep:         nextIdx,
@@ -1397,21 +1406,6 @@ async function resumeAndAdvance(enrollment: typeof outreachEnrollments.$inferSel
       nextSendAt:          computeNextSendAtFromNow(gapDays),
     })
     .where(eq(outreachEnrollments.id, enrollment.id));
-}
-
-/** Members may only action enrollments on leads assigned to them. */
-async function canTouchEnrollment(
-  user: { id: string; role?: string },
-  enrollmentId: string,
-): Promise<boolean> {
-  if (user.role === "admin") return true;
-  const [row] = await db
-    .select({ assigneeId: leads.assigneeId })
-    .from(outreachEnrollments)
-    .innerJoin(leads, eq(leads.id, outreachEnrollments.leadId))
-    .where(eq(outreachEnrollments.id, enrollmentId))
-    .limit(1);
-  return !!row && row.assigneeId === user.id;
 }
 
 // ── POST /outreach/enrollments/:id/touch-outcome ──────────
@@ -1429,84 +1423,116 @@ outreach.post("/enrollments/:id/touch-outcome", authMiddleware, async (c) => {
   const id   = c.req.param("id");
   const body = touchOutcomeSchema.parse(await c.req.json());
 
-  const [row] = await db
-    .select({
-      enrollment: outreachEnrollments,
-      leadId:     leads.id,
-      leadName:   leads.name,
-      channel:    outreachSteps.channel,
-    })
+  // Existence and authorization are resolved before any lock is taken — a
+  // lead's assignee can't change mid-request, so only the enrollment's status
+  // (re-checked below, under the lock) is actually racy.
+  const [exists] = await db
+    .select({ id: outreachEnrollments.id })
     .from(outreachEnrollments)
-    .innerJoin(leads, eq(leads.id, outreachEnrollments.leadId))
-    .leftJoin(outreachSteps, and(
-      eq(outreachSteps.sequenceId, outreachEnrollments.sequenceId),
-      eq(outreachSteps.position, outreachEnrollments.currentStep),
-    ))
     .where(eq(outreachEnrollments.id, id))
     .limit(1);
+  if (!exists) return c.json({ error: "Enrollment not found" }, 404);
 
-  if (!row) return c.json({ error: "Enrollment not found" }, 404);
-  // Members may only action their own leads, same rule as every other route.
-  if (!(await canTouchEnrollment(user, id))) {
+  // Same admin-or-assignee rule pause/resume/cancel/sends already use, just
+  // returning 403 instead of 404 since we already know the enrollment exists.
+  if (!(await mayUseEnrollment(user, id))) {
     return c.json({ error: "Forbidden" }, 403);
   }
-  if (row.enrollment.status !== "awaiting_action") {
-    return c.json({ error: "This enrollment is not waiting on a manual step" }, 409);
-  }
 
-  const activity = async (description: string) => {
-    await db.insert(leadActivities).values({
-      leadId:      row.leadId,
-      type:        row.channel === "call" ? "call" : "note",
-      description: description.slice(0, 1000),
-      createdBy:   user.id,
-    });
-  };
+  const result = await db.transaction(async (tx) => {
+    // Re-read the row FOR UPDATE, locked to just outreach_enrollments — the
+    // LEFT JOIN to outreach_steps below is on its nullable side, and Postgres
+    // refuses "FOR UPDATE" across the nullable side of an outer join unless
+    // the lock is scoped with OF. A concurrent touch-outcome call on the same
+    // enrollment blocks on this SELECT until this transaction commits or
+    // rolls back, then re-reads the now-updated status instead of both
+    // requests acting on the same stale "awaiting_action" read.
+    const [row] = await tx
+      .select({
+        enrollment: outreachEnrollments,
+        leadId:     leads.id,
+        channel:    outreachSteps.channel,
+      })
+      .from(outreachEnrollments)
+      .innerJoin(leads, eq(leads.id, outreachEnrollments.leadId))
+      .leftJoin(outreachSteps, and(
+        eq(outreachSteps.sequenceId, outreachEnrollments.sequenceId),
+        eq(outreachSteps.position, outreachEnrollments.currentStep),
+      ))
+      .where(eq(outreachEnrollments.id, id))
+      .for("update", { of: outreachEnrollments })
+      .limit(1);
 
-  switch (body.outcome) {
-    case "sent": {
-      // A message that went through IS the confirmation the number is on
-      // WhatsApp, so success teaches the list as well as failure does.
-      if (row.channel === "whatsapp") {
-        await db.update(leads).set({ whatsappStatus: "yes" }).where(eq(leads.id, row.leadId));
+    if (!row) {
+      return { status: 404 as const, body: { error: "Enrollment not found" } };
+    }
+    if (row.enrollment.status !== "awaiting_action") {
+      return { status: 409 as const, body: { error: "This enrollment is not waiting on a manual step" } };
+    }
+
+    // currentStep can point at a step that was deleted while the enrollment
+    // sat blocked, in which case the LEFT JOIN yields a null channel. Don't
+    // claim a channel we don't actually know, and don't touch whatsapp_status
+    // on a guess.
+    const channel = row.channel;
+
+    const activity = async (description: string) => {
+      await tx.insert(leadActivities).values({
+        leadId:      row.leadId,
+        type:        channel === "call" ? "call" : "note",
+        description: description.slice(0, 1000),
+        createdBy:   user.id,
+      });
+    };
+
+    switch (body.outcome) {
+      case "sent": {
+        // A message that went through IS the confirmation the number is on
+        // WhatsApp, so success teaches the list as well as failure does.
+        if (channel === "whatsapp") {
+          await tx.update(leads).set({ whatsappStatus: "yes" }).where(eq(leads.id, row.leadId));
+        }
+        const label = channel === "call" ? "Called" : channel === "whatsapp" ? "WhatsApp sent" : "Actioned";
+        await activity(`${label}${body.notes ? ` — ${body.notes}` : ""}`);
+        await resumeAndAdvance(tx, row.enrollment);
+        break;
       }
-      await activity(`${row.channel === "call" ? "Called" : "WhatsApp sent"}${body.notes ? ` — ${body.notes}` : ""}`);
-      await resumeAndAdvance(row.enrollment);
-      break;
+      case "no_whatsapp": {
+        await tx.update(leads).set({ whatsappStatus: "no" }).where(eq(leads.id, row.leadId));
+        await activity("No WhatsApp on this number — routing to another channel");
+        // Re-route rather than stop: the lead may still have a working email.
+        await resumeAndAdvance(tx, row.enrollment);
+        break;
+      }
+      case "wrong_number": {
+        await tx.update(leads)
+          .set({ phone: null, phoneE164: null, phoneType: null, whatsappStatus: "no" })
+          .where(eq(leads.id, row.leadId));
+        await activity("Wrong number — cleared");
+        await resumeAndAdvance(tx, row.enrollment);
+        break;
+      }
+      case "not_interested": {
+        await tx.update(leads).set({ stage: "closed_lost" }).where(eq(leads.id, row.leadId));
+        await tx.update(outreachEnrollments)
+          .set({ status: "completed", completedAt: new Date(), nextSendAt: null })
+          .where(eq(outreachEnrollments.id, id));
+        await activity(`Not interested${body.notes ? ` — ${body.notes}` : ""}`);
+        break;
+      }
+      case "replied": {
+        await tx.update(outreachEnrollments)
+          .set({ status: "replied", completedAt: new Date(), nextSendAt: null })
+          .where(eq(outreachEnrollments.id, id));
+        await activity(`Replied${body.notes ? ` — ${body.notes}` : ""}`);
+        break;
+      }
     }
-    case "no_whatsapp": {
-      await db.update(leads).set({ whatsappStatus: "no" }).where(eq(leads.id, row.leadId));
-      await activity("No WhatsApp on this number — routing to another channel");
-      // Re-route rather than stop: the lead may still have a working email.
-      await resumeAndAdvance(row.enrollment);
-      break;
-    }
-    case "wrong_number": {
-      await db.update(leads)
-        .set({ phone: null, phoneE164: null, phoneType: null, whatsappStatus: "no" })
-        .where(eq(leads.id, row.leadId));
-      await activity("Wrong number — cleared");
-      await resumeAndAdvance(row.enrollment);
-      break;
-    }
-    case "not_interested": {
-      await db.update(leads).set({ stage: "closed_lost" }).where(eq(leads.id, row.leadId));
-      await db.update(outreachEnrollments)
-        .set({ status: "completed", completedAt: new Date(), nextSendAt: null })
-        .where(eq(outreachEnrollments.id, id));
-      await activity(`Not interested${body.notes ? ` — ${body.notes}` : ""}`);
-      break;
-    }
-    case "replied": {
-      await db.update(outreachEnrollments)
-        .set({ status: "replied", completedAt: new Date(), nextSendAt: null })
-        .where(eq(outreachEnrollments.id, id));
-      await activity(`Replied${body.notes ? ` — ${body.notes}` : ""}`);
-      break;
-    }
-  }
 
-  return c.json({ ok: true, outcome: body.outcome });
+    return { status: 200 as const, body: { ok: true, outcome: body.outcome } };
+  });
+
+  return c.json(result.body, result.status);
 });
 
 export default outreach;
