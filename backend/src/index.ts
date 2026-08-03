@@ -202,6 +202,22 @@ if (process.env.DIGEST_ENABLED === "true") {
   console.log(`[digest] enabled — fires at ${process.env.DIGEST_HOUR ?? 9}:00 Africa/Cairo`);
 }
 
+// The mailboxes table exists but ships empty, and the daily cap has nowhere to
+// live without a row. Idempotent: only ever inserts the configured sender.
+void (async () => {
+  const address = process.env.EMAIL_FROM;
+  if (!address) return;
+  try {
+    await db.execute(sql`
+      INSERT INTO mailboxes (address, daily_cap, warmup_stage)
+      VALUES (${address}, 0, 'recovery')
+      ON CONFLICT (address) DO NOTHING
+    `);
+  } catch (e: any) {
+    console.error("[boot] could not seed mailbox:", e?.message);
+  }
+})();
+
 // ── Inbox poller: read INBOX replies/bounces every N minutes ────────
 // Runs tighter than the outreach sweep so a reply pauses the sequence before
 // the next scheduled touch goes out.

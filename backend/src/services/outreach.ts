@@ -3,12 +3,17 @@ import { and, eq, lte, sql, asc, isNull, or } from "drizzle-orm";
 import { db } from "../db/client";
 import {
   outreachSequences, outreachSteps, outreachEnrollments, outreachSends,
-  leads, leadActivities, profiles,
+  leads, leadActivities, profiles, mailboxes, suppressions,
 } from "../db/schema";
 import { sendOutreachEmail, buildDefaultSignature, buildDefaultSignatureText } from "./email";
 import { runAgent, isEmailCapableAgent } from "./agents";
 import { fireEventAsync } from "./webhooks";
 import { sanitizeSubject } from "./outreach-subject";
+import {
+  dailyCapFor, releaseCount, slotsRemainingToday, spreadGapSeconds,
+  nextSpreadSlot, nextStageAfterSpamReject, type WarmupStage,
+} from "./sending-policy";
+import { suppress, suppressedSet } from "./suppressions";
 
 // Mustache-lite template renderer. Supports {{name}}, {{company}}, etc.
 // Missing keys render as empty string. Whitespace inside braces is ignored.
@@ -187,9 +192,76 @@ function isPermanentSendError(msg: string): boolean {
   return /\b(550|551|553|554)\b|spam|blocked|black\s?list|no such user|mailbox (unavailable|not found|does not exist)|user unknown|address rejected|recipient (address )?rejected|invalid recipient|relay access denied/i.test(msg);
 }
 
+// The provider's own outbound filter refusing us, as distinct from the
+// recipient's server rejecting a bad address. Namecheap returns
+// "554 5.7.1 ... JFE040023" when it decides a message looks like bulk.
+//
+// This is the signal that matters most: it means continuing at the current rate
+// will make things worse, so the mailbox drops to the recovery cap.
+function isSpamRejection(msg: string): boolean {
+  return /\b554\b|JFE\d+|spam|blocked|blacklist|reputation|bulk/i.test(msg);
+}
+
+/** Bucket a failure so the UI can explain it rather than just reporting "failed". */
+function classifyFailure(msg: string): "spam_reject" | "permanent" | "infra" | "transient" {
+  if (isSpamRejection(msg))         return "spam_reject";
+  if (isPermanentSendError(msg))    return "permanent";
+  if (isRecoverableInfraError(msg)) return "infra";
+  return "transient";
+}
+
+/**
+ * Whole clean weeks since the mailbox last changed stage, which is what the
+ * warmup ramp is paid out against. Missing timestamp means "just started".
+ */
+function cleanWeeksFor(mailbox: typeof mailboxes.$inferSelect | undefined): number {
+  if (!mailbox?.updatedAt) return 0;
+  const ms = Date.now() - new Date(mailbox.updatedAt).getTime();
+  return Math.max(0, Math.floor(ms / (7 * 86_400_000)));
+}
+
+async function isSuppressedAddress(address: string): Promise<boolean> {
+  return (await suppressedSet([address])).size > 0;
+}
+
 // ── Scheduler tick: find due enrollments, send next step ──
-export async function processDueSends(limit = 20): Promise<{ processed: number; sent: number; failed: number }> {
+export async function processDueSends(limit = 20): Promise<{ processed: number; sent: number; failed: number; throttled: number }> {
   const now = new Date();
+
+  // ── Volume gate ───────────────────────────────────────
+  // Outside the Cairo send window, or over today's cap, nothing goes out. This
+  // replaces the previous behaviour of releasing every due enrollment at once.
+  const slots = slotsRemainingToday(now);
+  if (slots === 0) {
+    return { processed: 0, sent: 0, failed: 0, throttled: 0 };
+  }
+
+  const [mailbox] = await db.select().from(mailboxes).limit(1);
+  const stage = (mailbox?.warmupStage ?? "recovery") as WarmupStage;
+  const cap   = mailbox?.dailyCap && mailbox.dailyCap > 0
+    ? mailbox.dailyCap
+    : dailyCapFor(stage, cleanWeeksFor(mailbox));
+
+  // Authoritative count: derived from the sends table for the current Cairo
+  // day, never from a stored counter — a counter drifts across restarts and
+  // double-sends, and this number decides whether we breach the cap.
+  const [{ sentTodayCount }] = await db
+    .select({ sentTodayCount: sql<number>`COUNT(*)::int` })
+    .from(outreachSends)
+    .where(and(
+      eq(outreachSends.status, "sent"),
+      sql`(${outreachSends.sentAt} AT TIME ZONE 'Africa/Cairo')::date
+          = (NOW() AT TIME ZONE 'Africa/Cairo')::date`,
+    ));
+
+  const release = releaseCount({
+    capRemaining:   cap - Number(sentTodayCount),
+    slotsRemaining: slots,
+  });
+  if (release === 0) {
+    return { processed: 0, sent: 0, failed: 0, throttled: 1 };
+  }
+
   const due = await db
     .select()
     .from(outreachEnrollments)
@@ -197,10 +269,11 @@ export async function processDueSends(limit = 20): Promise<{ processed: number; 
       eq(outreachEnrollments.status, "active"),
       lte(outreachEnrollments.nextSendAt, now),
     ))
-    .limit(limit);
+    .limit(Math.min(limit, release));
 
   let sent = 0;
   let failed = 0;
+  let throttled = 0;
 
   for (const enrollment of due) {
     try {
@@ -240,7 +313,7 @@ export async function processDueSends(limit = 20): Promise<{ processed: number; 
     }
   }
 
-  return { processed: due.length, sent, failed };
+  return { processed: due.length, sent, failed, throttled };
 }
 
 // Record a failed send + decide whether to retry (transient) or give up
@@ -252,6 +325,7 @@ async function handleSendFailure(
   err: any,
 ): Promise<"retry" | "failed"> {
   const msg = String(err?.message ?? err);
+  const kind = classifyFailure(msg);
 
   // Always log the failure to the sends table so it's visible in analytics.
   await db.insert(outreachSends).values({
@@ -262,7 +336,26 @@ async function handleSendFailure(
     body:         null,
     status:       "failed",
     error:        msg.slice(0, 1000),
+    failureKind:  kind,
   });
+
+  // The provider is refusing us. Continuing at this rate makes it worse, so
+  // drop the mailbox to the recovery cap and suppress the address that drew it.
+  if (kind === "spam_reject") {
+    await db.update(mailboxes)
+      .set({ warmupStage: nextStageAfterSpamReject(), updatedAt: new Date() });
+    const [rejectedLead] = await db
+      .select({ email: leads.email })
+      .from(leads)
+      .where(eq(leads.id, enrollment.leadId))
+      .limit(1);
+    if (rejectedLead?.email) {
+      await suppress({
+        address: rejectedLead.email, reason: "spam_reject",
+        source: "scheduler", notes: msg.slice(0, 400),
+      });
+    }
+  }
 
   // Count failed attempts for THIS step (includes the row just inserted).
   const [{ failures }] = await db
@@ -353,6 +446,23 @@ async function processSingleSend(enrollment: typeof outreachEnrollments.$inferSe
   if (step.channel !== "email") {
     await advanceStep(enrollment, steps);
     return "advanced";
+  }
+
+  // Never send to a suppressed address. Checked here rather than only at
+  // enrolment because an address can be suppressed mid-sequence by a bounce.
+  if (await isSuppressedAddress(lead.email)) {
+    await db.insert(outreachSends).values({
+      enrollmentId: enrollment.id,
+      stepId:       step.id,
+      channel:      "email",
+      status:       "failed",
+      error:        "Address is on the suppression list",
+      failureKind:  "suppressed",
+    });
+    await db.update(outreachEnrollments)
+      .set({ status: "failed", pausedReason: "Address suppressed", nextSendAt: null })
+      .where(eq(outreachEnrollments.id, enrollment.id));
+    return "failed";
   }
 
   const vars = buildLeadVars(lead);
