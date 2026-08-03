@@ -529,7 +529,7 @@ function MemberWorkDialog({ userId, onClose }: { userId: string | null; onClose:
 
   return (
     <Dialog open={!!userId} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[88dvh] overflow-y-auto">
         {isLoading || !data ? (
           <MemberWorkSkeleton />
         ) : (

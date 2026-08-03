@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Plus, List, Columns3, Trash2, Pencil, FolderPlus } from "lucide-react";
+import { Plus, List, Columns3, Trash2, Pencil, FolderPlus, Circle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -146,15 +146,47 @@ export default function Tasks() {
 
   const TaskCard = ({ task }: { task: ApiTask }) => {
     const isOverdue = task.dueDate && task.status !== "done" && new Date(task.dueDate) < new Date();
+    const isDone = task.status === "done";
     return (
       <div
         onClick={() => setDetailTask(task)}
         className={cn(
           "rounded-lg border bg-card p-3 space-y-2 hover:border-primary/30 transition-colors cursor-pointer",
           isOverdue ? "border-destructive/40" : "border-border",
+          isDone && "opacity-60",
         )}
       >
-        <p className="text-sm font-medium text-foreground leading-snug">{task.title}</p>
+        <div className="flex items-start gap-2">
+          {/* Marking a task off is the most repeated action on a board, and it
+              cost six taps: the kanban's HTML5 drag does not work on touch, so
+              the only route was card -> unlabelled pencil -> a status select ->
+              Save. One tap now, through the same optimistic mutation the drag
+              used. stopPropagation so ticking it does not also open the detail
+              dialog; the 44px box is the hit area, not the visual size. */}
+          <button
+            type="button"
+            aria-label={isDone ? `Mark "${task.title}" as not done` : `Mark "${task.title}" done`}
+            aria-pressed={isDone}
+            className="-m-2 grid h-11 w-11 shrink-0 place-items-center rounded-md
+                       text-muted-foreground transition-colors hover:text-primary
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={(e) => {
+              e.stopPropagation();
+              moveTask.mutate(
+                { id: task.id, status: isDone ? "todo" : "done" },
+                { onError: (err) => toast.error(err.message) },
+              );
+            }}
+          >
+            {isDone
+              ? <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+              : <Circle className="h-5 w-5" />}
+          </button>
+          <p className={cn(
+            "flex-1 text-sm font-medium leading-snug text-foreground",
+            isDone && "line-through decoration-muted-foreground",
+          )}>{task.title}</p>
+        </div>
         {(task.project_name || task.client_name) && (
           <p className="text-[10px] text-muted-foreground">
             {task.project_name && <span className="text-primary/80">{task.project_name}</span>}

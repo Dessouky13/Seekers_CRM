@@ -12,7 +12,16 @@ const TabsList = React.forwardRef<
   <TabsPrimitive.List
     ref={ref}
     className={cn(
-      "inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground",
+      // `inline-flex` with nowrap triggers and no overflow meant a tab strip
+      // wider than the viewport simply had unreachable tabs. Finance's five tabs
+      // total ~500px against a 375px phone, so "Client Recurring" and "Setup
+      // Fees" could not be tapped at all; same for Outreach's "Setup & Ingestion".
+      // Scrolling here fixes every TabsList in the app at once. justify-start so
+      // the first tab is flush left when scrollable rather than centred and
+      // half-cut; the scrollbar is hidden because it overlays the tab labels.
+      "inline-flex h-10 max-w-full items-center justify-start overflow-x-auto rounded-md bg-muted p-1",
+      "text-muted-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+      "sm:justify-center",
       className,
     )}
     {...props}

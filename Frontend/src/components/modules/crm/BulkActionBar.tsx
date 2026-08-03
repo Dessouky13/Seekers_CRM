@@ -1,6 +1,7 @@
 // Floating bulk-action bar shown while rows are selected: selection count,
 // "enroll in sequence" dropdown, admin-only bulk delete, and clear selection.
 
+import { createPortal } from "react-dom";
 import { Send, Trash2, ChevronDown as ChevronDownIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -24,9 +25,22 @@ export function BulkActionBar({
   onDelete:           () => void;
   onClear:            () => void;
 }) {
-  return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
-      <div className="flex items-center gap-3 bg-card border border-border shadow-2xl rounded-xl px-4 py-2.5 backdrop-blur-md">
+  // Rendered into document.body, not in place.
+  //
+  // Three things were wrong on a phone. It lived inside <main>, which carries
+  // [transform:translateZ(0)] for smooth iOS scrolling — and a transform makes an
+  // element a containing block for `position: fixed` descendants, so this bar was
+  // pinned to the scroll container rather than the viewport and drifted with the
+  // content. `bottom-6` (24px) also placed it underneath the 56px MobileTabBar,
+  // and the single non-wrapping row was ~420px of content in a 375px viewport.
+  // Mobile row selection is offered, so a user could select leads and then have
+  // no reachable way to act on them.
+  return createPortal(
+    <div
+      className="fixed left-1/2 z-50 w-[calc(100%-1.5rem)] max-w-lg -translate-x-1/2 animate-fade-in
+                 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.75rem)] md:bottom-6 md:w-auto"
+    >
+      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 rounded-xl border border-border bg-card px-4 py-2.5 shadow-2xl backdrop-blur-md md:flex-nowrap">
         <span className="text-sm text-foreground tabular-nums">
           <span className="font-bold text-primary">{selectedCount}</span> selected
         </span>
@@ -104,6 +118,7 @@ export function BulkActionBar({
           Clear
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

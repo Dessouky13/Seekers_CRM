@@ -236,7 +236,7 @@ function TeamBoard() {
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function Notes() {
   return (
-    <div className="flex flex-col h-full max-h-[calc(100vh-8rem)] space-y-4">
+    <div className="flex flex-col h-full max-h-[calc(100dvh-8rem)] space-y-4">
       <div>
         <h1 className="text-xl font-semibold text-foreground flex items-center gap-2">
           <StickyNote className="h-5 w-5 text-primary" /> Notes

@@ -589,7 +589,7 @@ function LeadIntelDialog({ lead, onClose }: { lead: IntelLead | null; onClose: (
 
   return (
     <Dialog open={!!lead} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[88dvh] overflow-y-auto">
         {lead && (
           <>
             <DialogHeader>
