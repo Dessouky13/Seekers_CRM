@@ -7,7 +7,8 @@ export type ActionType =
   | "sequence_blocked"
   | "task_due"
   | "stale_lead"
-  | "unassigned_lead";
+  | "unassigned_lead"
+  | "manual_touch";
 
 export type Urgency = "now" | "today" | "week";
 
@@ -25,6 +26,11 @@ export interface WorklistAction {
   taskId:    string | null;
   dealValue: number;
   ageHours:  number;
+  /** Present only on manual_touch items. */
+  enrollmentId?: string;
+  channel?:      "whatsapp" | "call";
+  message?:      string | null;
+  phoneE164?:    string | null;
 }
 
 export interface WorklistResponse {

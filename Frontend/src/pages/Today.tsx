@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   MessageSquareReply, Flame, AlertTriangle, CheckSquare,
-  Clock, UserPlus, ArrowRight, CheckCircle2, TrendingDown,
+  Clock, UserPlus, ArrowRight, CheckCircle2, TrendingDown, MessageCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { GettingStarted } from "@/components/GettingStarted";
+import { ManualTouchCard } from "@/components/modules/ManualTouchCard";
 import {
   useWorklist, usePipelineHealth,
   type WorklistAction, type ActionType,
@@ -25,6 +26,7 @@ const STYLE: Record<ActionType, { icon: typeof Flame; label: string; tone: strin
   task_due:         { icon: CheckSquare,        label: "Task",          tone: "text-blue-400 bg-blue-500/10 border-blue-500/25",        dot: "bg-blue-500" },
   stale_lead:       { icon: Clock,              label: "Stale",         tone: "text-amber-400 bg-amber-500/10 border-amber-500/25",     dot: "bg-amber-500" },
   unassigned_lead:  { icon: UserPlus,           label: "No owner",      tone: "text-slate-400 bg-slate-500/10 border-slate-500/25",     dot: "bg-slate-500" },
+  manual_touch:     { icon: MessageCircle,      label: "Your turn",     tone: "text-emerald-400 bg-emerald-500/10 border-emerald-500/25", dot: "bg-emerald-500" },
 };
 
 const PRIMARY_CTA: Record<ActionType, string> = {
@@ -34,6 +36,7 @@ const PRIMARY_CTA: Record<ActionType, string> = {
   task_due:         "Open task",
   stale_lead:       "Chase",
   unassigned_lead:  "Assign",
+  manual_touch:     "Open",
 };
 
 const money = (n: number) =>
@@ -297,13 +300,17 @@ export default function Today() {
 
       {focus ? (
         <>
-          <FocusCard
-            action={focus}
-            onGo={go}
-            onSkip={() => setSkipped((s) => [...s, focus.id])}
-            position={all.length - live.length + 1}
-            total={all.length}
-          />
+          {focus.type === "manual_touch"
+            ? <ManualTouchCard action={focus} />
+            : (
+              <FocusCard
+                action={focus}
+                onGo={go}
+                onSkip={() => setSkipped((s) => [...s, focus.id])}
+                position={all.length - live.length + 1}
+                total={all.length}
+              />
+            )}
 
           {queue.length > 0 && (
             <div>
