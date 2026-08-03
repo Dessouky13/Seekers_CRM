@@ -133,6 +133,12 @@ Response:
         </a>
       </div>
 
+      {/* Already have a list — from one of the workflows above, a scrape, or a
+          spreadsheet someone put together? This is the fast path in: no
+          webhook or n8n setup needed. */}
+      <p className="text-xs text-muted-foreground px-1">
+        Already have a list from one of the workflows above, a scrape, or a spreadsheet? Skip the setup — paste or upload it directly below.
+      </p>
       <CsvImportPanel />
     </div>
   );

@@ -347,12 +347,19 @@ export interface BulkIngestPayload {
     deal_value?: number;
     notes?:      string | null;
   }>;
+  /** What to do with a row that matches an existing lead (by email, or by
+   *  name+company when there's no email). Default "update" patches missing
+   *  fields on the existing lead; "skip" leaves it untouched. Either way, a
+   *  row repeating an earlier row in the SAME batch never creates a second
+   *  record — see backend/src/services/lead-import.ts. */
+  mode?: "skip" | "update";
 }
 
 export interface BulkIngestResult {
   total:       number;
   created:     number;
-  deduped:     number;
+  updated:     number;
+  skipped:     number;
   errors:      number;
   created_ids: string[];
   error_rows:  { index: number; error: string }[];
