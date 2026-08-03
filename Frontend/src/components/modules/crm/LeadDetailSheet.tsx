@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { cairoToday } from "@/lib/dates";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AgentPanel } from "@/components/modules/AgentPanel";
@@ -55,7 +56,7 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
         leadId,
         type:        fd.get("type") as string,
         description: fd.get("description") as string,
-        date:        (fd.get("date") as string) || new Date().toISOString().slice(0, 10),
+        date:        (fd.get("date") as string) || cairoToday(),
       },
       {
         onSuccess: () => { setActivityOpen(false); toast.success("Activity added"); },
@@ -83,8 +84,19 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
         status:  "active",
       },
       {
-        onSuccess: () => toast.success(`${lead.name} converted to client`),
-        onError:   (err) => toast.error(err.message),
+        onSuccess: () => {
+          toast.success(`${lead.name} converted to client`);
+          // Closes the loop on the timeline: anyone reviewing this lead later
+          // can see exactly when and that it became a client, without having
+          // to cross-reference the Clients page.
+          addActivity.mutate({
+            leadId: lead.id,
+            type: "note",
+            description: "Converted to client",
+            date: cairoToday(),
+          });
+        },
+        onError: (err) => toast.error(err.message),
       },
     );
   };
@@ -97,18 +109,12 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
             <SheetTitle>{lead?.name ?? (isLoading ? "Loading…" : "Lead")}</SheetTitle>
             {lead && (
               <div className="flex items-center gap-1">
-                {lead.stage === "closed_won" && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs text-green-400 hover:text-green-400 gap-1"
-                    onClick={handleConvertToClient}
-                    disabled={createClient.isPending}
-                    title="Convert to client"
-                  >
-                    <UserCheck className="h-3.5 w-3.5" />
-                  </Button>
-                )}
+                {/* Convert-to-client used to live here too, as a second
+                    icon-only button easy to miss next to Edit/Delete. It's now
+                    a full-width button right under the Stage control below —
+                    same place you just moved the lead to Closed Won, so the
+                    next obvious action is right there instead of hidden in
+                    the header. */}
                 {/* These were unlabelled icon-only buttons, so a screen reader
                     announced "button" for the control that DELETES a lead. The
                     min-h/min-w give a 44px touch box without changing the visual
@@ -194,6 +200,25 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
                   </select>
                 </div>
               </div>
+
+              {/* The pipeline's obvious next step. Visible and one tap: no
+                  hunting for a tiny icon once a deal is won, and a plain
+                  sentence pointing at the stage control otherwise — not a
+                  tour, just the one thing to do next. */}
+              {lead.stage === "closed_won" ? (
+                <Button
+                  className="w-full gap-1.5 bg-green-600 text-white hover:bg-green-600/90"
+                  onClick={handleConvertToClient}
+                  disabled={createClient.isPending}
+                >
+                  <UserCheck className="h-3.5 w-3.5" />
+                  {createClient.isPending ? "Converting…" : "Convert to Client"}
+                </Button>
+              ) : (
+                <p className="text-xs text-muted-foreground -mt-3">
+                  Move the stage above to <strong>Closed Won</strong> to convert this lead into a client.
+                </p>
+              )}
 
               {lead.notes && (
                 <div>
@@ -408,7 +433,7 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
                   </select>
                 </div>
                 <div><Label>Description</Label><Input name="description" required className="mt-1" /></div>
-                <div><Label>Date</Label><Input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} className="mt-1" /></div>
+                <div><Label>Date</Label><Input name="date" type="date" defaultValue={cairoToday()} className="mt-1" /></div>
                 <DialogFooter>
                   <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
                   <Button type="submit" disabled={addActivity.isPending}>

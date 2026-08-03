@@ -1,9 +1,13 @@
 // Worklist ranking — "what needs a human, and in what order".
 //
-// Deliberately free of imports. No database, no HTTP, no clock of its own
+// Deliberately free of dependencies. No database, no HTTP, no clock of its own
 // (`now` is passed in). This is the part we will tune for months, so it has to
 // be runnable and testable on its own — see worklist-ranking.test.ts. The
 // database queries that feed it live in worklist.ts.
+//
+// The single import below is `utils/dates`, which is equally pure: it exists so
+// that "what day is it" has one answer across the codebase (Cairo, never UTC).
+import { cairoDate } from "../utils/dates";
 
 export type ActionType =
   | "reply_waiting"
@@ -317,7 +321,10 @@ function prettyStage(stage: string): string {
   return stage.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-const toIso = (d: Date) => d.toISOString().slice(0, 10);
+// Cairo, not UTC: `dueDate` and `lastActivity` are calendar days as the team
+// experiences them, so "is this task overdue" must be asked in the same calendar.
+// Under UTC a task due today reads as due *tomorrow* until 02:00 Cairo.
+const toIso = (d: Date) => cairoDate(d);
 
 /** Whole days between two YYYY-MM-DD strings (a - b). */
 function daysBetweenDates(a: string, b: string): number {

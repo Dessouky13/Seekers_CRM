@@ -8,16 +8,23 @@ import { db } from "../db/client";
 import { profiles } from "../db/schema";
 import { getWorklist } from "./worklist";
 import { fireEvent } from "./webhooks";
+import { cairoDate, CAIRO_TZ } from "../utils/dates";
 
 /** Cairo-local hour, so "09:00 digest" means 09:00 for the team, not UTC. */
-const TZ = process.env.DIGEST_TZ ?? "Africa/Cairo";
+const TZ = process.env.DIGEST_TZ ?? CAIRO_TZ;
 
 export function localHour(now: Date, tz = TZ): number {
   return Number(now.toLocaleString("en-US", { timeZone: tz, hour: "2-digit", hour12: false }));
 }
 
+/**
+ * YYYY-MM-DD in the digest timezone. This file got the timezone right before the
+ * rest of the codebase did; the implementation now lives in `utils/dates` so
+ * there is exactly one of it, and this stays as the TZ-overridable seam the
+ * digest scheduler needs.
+ */
 export function localDate(now: Date, tz = TZ): string {
-  return now.toLocaleDateString("en-CA", { timeZone: tz }); // YYYY-MM-DD
+  return cairoDate(now, tz);
 }
 
 /**

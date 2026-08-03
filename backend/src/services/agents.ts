@@ -9,6 +9,7 @@ import {
   agentRuns, profiles,
 } from "../db/schema";
 import { orChat, type ORMessage } from "./openrouter";
+import { cairoDaysAgo } from "../utils/dates";
 
 // ── Types ─────────────────────────────────────────────────
 export type AgentScope = "lead" | "client" | "task" | "pipeline" | "global";
@@ -334,7 +335,7 @@ Keep the entire proposal under 500 words. Be specific to their niche — no gene
         .groupBy(leads.stage);
 
       // Stale leads — no activity in 14 days
-      const fourteenAgo = new Date(Date.now() - 14 * 86400_000).toISOString().slice(0, 10);
+      const fourteenAgo = cairoDaysAgo(14);
       const staleRows = await db
         .select({ id: leads.id, name: leads.name, company: leads.company, stage: leads.stage, lastActivity: leads.lastActivity, dealValue: leads.dealValue })
         .from(leads)
@@ -347,7 +348,7 @@ Keep the entire proposal under 500 words. Be specific to their niche — no gene
         .limit(15);
 
       // Won in last 30d (for momentum context)
-      const thirtyAgo = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+      const thirtyAgo = cairoDaysAgo(30);
       const wonRecently = await db
         .select({ count: sql<number>`COUNT(*)::int`, value: sql<number>`SUM(${leads.dealValue}::numeric)` })
         .from(leads)

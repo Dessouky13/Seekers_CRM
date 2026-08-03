@@ -19,6 +19,7 @@ import {
 } from "@/hooks/useTeam";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+import { cairoToday } from "@/lib/dates";
 
 const fmt = (n: number) =>
   `EGP ${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n)}`;
@@ -572,7 +573,7 @@ function MemberWorkDialog({ userId, onClose }: { userId: string | null; onClose:
               {data.tasks.length === 0 ? <Empty>No tasks assigned yet.</Empty> : (
                 <div className="space-y-1">
                   {data.tasks.map((t) => {
-                    const overdue = t.status !== "done" && t.dueDate && t.dueDate < new Date().toISOString().slice(0, 10);
+                    const overdue = t.status !== "done" && t.dueDate && t.dueDate < cairoToday();
                     return (
                       <div key={t.id} className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-1.5">
                         <span className={cn("text-xs flex-1 truncate", t.status === "done" && "line-through text-muted-foreground")}>

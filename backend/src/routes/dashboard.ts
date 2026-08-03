@@ -4,6 +4,7 @@ import { and, eq, lt, not, inArray, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { transactions, tasks, leads, goals, profiles } from "../db/schema";
 import { authMiddleware } from "../middleware/auth";
+import { cairoToday, cairoMonth } from "../utils/dates";
 import type { AppEnv } from "../types";
 
 const dashboard = new Hono<AppEnv>();
@@ -17,12 +18,16 @@ dashboard.get("/summary", authMiddleware, async (c) => {
   if (period && !/^\d{4}-\d{2}$/.test(period)) {
     return c.json({ error: "Invalid period format. Use YYYY-MM (e.g. 2026-03)" }, 400);
   }
-  const periodStr = period ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  // Cairo month, not the server's month: on a UTC VPS the first hours of the 1st
+  // would otherwise default the dashboard to the *previous* month.
+  const periodStr = period ?? cairoMonth(now);
   const [year, month] = periodStr.split("-").map(Number);
   const periodStart = `${year}-${String(month).padStart(2, "0")}-01`;
   const nextMonth   = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
 
-  const today = now.toISOString().slice(0, 10);
+  // "Overdue" is measured against the team's calendar day, so a task due today is
+  // not reported overdue to anyone opening the dashboard before 02:00 Cairo.
+  const today = cairoToday(now);
 
   const [financeData, taskData, leadData, goalsData] = await Promise.all([
     // Finance — only completed transactions, all-time totals

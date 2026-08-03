@@ -16,6 +16,7 @@ import {
 import { suppress, suppressedSet } from "./suppressions";
 import { configuredSenderAddress, loadSendingMailbox } from "./mailbox";
 import { unreachableReason } from "./channels";
+import { cairoToday } from "../utils/dates";
 
 // Promise-based sleep for spacing sends within a released batch.
 function sleepUntil(target: Date): Promise<void> {
@@ -814,7 +815,7 @@ async function processSingleSend(
 
   // Update lead.lastActivity
   await db.update(leads)
-    .set({ lastActivity: new Date().toISOString().slice(0, 10), updatedAt: new Date() })
+    .set({ lastActivity: cairoToday(), updatedAt: new Date() })
     .where(eq(leads.id, lead.id));
 
   await advanceStep(enrollment, steps);
@@ -926,13 +927,13 @@ export async function handleReply(opts: {
     await db.update(leads)
       .set({
         stage:        "contacted",
-        lastActivity: new Date().toISOString().slice(0, 10),
+        lastActivity: cairoToday(),
         updatedAt:    new Date(),
       })
       .where(eq(leads.id, lead.id));
   } else {
     await db.update(leads)
-      .set({ lastActivity: new Date().toISOString().slice(0, 10), updatedAt: new Date() })
+      .set({ lastActivity: cairoToday(), updatedAt: new Date() })
       .where(eq(leads.id, lead.id));
   }
 

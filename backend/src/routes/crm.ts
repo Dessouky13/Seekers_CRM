@@ -12,6 +12,7 @@ import {
 import { orChat } from "../services/openrouter";
 import { fireEventAsync } from "../services/webhooks";
 import { phoneFields } from "../services/phone";
+import { cairoToday, cairoDaysAgo } from "../utils/dates";
 import type { AppEnv } from "../types";
 
 const crm = new Hono<AppEnv>();
@@ -136,7 +137,10 @@ crm.get("/stale-leads", authMiddleware, async (c) => {
     .leftJoin(profiles, eq(leads.assigneeId, profiles.id))
     .where(and(
       not(inArray(leads.stage, ["closed_won", "closed_lost"])),
-      sql`(${leads.lastActivity} IS NULL OR ${leads.lastActivity}::date <= CURRENT_DATE - INTERVAL '2 days')`,
+      // CURRENT_DATE is the *session* timezone's date, which on a UTC VPS is
+      // yesterday for the first hours of the Cairo day. Anchor it explicitly.
+      sql`(${leads.lastActivity} IS NULL
+           OR ${leads.lastActivity} <= (NOW() AT TIME ZONE 'Africa/Cairo')::date - INTERVAL '2 days')`,
       ...(forcedStale ? [eq(leads.assigneeId, forcedStale)] : []),
     ))
     .orderBy(sql`${leads.lastActivity} ASC NULLS FIRST`);
@@ -231,7 +235,7 @@ crm.patch("/leads/:id", authMiddleware, async (c) => {
       stage:        (body.stage      ?? existing.stage) as any,
       assigneeId:   body.assignee_id !== undefined ? (body.assignee_id || null) : existing.assigneeId,
       notes:        body.notes       !== undefined ? (body.notes || null) : existing.notes,
-      lastActivity: stageChanged ? new Date().toISOString().slice(0, 10) : existing.lastActivity,
+      lastActivity: stageChanged ? cairoToday() : existing.lastActivity,
       updatedAt:    new Date(),
     })
     .where(eq(leads.id, id))
@@ -432,7 +436,8 @@ crm.post("/leads/:id/activities", authMiddleware, async (c) => {
       leadId,
       type:        body.type,
       description: body.description,
-      date:        body.date ?? new Date().toISOString().slice(0, 10),
+      // An activity logged at 22:00 Cairo belongs to that evening, not to tomorrow.
+      date:        body.date ?? cairoToday(),
       createdBy:   user.id,
     })
     .returning();
@@ -519,18 +524,12 @@ crm.get("/pipeline-summary", authMiddleware, async (c) => {
 // aggregates across the whole pipeline, not just the caller's leads)
 crm.get("/insights", authMiddleware, adminOnly, async (c) => {
   const parsed = crmInsightsQuerySchema.parse(c.req.query());
-  const to = parsed.to ?? new Date().toISOString().slice(0, 10);
+  const to = parsed.to ?? cairoToday();
 
   const defaultFrom = (() => {
-    const now = new Date();
-    if (parsed.period === "weekly") {
-      now.setDate(now.getDate() - 7);
-    } else if (parsed.period === "monthly") {
-      now.setDate(now.getDate() - 30);
-    } else {
-      now.setDate(now.getDate() - 14);
-    }
-    return now.toISOString().slice(0, 10);
+    if (parsed.period === "weekly")  return cairoDaysAgo(7);
+    if (parsed.period === "monthly") return cairoDaysAgo(30);
+    return cairoDaysAgo(14);
   })();
 
   const from = parsed.from ?? defaultFrom;
@@ -579,8 +578,11 @@ crm.get("/insights", authMiddleware, adminOnly, async (c) => {
     .from(leads)
     .where(and(
       inArray(leads.stage, ["call_scheduled", "proposal_sent", "negotiation", "closed_won"]),
-      sql`${leads.updatedAt}::date >= ${from}`,
-      sql`${leads.updatedAt}::date <= ${to}`,
+      // updated_at is a timestamptz — a bare ::date would bucket it by the session
+      // timezone, so the same lead could fall in or out of the range depending on
+      // which connection ran the query.
+      sql`(${leads.updatedAt} AT TIME ZONE 'Africa/Cairo')::date >= ${from}`,
+      sql`(${leads.updatedAt} AT TIME ZONE 'Africa/Cairo')::date <= ${to}`,
     ));
 
   const sent = Number(sent_count ?? 0);

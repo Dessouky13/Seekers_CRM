@@ -10,6 +10,7 @@ import { authMiddleware, adminOnly } from "../middleware/auth";
 import { updateProfileSchema, inviteUserSchema, emailInput } from "../utils/validators";
 import { sendInviteEmail } from "../services/email";
 import { toSafeProfile, hashPassword } from "../services/auth";
+import { cairoDaysAgo } from "../utils/dates";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import type { AppEnv } from "../types";
@@ -26,7 +27,7 @@ users.get("/", authMiddleware, async (c) => {
 // Per-person workload + output, for the admin Team page.
 // MUST be declared before "/:id" or that route swallows it.
 users.get("/work-summary", authMiddleware, adminOnly, async (c) => {
-  const staleCutoff = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
+  const staleCutoff = cairoDaysAgo(7);
 
   const [people, leadRows, taskRows, enrollRows, sendRows, activityRows, loginRows] = await Promise.all([
     db.select().from(profiles).orderBy(profiles.createdAt),

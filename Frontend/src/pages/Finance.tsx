@@ -24,6 +24,7 @@ import { MonthlyAnalytics } from "@/components/modules/finance/MonthlyAnalytics"
 import { ToolsPanel } from "@/components/modules/finance/ToolsPanel";
 import { CashPositionsPanel } from "@/components/modules/finance/CashPositionsPanel";
 import { cn } from "@/lib/utils";
+import { cairoToday } from "@/lib/dates";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { exportCsv, type CsvColumn } from "@/lib/csv";
 import type { ApiTransaction } from "@/lib/types";
@@ -320,7 +321,7 @@ export default function Finance() {
                   </select>
                 </div>
                 <div><Label>Amount</Label><Input name="amount" type="number" step="0.01" min="0" defaultValue={editTx ? Number(editTx.amount) : undefined} required className="mt-1" /></div>
-                <div className="col-span-2"><Label>Date</Label><Input name="date" type="date" defaultValue={editTx?.date ?? new Date().toISOString().slice(0, 10)} required className="mt-1" /></div>
+                <div className="col-span-2"><Label>Date</Label><Input name="date" type="date" defaultValue={editTx?.date ?? cairoToday()} required className="mt-1" /></div>
               </div>
 
               <div>

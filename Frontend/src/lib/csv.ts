@@ -4,6 +4,7 @@
 // fetched — there is no export endpoint, and deliberately so: reusing the
 // normal role-scoped API responses means an export can never reveal a row the
 // user could not already see on screen.
+import { cairoToday } from "./dates";
 
 /** A column definition: the header text and how to pull the value from a row. */
 export interface CsvColumn<T> {
@@ -58,9 +59,15 @@ export function downloadCsv(filename: string, content: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-/** `leads-2026-08-03.csv` */
+/**
+ * `leads-2026-08-03.csv`
+ *
+ * Cairo-dated, like every other day in this app — an export pulled at 00:30 was
+ * previously stamped with the previous day, which makes two exports taken hours
+ * apart sort and read as the same day's snapshot.
+ */
 export function timestampedName(base: string): string {
-  return `${base}-${new Date().toISOString().slice(0, 10)}.csv`;
+  return `${base}-${cairoToday()}.csv`;
 }
 
 /** Convenience: build and download in one call. */

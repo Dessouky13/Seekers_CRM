@@ -22,6 +22,7 @@ import { useCreateTask } from "@/hooks/useTasks";
 import { useCreateTransaction } from "@/hooks/useFinance";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+import { cairoToday } from "@/lib/dates";
 
 type Kind = "lead" | "task" | "expense";
 
@@ -73,7 +74,7 @@ export function QuickAdd() {
       createTx.mutate(
         { type: "expense",
           amount: Number(fd.get("amount")),
-          date: (fd.get("date") as string) || new Date().toISOString().slice(0, 10),
+          date: (fd.get("date") as string) || cairoToday(),
           category: (fd.get("category") as string) || "Other",
           notes: (fd.get("notes") as string) || undefined },
         { onSuccess: () => done("Expense"), onError: fail },
@@ -184,7 +185,7 @@ export function QuickAdd() {
                   </div>
                   <div>
                     <Label htmlFor="qa-date">Date</Label>
-                    <Input id="qa-date" name="date" type="date" className="mt-1" defaultValue={new Date().toISOString().slice(0, 10)} />
+                    <Input id="qa-date" name="date" type="date" className="mt-1" defaultValue={cairoToday()} />
                   </div>
                   <div>
                     <Label htmlFor="qa-notes">Note <span className="text-muted-foreground">(optional)</span></Label>
