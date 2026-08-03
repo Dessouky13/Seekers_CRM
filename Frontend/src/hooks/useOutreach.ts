@@ -2,7 +2,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 
 export type Channel = "email" | "linkedin" | "note" | "whatsapp" | "call";
-export type EnrollmentStatus = "active" | "paused" | "completed" | "failed" | "replied";
+// Kept in sync with the backend enum (backend/src/db/schema.ts,
+// outreachEnrollments.status) — awaiting_action is a lead blocked on a human
+// completing a whatsapp/call step, distinct from paused (which means
+// something went wrong). No other backend value is missing here.
+export type EnrollmentStatus = "active" | "paused" | "completed" | "failed" | "replied" | "awaiting_action";
 
 export interface Sequence {
   id:                       string;

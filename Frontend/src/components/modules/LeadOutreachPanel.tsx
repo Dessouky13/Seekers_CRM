@@ -18,12 +18,16 @@ interface Props {
   category: string | null;
 }
 
+// See EnrollmentsList.tsx for why awaiting_action gets its own violet tone
+// rather than reusing amber/emerald (already claimed by the channel badges)
+// or success/warning (already "active"/"paused").
 const statusColors: Record<EnrollmentStatus, string> = {
-  active:    "bg-success/15 text-success border-success/30",
-  paused:    "bg-warning/15 text-warning border-warning/30",
-  completed: "bg-muted text-muted-foreground border-muted",
-  failed:    "bg-destructive/15 text-destructive border-destructive/30",
-  replied:   "bg-info/15 text-info border-info/30",
+  active:          "bg-success/15 text-success border-success/30",
+  paused:          "bg-warning/15 text-warning border-warning/30",
+  completed:       "bg-muted text-muted-foreground border-muted",
+  failed:          "bg-destructive/15 text-destructive border-destructive/30",
+  replied:         "bg-info/15 text-info border-info/30",
+  awaiting_action: "bg-violet-500/15 text-violet-400 border-violet-500/30",
 };
 
 export function LeadOutreachPanel({ leadId, category }: Props) {
@@ -133,17 +137,19 @@ export function LeadOutreachPanel({ leadId, category }: Props) {
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
                 {e.status === "active" && (
-                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0 max-sm:h-10 max-sm:w-10" onClick={() => pauseE.mutate(e.id, { onSuccess: () => toast.success("Paused") })}>
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0 max-sm:h-10 max-sm:w-10" title="Pause" onClick={() => pauseE.mutate(e.id, { onSuccess: () => toast.success("Paused") })}>
                     <Pause className="h-3 w-3" />
                   </Button>
                 )}
                 {e.status === "paused" && (
-                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0 max-sm:h-10 max-sm:w-10" onClick={() => resumeE.mutate(e.id, { onSuccess: () => toast.success("Resumed") })}>
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0 max-sm:h-10 max-sm:w-10" title="Resume" onClick={() => resumeE.mutate(e.id, { onSuccess: () => toast.success("Resumed") })}>
                     <Play className="h-3 w-3" />
                   </Button>
                 )}
-                {(e.status === "active" || e.status === "paused") && (
-                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0 max-sm:h-10 max-sm:w-10 text-destructive" onClick={() => cancelE.mutate(e.id, { onSuccess: () => toast.success("Cancelled") })}>
+                {/* Cancel is the escape hatch for awaiting_action too — pause/resume
+                    are meaningless there since no timer is running. */}
+                {(e.status === "active" || e.status === "paused" || e.status === "awaiting_action") && (
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0 max-sm:h-10 max-sm:w-10 text-destructive" title="Cancel" onClick={() => cancelE.mutate(e.id, { onSuccess: () => toast.success("Cancelled") })}>
                     <X className="h-3 w-3" />
                   </Button>
                 )}

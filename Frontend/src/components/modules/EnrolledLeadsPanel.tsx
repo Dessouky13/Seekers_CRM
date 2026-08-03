@@ -19,12 +19,14 @@ import { useCurrentUser } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import type { ApiLead } from "@/lib/types";
 
+// See EnrollmentsList.tsx for why awaiting_action gets its own violet tone.
 const statusColors: Record<EnrollmentStatus, string> = {
-  active:    "border-success/30 text-success",
-  paused:    "border-warning/30 text-warning",
-  completed: "border-muted text-muted-foreground",
-  failed:    "border-destructive/30 text-destructive",
-  replied:   "border-info/30 text-info",
+  active:          "border-success/30 text-success",
+  paused:          "border-warning/30 text-warning",
+  completed:       "border-muted text-muted-foreground",
+  failed:          "border-destructive/30 text-destructive",
+  replied:         "border-info/30 text-info",
+  awaiting_action: "border-violet-500/30 text-violet-400",
 };
 
 interface Props {

@@ -18,12 +18,20 @@ import { cn } from "@/lib/utils";
 
 const columns = ["Lead", "Sequence", "Step", "Next send", "Status", ""];
 
+// awaiting_action gets its own violet tone — it isn't healthy (success),
+// broken (destructive) or actually paused (warning is already taken by
+// `paused`). Violet already carries "stalled, needs a human" for
+// sequence_blocked in Today.tsx, so this reads consistently with that rather
+// than reusing amber/emerald, which are already claimed by the WhatsApp/call
+// channel badges themselves (ManualTouchCard) and would misread this row as
+// "a WhatsApp thing" or collide with the amber `paused` badge right next to it.
 const statusColors: Record<EnrollmentStatus, string> = {
-  active:    "bg-success/15 text-success",
-  paused:    "bg-warning/15 text-warning",
-  completed: "bg-muted text-muted-foreground",
-  failed:    "bg-destructive/15 text-destructive",
-  replied:   "bg-info/15 text-info",
+  active:          "bg-success/15 text-success",
+  paused:          "bg-warning/15 text-warning",
+  completed:       "bg-muted text-muted-foreground",
+  failed:          "bg-destructive/15 text-destructive",
+  replied:         "bg-info/15 text-info",
+  awaiting_action: "bg-violet-500/15 text-violet-400",
 };
 
 export function EnrollmentsList() {
@@ -47,6 +55,7 @@ export function EnrollmentsList() {
             <SelectItem value="completed">Completed</SelectItem>
             <SelectItem value="failed">Failed</SelectItem>
             <SelectItem value="replied">Replied</SelectItem>
+            <SelectItem value="awaiting_action">Awaiting Action</SelectItem>
           </SelectContent>
         </Select>
         <span className="text-xs text-muted-foreground">{enrollments.length} enrollments</span>
@@ -87,17 +96,20 @@ export function EnrollmentsList() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
                       {e.status === "active" && (
-                        <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => pauseE.mutate(e.id, { onSuccess: () => toast.success("Paused") })}>
+                        <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" title="Pause" onClick={() => pauseE.mutate(e.id, { onSuccess: () => toast.success("Paused") })}>
                           <Pause className="h-3 w-3" />
                         </Button>
                       )}
                       {e.status === "paused" && (
-                        <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => resumeE.mutate(e.id, { onSuccess: () => toast.success("Resumed") })}>
+                        <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" title="Resume" onClick={() => resumeE.mutate(e.id, { onSuccess: () => toast.success("Resumed") })}>
                           <Play className="h-3 w-3" />
                         </Button>
                       )}
-                      {(e.status === "active" || e.status === "paused") && (
-                        <Button size="sm" variant="ghost" className="h-6 px-2 text-xs text-destructive" onClick={() => cancelE.mutate(e.id, { onSuccess: () => toast.success("Cancelled") })}>
+                      {/* Cancel is the only control that makes sense for awaiting_action:
+                          there is no timer running for pause/resume to affect — the
+                          enrollment is simply parked until a human acts or gives up. */}
+                      {(e.status === "active" || e.status === "paused" || e.status === "awaiting_action") && (
+                        <Button size="sm" variant="ghost" className="h-6 px-2 text-xs text-destructive" title="Cancel" onClick={() => cancelE.mutate(e.id, { onSuccess: () => toast.success("Cancelled") })}>
                           <X className="h-3 w-3" />
                         </Button>
                       )}
