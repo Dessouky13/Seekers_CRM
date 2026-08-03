@@ -197,7 +197,7 @@ export default function Tasks() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Tasks</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p className="hidden sm:block text-sm text-muted-foreground mt-0.5">
             {tasks.length} task{tasks.length !== 1 ? "s" : ""} · {projects.length} project{projects.length !== 1 ? "s" : ""}
           </p>
         </div>

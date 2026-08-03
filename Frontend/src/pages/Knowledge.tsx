@@ -114,7 +114,7 @@ export default function Knowledge() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Knowledge Base</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Upload documents and query the Agency Brain.</p>
+          <p className="hidden sm:block text-sm text-muted-foreground mt-0.5">Upload documents and query the Agency Brain.</p>
         </div>
         <Button size="sm" className="gap-1.5" onClick={() => setUploadOpen(true)}>
           <Upload className="h-3.5 w-3.5" /> Upload Document

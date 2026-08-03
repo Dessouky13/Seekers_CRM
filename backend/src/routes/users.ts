@@ -162,10 +162,19 @@ users.get("/work-summary", authMiddleware, adminOnly, async (c) => {
         logins_7d:        Number(g?.last7 ?? 0),
         failed_24h:       Number(g?.failed24 ?? 0),
         is_online:        lastSeen > 0 && now - lastSeen < ONLINE_MS,
-        // Distinct from "has not logged in recently": an account created and
-        // never used is an onboarding failure, and the page should say so
-        // rather than showing a blank timestamp.
-        never_logged_in:  Number(g?.total ?? 0) === 0,
+        // "Never used this account" — an onboarding failure worth flagging —
+        // NOT merely "no recorded sign-in".
+        //
+        // Sessions that predate the login_events table have no row here, but
+        // their requests still refresh last_seen_at. Checking only the count
+        // labelled people "never signed in" while the same card showed them
+        // online, because they had signed in before telemetry existed.
+        never_logged_in:  Number(g?.total ?? 0) === 0 && lastSeen === 0,
+        // True when we know they are active but the sign-in itself predates
+        // telemetry, so the UI can say "before sign-in tracking" instead of
+        // rendering a confident but empty "never".
+        login_history_predates_tracking:
+          Number(g?.total ?? 0) === 0 && lastSeen > 0,
       },
     };
   }));

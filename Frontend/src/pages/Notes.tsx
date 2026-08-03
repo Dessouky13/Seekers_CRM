@@ -241,7 +241,7 @@ export default function Notes() {
         <h1 className="text-xl font-semibold text-foreground flex items-center gap-2">
           <StickyNote className="h-5 w-5 text-primary" /> Notes
         </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Your personal notepad + shared team board.</p>
+        <p className="hidden sm:block text-sm text-muted-foreground mt-0.5">Your personal notepad + shared team board.</p>
       </div>
 
       <Tabs defaultValue="my" className="flex-1 flex flex-col">

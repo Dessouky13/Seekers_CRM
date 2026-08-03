@@ -4,6 +4,7 @@ import {
   Database, Target,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { ResponsiveTable } from "@/components/ui/responsive-table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableSkeleton } from "@/components/ui/skeletons";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -337,7 +338,7 @@ export default function Outbound() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Outbound</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p className="hidden sm:block text-sm text-muted-foreground mt-0.5">
             Lead intelligence, deliverability health, and the raw event log from the outbound machine.
           </p>
         </div>
@@ -437,34 +438,49 @@ function PipelineTab() {
           hint="Enrichment runs via n8n once configured — it posts to /intel/fingerprint, /intel/reviews and /intel/enrichment with the automation API key. Every lead it touches appears here with an ICP score."
         />
       ) : (
-        <div className="rounded-xl border border-border overflow-x-auto">
-          <table className="w-full text-sm min-w-[640px]">
-            <thead>
-              <tr className="border-b border-border bg-muted/30">
-                {INTEL_LEAD_COLUMNS.map((h) => (
-                  <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {leads.map((l) => (
-                <tr key={l.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="text-sm font-medium text-foreground">{l.name}</div>
-                    <div className="text-xs text-muted-foreground">{l.company}{l.domain ? ` · ${l.domain}` : ""}</div>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{l.category ?? "—"}</td>
-                  <td className="px-4 py-3">
-                    <Badge variant="secondary" className="text-[10px] uppercase">{l.stage.replace(/_/g, " ")}</Badge>
-                  </td>
-                  <td className="px-4 py-3"><IcpBadge score={l.icpScore} /></td>
-                  <td className="px-4 py-3"><EnrichedPill enriched={!!l.techFingerprint} /></td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{relTime(l.updatedAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        // Table on desktop, stacked cards on a phone. This table overflowed a
+        // 390px screen by 254px, hiding the ICP score and enrichment state —
+        // the two columns the page exists to show.
+        <ResponsiveTable
+          rows={leads}
+          rowKey={(l) => l.id}
+          caption="Leads with enrichment intelligence"
+          columns={[
+            {
+              header: "Lead", priority: "primary",
+              cell: (l) => <span className="font-medium text-foreground">{l.name}</span>,
+            },
+            {
+              header: "Company", priority: "secondary",
+              cell: (l) => <>{l.company}{l.domain ? ` · ${l.domain}` : ""}</>,
+            },
+            {
+              header: "Niche", priority: "meta",
+              cell: (l) => l.category ?? "—",
+            },
+            {
+              header: "Stage", priority: "meta", hideLabelOnMobile: true,
+              cell: (l) => (
+                <Badge variant="secondary" className="text-[10px] uppercase">
+                  {l.stage.replace(/_/g, " ")}
+                </Badge>
+              ),
+            },
+            {
+              header: "ICP", priority: "meta", hideLabelOnMobile: true,
+              cell: (l) => <IcpBadge score={l.icpScore} />,
+            },
+            {
+              header: "Enriched", priority: "meta", hideLabelOnMobile: true,
+              cell: (l) => <EnrichedPill enriched={!!l.techFingerprint} />,
+            },
+            {
+              header: "Updated", priority: "meta",
+              className: "text-xs text-muted-foreground tabular-nums",
+              cell: (l) => relTime(l.updatedAt),
+            },
+          ]}
+        />
       )}
     </div>
   );

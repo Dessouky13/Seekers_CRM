@@ -1,0 +1,37 @@
+{
+  "name": "Seekers AI — Agency OS",
+  "short_name": "Agency OS",
+  "description": "Internal operations platform for Seekers AI Automation Solutions",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0B0A1F",
+  "theme_color": "#0B0A1F",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Today",
+      "short_name": "Today",
+      "description": "What needs you right now",
+      "url": "/"
+    },
+    {
+      "name": "Leads",
+      "short_name": "Leads",
+      "description": "The lead pipeline",
+      "url": "/crm"
+    },
+    {
+      "name": "Tasks",
+      "short_name": "Tasks",
+      "description": "Your task board",
+      "url": "/tasks"
+    }
+  ]
+}

@@ -138,7 +138,7 @@ export default function Team() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Team</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p className="hidden sm:block text-sm text-muted-foreground mt-0.5">
             Give access, set what each person can see, and track their work.
           </p>
         </div>
@@ -256,8 +256,10 @@ function MemberCard({ m, isSelf, onOpen, onToggleRole, onDelete, busy }: {
               {isAdmin ? "ADMIN" : "MEMBER"}
             </Badge>
             {isSelf && <Badge variant="outline" className="text-[9px]">YOU</Badge>}
-            {/* An account that exists but has never been used is an onboarding
-                failure, not just "inactive" — it needs its own label. */}
+            {/* Only for a genuinely unused account. This used to be driven by
+                the sign-in count alone, so someone whose session predated
+                telemetry was labelled "never signed in" on a card that also
+                showed them online. */}
             {m.session.never_logged_in && (
               <Badge variant="outline" className="text-[9px] border-warning/40 text-warning">
                 NEVER SIGNED IN
@@ -333,10 +335,19 @@ function MemberCard({ m, isSelf, onOpen, onToggleRole, onDelete, busy }: {
             is the real sign-in record. */}
         <Stat
           icon={LogIn} label="Sign-ins"
-          value={m.session.never_logged_in ? "never" : `${m.session.logins_30d} · 30d`}
-          sub={m.session.never_logged_in
-            ? "account not yet used"
-            : `last ${relativeTime(m.session.last_login_at)} · ${m.session.logins_total} total`}
+          value={
+            m.session.never_logged_in ? "never"
+            : m.session.login_history_predates_tracking ? "active"
+            : `${m.session.logins_30d} · 30d`
+          }
+          sub={
+            m.session.never_logged_in ? "account not yet used"
+            // Saying "0 sign-ins" about someone who is demonstrably using the
+            // app is wrong; the count starts from their next sign-in.
+            : m.session.login_history_predates_tracking
+              ? "signed in before tracking started"
+              : `last ${relativeTime(m.session.last_login_at)} · ${m.session.logins_total} total`
+          }
           warn={m.session.failed_24h >= 3 ? `${m.session.failed_24h} failed today` : undefined}
         />
       </div>

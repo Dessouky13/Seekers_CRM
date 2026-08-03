@@ -14,17 +14,20 @@ export function PipelineStats({ pipeline }: { pipeline: PipelineStageRow[] }) {
   const totalClosed   = wonCount + lostCount;
   const convRate      = totalClosed > 0 ? Math.round((wonCount / totalClosed) * 100) : 0;
 
+  // One scrollable line on a phone rather than a wrapping block. Wrapping
+  // turned five short stats into three stacked rows and pushed the actual
+  // leads most of a screen further down.
   return (
-    <div className="flex items-center gap-4 text-[12px] text-muted-foreground">
-      <span><span className="text-foreground font-semibold tabular-nums">{totalActive}</span> active</span>
-      <span className="text-border">·</span>
-      <span>Pipeline <span className="text-foreground font-semibold tabular-nums">{fmt(totalPipeline)}</span></span>
-      <span className="text-border">·</span>
-      <span><span className="text-emerald-400 font-semibold tabular-nums">{wonCount}</span> won</span>
-      <span className="text-border">·</span>
-      <span><span className="text-rose-400 font-semibold tabular-nums">{lostCount}</span> lost</span>
-      <span className="text-border">·</span>
-      <span><span className="text-primary font-semibold tabular-nums">{convRate}%</span> conv</span>
+    <div className="-mx-1 flex items-center gap-3 overflow-x-auto whitespace-nowrap px-1 text-[12px] text-muted-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:gap-4 sm:overflow-visible">
+      <span className="shrink-0"><span className="font-semibold tabular-nums text-foreground">{totalActive}</span> active</span>
+      <span className="shrink-0 text-border">·</span>
+      <span className="shrink-0">Pipeline <span className="font-semibold tabular-nums text-foreground">{fmt(totalPipeline)}</span></span>
+      <span className="shrink-0 text-border">·</span>
+      <span className="shrink-0"><span className="font-semibold tabular-nums text-emerald-400">{wonCount}</span> won</span>
+      <span className="shrink-0 text-border">·</span>
+      <span className="shrink-0"><span className="font-semibold tabular-nums text-rose-400">{lostCount}</span> lost</span>
+      <span className="shrink-0 text-border">·</span>
+      <span className="shrink-0"><span className="font-semibold tabular-nums text-primary">{convRate}%</span> conv</span>
     </div>
   );
 }

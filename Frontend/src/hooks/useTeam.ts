@@ -22,7 +22,10 @@ export interface TeamMemberWork extends ApiUser {
     logins_7d:     number;
     failed_24h:    number;
     is_online:     boolean;
+    /** Genuinely unused account: no recorded sign-in AND never seen. */
     never_logged_in: boolean;
+    /** Active, but their sign-in happened before login tracking existed. */
+    login_history_predates_tracking: boolean;
   };
 }
 
@@ -42,6 +45,7 @@ export function useTeamWorkSummary() {
           last_login_at: null, last_seen_at: null,
           logins_total: 0, logins_30d: 0, logins_7d: 0,
           failed_24h: 0, is_online: false, never_logged_in: false,
+          login_history_predates_tracking: false,
         },
       }));
     },

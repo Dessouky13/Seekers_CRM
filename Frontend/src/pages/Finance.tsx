@@ -281,7 +281,7 @@ export default function Finance() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Finance</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Track income, expenses and profitability.</p>
+          <p className="hidden sm:block text-sm text-muted-foreground mt-0.5">Track income, expenses and profitability.</p>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -563,7 +563,74 @@ export default function Finance() {
           {isLoading ? (
             <TableSkeleton columns={TRANSACTION_COLUMNS} rows={8} />
           ) : (
-            <div className="rounded-xl border border-border overflow-x-auto">
+            <>
+            {/* ── Phone: one card per transaction ──────────
+                The nine-column table overflowed a 390px screen by 463px, so
+                everything from Categories rightwards — including the actions —
+                was off-screen and reachable only by dragging. */}
+            <div className="space-y-2 md:hidden">
+              {transactions.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-border/60 px-4 py-10 text-center text-sm text-muted-foreground">
+                  No transactions match these filters.
+                </p>
+              ) : transactions.map((t) => (
+                <div key={t.id} className="rounded-xl border border-border bg-card p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className={cn("text-base font-semibold tabular-nums",
+                        t.type === "income" ? "text-green-400" : "text-red-400")}>
+                        {t.type === "expense" ? "−" : "+"}{fmt(Number(t.amount))}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-foreground">
+                        {t.category}
+                        {(t.categories ?? []).length > 1 && (
+                          <span className="text-muted-foreground"> +{(t.categories ?? []).length - 1}</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => openDialog(t)}
+                        aria-label={`Edit transaction of ${fmt(Number(t.amount))} on ${t.date}`}
+                        className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground active:bg-muted"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(t)}
+                        aria-label={`Delete transaction of ${fmt(Number(t.amount))} on ${t.date}`}
+                        className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground active:bg-muted active:text-destructive"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                    <span className="tabular-nums">{t.date}</span>
+                    {t.clientName && <span className="truncate">{t.clientName}</span>}
+                    {t.tool_name && <span className="truncate">{t.tool_name}</span>}
+                    {t.held_by_name && (
+                      <span className={cn(t.settledAt ? "" : "text-warning")}>
+                        held by {t.held_by_name}{t.settledAt ? "" : " · unsettled"}
+                      </span>
+                    )}
+                    {t.status !== "completed" && (
+                      <Badge variant="outline" className="text-[9px]">{t.status}</Badge>
+                    )}
+                  </div>
+
+                  {t.notes && (
+                    <p className="mt-1.5 line-clamp-2 text-[11px] text-muted-foreground">{t.notes}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* ── Desktop: full table ── */}
+            <div className="hidden rounded-xl border border-border md:block">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[640px]">
                   <thead>
@@ -646,6 +713,10 @@ export default function Finance() {
                 {transactions.length} entries
               </div>
             </div>
+            <p className="px-1 pt-1 text-xs text-muted-foreground md:hidden">
+              {transactions.length} entries
+            </p>
+            </>
           )}
         </TabsContent>
 

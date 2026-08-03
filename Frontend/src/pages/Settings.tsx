@@ -106,7 +106,7 @@ export default function Settings() {
     <div className="space-y-8 max-w-3xl">
       <div>
         <h1 className="text-xl font-semibold text-foreground">Settings</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Manage your team and account preferences.</p>
+        <p className="hidden sm:block text-sm text-muted-foreground mt-0.5">Manage your team and account preferences.</p>
       </div>
 
       {/* My Profile */}

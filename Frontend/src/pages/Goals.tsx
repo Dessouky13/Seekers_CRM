@@ -106,7 +106,7 @@ export default function Goals() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Goals</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Track OKR-style progress toward your targets.</p>
+          <p className="hidden sm:block text-sm text-muted-foreground mt-0.5">Track OKR-style progress toward your targets.</p>
         </div>
         <Dialog open={isOpen} onOpenChange={(o) => { setIsOpen(o); if (!o) setEditGoal(null); }}>
           <DialogTrigger asChild>

@@ -188,7 +188,7 @@ export default function Vault() {
           <h1 className="text-xl font-semibold text-foreground flex items-center gap-2">
             <Lock className="h-5 w-5 text-primary" /> Vault
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p className="hidden sm:block text-sm text-muted-foreground mt-0.5">
             Shared team password store. Protected by your login — do not share screenshots.
           </p>
         </div>

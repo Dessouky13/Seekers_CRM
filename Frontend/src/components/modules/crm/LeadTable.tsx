@@ -33,7 +33,88 @@ export function LeadTable({
   const someSelected = selectedIds.size > 0 && !allSelected;
 
   return (
-    <div className="border border-border/60 rounded-lg overflow-x-auto bg-card/30">
+    <>
+      {/* ── Phone: stacked cards ──────────────────────────
+          A nine-column table inside a horizontal scroller means dragging a
+          375px viewport across a grid to read one lead — the columns to the
+          right are effectively invisible. Same data, stacked. */}
+      <div className="space-y-2 md:hidden">
+        <div className="flex items-center gap-2 px-1 pb-1">
+          <Checkbox
+            checked={allSelected ? true : someSelected ? "indeterminate" : false}
+            onCheckedChange={toggleAll}
+            aria-label="Select all visible leads"
+          />
+          <span className="text-[11px] text-muted-foreground">
+            {selectedIds.size > 0 ? `${selectedIds.size} selected` : "Select all"}
+          </span>
+        </div>
+
+        {leads.map((l) => {
+          const stageInfo = LEAD_STAGES.find((s) => s.key === l.stage);
+          const isStale = l.lastActivity
+            ? (Date.now() - new Date(l.lastActivity).getTime()) > 2 * 24 * 60 * 60 * 1000
+            : true;
+          const isActive = !["closed_won", "closed_lost"].includes(l.stage);
+          const checked  = selectedIds.has(l.id);
+          return (
+            <div
+              key={l.id}
+              className={cn(
+                "flex items-start gap-3 rounded-xl border p-3 transition-colors",
+                checked ? "border-primary/50 bg-primary/5" : "border-border bg-card",
+              )}
+            >
+              {/* Generous hit area — a bare 16px checkbox is a miss on touch. */}
+              <button
+                type="button"
+                onClick={() => toggleOne(l.id)}
+                aria-label={`Select ${l.name}`}
+                className="-m-1 grid h-9 w-9 shrink-0 place-items-center"
+              >
+                <Checkbox checked={checked} tabIndex={-1} aria-hidden />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onSelect(l.id)}
+                className="min-w-0 flex-1 text-left"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate text-sm font-medium text-foreground">{l.name}</span>
+                  {isStale && isActive && (
+                    <span className="shrink-0 text-[10px] text-destructive" title="No activity in 2+ days">⚠</span>
+                  )}
+                </div>
+                <p className="truncate text-xs text-muted-foreground">{l.company}</p>
+
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className={cn("rounded px-2 py-0.5 text-[11px] font-medium", stageInfo?.chip)}>
+                    {stageInfo?.label}
+                  </span>
+                  {l.category && (
+                    <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", CATEGORY_CHIP)}>
+                      {l.category}
+                    </span>
+                  )}
+                  <span className="ml-auto text-sm font-semibold tabular-nums text-foreground">
+                    {fmt(l.dealValue)}
+                  </span>
+                </div>
+
+                <p className="mt-1.5 truncate text-[11px] text-muted-foreground">
+                  {l.assignee_name ?? "Unassigned"} · {l.lastActivity ?? "no activity"}
+                </p>
+              </button>
+
+              <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground/40" />
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Desktop: full table ── */}
+      <div className="hidden rounded-lg border border-border/60 bg-card/30 md:block">
       <div className="overflow-x-auto">
         <table className="w-full text-sm min-w-[640px]">
           <thead>
@@ -116,7 +197,8 @@ export function LeadTable({
           </tbody>
         </table>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 

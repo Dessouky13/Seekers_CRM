@@ -17,7 +17,7 @@ export default function Outreach() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Outreach</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p className="hidden sm:block text-sm text-muted-foreground mt-0.5">
             Automated sequences, lead ingestion, and live enrollments.
           </p>
         </div>
