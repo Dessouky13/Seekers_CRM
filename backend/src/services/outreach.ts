@@ -1,5 +1,5 @@
 // Outreach service: template rendering, scheduler tick, send orchestration.
-import { and, eq, lte, sql, asc, isNull, or } from "drizzle-orm";
+import { and, eq, lte, sql, asc, isNull, or, inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import {
   outreachSequences, outreachSteps, outreachEnrollments, outreachSends,
@@ -10,10 +10,12 @@ import { runAgent, isEmailCapableAgent } from "./agents";
 import { fireEventAsync } from "./webhooks";
 import { sanitizeSubject } from "./outreach-subject";
 import {
-  slotsRemainingToday, spreadGapSeconds, nextSpreadSlot, isWithinSendWindow,
+  spreadGapSeconds, nextSpreadSlot, isWithinSendWindow,
   releaseCountNow, nextStageAfterSpamReject, type WarmupStage,
 } from "./sending-policy";
 import { suppress, suppressedSet } from "./suppressions";
+import { configuredSenderAddress, loadSendingMailbox } from "./mailbox";
+import { unreachableReason } from "./channels";
 
 // Promise-based sleep for spacing sends within a released batch.
 function sleepUntil(target: Date): Promise<void> {
@@ -123,6 +125,26 @@ export function computeNextSendAtFromNow(gapDays: number): Date {
 }
 
 // ── Enrollment ────────────────────────────────────────────
+/**
+ * Enrollment statuses that mean "this lead is currently being worked by a
+ * sequence". THE single definition — every already-enrolled guard reads it.
+ *
+ * It exists as one constant because it was previously spelled out inline in
+ * three places as just active/paused, and `awaiting_action` (added by the
+ * manual-channel work) was missed in all three. A lead parked on a WhatsApp
+ * step therefore counted as NOT enrolled, so a bulk enroll from the CRM created
+ * a SECOND live enrollment for them — re-opening the duplicate-send hole that
+ * once sent 142 leads up to 4 messages each (see autoEnrollIfMatchingCategory).
+ *
+ * `completed`/`failed`/`replied` are deliberately absent: those are historical,
+ * and re-enrolling a lead whose sequence finished is a legitimate action.
+ */
+export const LIVE_ENROLLMENT_STATUSES = ["active", "paused", "awaiting_action"] as const;
+
+/** Reusable predicate over the constant above, so no caller re-spells the set. */
+const isLiveEnrollment = () =>
+  inArray(outreachEnrollments.status, [...LIVE_ENROLLMENT_STATUSES]);
+
 export interface EnrollOptions {
   leadId:      string;
   sequenceId:  string;
@@ -138,7 +160,8 @@ export async function enrollLead(opts: EnrollOptions) {
   const steps = await db.select().from(outreachSteps).where(eq(outreachSteps.sequenceId, opts.sequenceId)).orderBy(asc(outreachSteps.position));
   if (steps.length === 0) throw new Error("Sequence has no steps");
 
-  // Dedupe: only block re-enrollment if there's an ACTIVE or PAUSED enrollment.
+  // Dedupe: only block re-enrollment if there is a LIVE enrollment (see
+  // LIVE_ENROLLMENT_STATUSES — this must include awaiting_action).
   // Completed/failed/replied enrollments are historical — we allow re-enrolling.
   const [existing] = await db
     .select({ id: outreachEnrollments.id, status: outreachEnrollments.status })
@@ -146,16 +169,19 @@ export async function enrollLead(opts: EnrollOptions) {
     .where(and(
       eq(outreachEnrollments.leadId, opts.leadId),
       eq(outreachEnrollments.sequenceId, opts.sequenceId),
-      or(
-        eq(outreachEnrollments.status, "active"),
-        eq(outreachEnrollments.status, "paused"),
-      )!,
+      isLiveEnrollment(),
     ))
     .limit(1);
 
   if (existing) {
     return { enrollment: { id: existing.id, status: existing.status }, alreadyEnrolled: true };
   }
+
+  // Refuse a lead no channel can reach, rather than creating an enrollment that
+  // can only ever fail. channels.ts is the authority on reachability — the same
+  // function the Leads page's reachability filter and the worklist routing use,
+  // so all three agree about the same lead.
+  await assertReachable(opts.leadId);
 
   const now = new Date();
   const nextSendAt = computeNextSendAt(now, steps[0].dayOffset);
@@ -174,6 +200,36 @@ export async function enrollLead(opts: EnrollOptions) {
     .returning();
 
   return { enrollment, alreadyEnrolled: false };
+}
+
+/**
+ * Throw unless at least one channel can reach this lead.
+ *
+ * The design promised this refusal and never implemented it, so a lead with a
+ * dead email and no number could be enrolled and then sat in the pipeline
+ * looking exactly like one waiting its turn, until the scheduler failed it.
+ * Refusing at enrolment puts the reason in front of whoever is enrolling, while
+ * they still have the lead on screen.
+ */
+async function assertReachable(leadId: string): Promise<void> {
+  const [lead] = await db
+    .select({
+      email:          leads.email,
+      emailStatus:    leads.emailStatus,
+      phoneE164:      leads.phoneE164,
+      phoneType:      leads.phoneType,
+      whatsappStatus: leads.whatsappStatus,
+    })
+    .from(leads)
+    .where(eq(leads.id, leadId))
+    .limit(1);
+  if (!lead) throw new Error("Lead not found");
+
+  const reason = unreachableReason({
+    ...lead,
+    emailSuppressed: lead.email ? await isSuppressedAddress(lead.email) : false,
+  });
+  if (reason) throw new Error(`Lead cannot be reached on any channel: ${reason}`);
 }
 
 /** Channels that require a person. The scheduler raises a task instead of sending. */
@@ -285,12 +341,14 @@ async function runOneTick(limit: number): Promise<{ processed: number; sent: num
   // Outside the Cairo send window, or over today's cap, nothing goes out. This
   // replaces the previous behaviour of releasing every due enrollment at once.
   // Cheap pure check first so an out-of-window tick never touches the DB.
-  const slots = slotsRemainingToday(now);
-  if (slots === 0) {
+  if (!isWithinSendWindow(now)) {
     return { processed: 0, sent: 0, failed: 0, throttled: 0 };
   }
 
-  const [mailbox]  = await db.select().from(mailboxes).limit(1);
+  // The mailbox we are actually sending FROM, looked up by address — never
+  // `LIMIT 1` with no ORDER BY, which read an arbitrary row and could enforce
+  // a different mailbox's cap than the panel displayed. See services/mailbox.ts.
+  const mailbox    = await loadSendingMailbox();
   const stage      = (mailbox?.warmupStage ?? "recovery") as WarmupStage;
   const storedCap  = mailbox?.dailyCap ?? 0;
   const cleanWeeks = cleanWeeksFor(mailbox);
@@ -534,14 +592,14 @@ async function processSingleSend(
   const [lead] = await db.select().from(leads).where(eq(leads.id, enrollment.leadId)).limit(1);
   if (!lead) throw new Error("Lead vanished");   // pre-send, genuinely unexpected → backstop marks failed
 
-  // Lead has no email — can't email it. Mark failed with a clear, non-retryable
-  // reason (don't throw, so it doesn't look like a transient crash).
-  if (!lead.email) {
-    await db.update(outreachEnrollments)
-      .set({ status: "failed", pausedReason: "Lead has no email address", nextSendAt: null })
-      .where(eq(outreachEnrollments.id, enrollment.id));
-    return "failed";
-  }
+  // NOTE ON GUARD ORDER: the "lead has no email" check does NOT belong here,
+  // before the step is known. It used to, and it meant a phone-only lead
+  // enrolled in a WhatsApp sequence died on step 1 with the reason "Lead has no
+  // email address" — a step that was never going to send an email in the first
+  // place. Roughly 102 production leads are phone-only, and phone coverage
+  // (575) exceeds email coverage (517), so this defeated the entire point of
+  // the manual channels. It now lives below, after the channel is known, and
+  // fires only for an email step.
 
   // If lead has reached closed_won/closed_lost, finish enrollment
   if (lead.stage === "closed_won" || lead.stage === "closed_lost") {
@@ -589,6 +647,18 @@ async function processSingleSend(
   if (step.channel !== "email") {
     await advanceStep(enrollment, steps);
     return "advanced";
+  }
+
+  // From here down the step is definitely an email step, so an absent address
+  // really is fatal for it. Mark failed with a clear, non-retryable reason
+  // (don't throw, so it doesn't look like a transient crash). Deliberately
+  // placed AFTER the manual-channel and non-email branches above and BEFORE the
+  // suppression check below, which needs a non-null address.
+  if (!lead.email) {
+    await db.update(outreachEnrollments)
+      .set({ status: "failed", pausedReason: "Lead has no email address", nextSendAt: null })
+      .where(eq(outreachEnrollments.id, enrollment.id));
+    return "failed";
   }
 
   // Never send to a suppressed address. Checked here rather than only at
@@ -683,10 +753,12 @@ async function processSingleSend(
     signatureText = buildDefaultSignatureText({});
   }
 
-  // The actual envelope-from address sendOutreachEmail will use (same fallback
-  // it applies itself) — this is the mailbox identity a spam-reject downgrade
-  // must be scoped to, not just "whatever EMAIL_FROM happens to be right now."
-  const fromAddress = process.env.EMAIL_FROM ?? "team@seekersai.org";
+  // The mailbox identity a spam-reject downgrade must be scoped to. Canonical
+  // (lowercased) form, because that is how the row is keyed — using
+  // process.env.EMAIL_FROM verbatim, as this did, pointed the downgrade at
+  // "Team@seekersai.org" while the scheduler read "team@seekersai.org", so the
+  // safety downgrade silently updated 0 rows.
+  const fromAddress = configuredSenderAddress();
 
   // Send. A failure here is caught and routed to the retry/permanent-fail
   // handler — it must NOT bubble up and permanently kill the enrollment, and
@@ -811,7 +883,16 @@ export async function handleReply(opts: {
     return { matched: false, leadId: null, pausedCount: 0 };
   }
 
-  // Pause all active or paused enrollments for this lead
+  // Stop every LIVE enrollment for this lead — including awaiting_action.
+  //
+  // awaiting_action was missing here, and its absence was not cosmetic: a lead
+  // blocked on a WhatsApp step who then replied BY EMAIL kept a live
+  // awaiting_action enrollment. The database went on saying "a human must send
+  // this WhatsApp message" to a lead who had already answered, and the only
+  // screen that can clear that state (the Today queue's manual-touch card) was
+  // hidden by the ranker's per-lead dedupe, because reply_waiting outscores
+  // manual_touch. The enrollment became permanently unresolvable. A reply
+  // resolves the enrollment however it arrives.
   const updated = await db
     .update(outreachEnrollments)
     .set({
@@ -822,10 +903,7 @@ export async function handleReply(opts: {
     })
     .where(and(
       eq(outreachEnrollments.leadId, lead.id),
-      or(
-        eq(outreachEnrollments.status, "active"),
-        eq(outreachEnrollments.status, "paused"),
-      )!,
+      isLiveEnrollment(),
     ))
     .returning({ id: outreachEnrollments.id });
 
@@ -946,14 +1024,17 @@ export async function autoEnrollIfMatchingCategory(
     );
   }
 
-  // Belt and braces: never add a second ACTIVE/PAUSED enrolment for this lead,
-  // even in a different sequence. enrollLead() only de-dupes within one sequence.
+  // Belt and braces: never add a second LIVE enrolment for this lead, even in a
+  // different sequence. enrollLead() only de-dupes within one sequence.
+  // LIVE_ENROLLMENT_STATUSES includes awaiting_action — spelled out inline as
+  // active/paused, this guard treated a lead parked on a manual step as "not
+  // enrolled" and cheerfully started a second stream of messages to them.
   const [live] = await db
     .select({ id: outreachEnrollments.id })
     .from(outreachEnrollments)
     .where(and(
       eq(outreachEnrollments.leadId, leadId),
-      or(eq(outreachEnrollments.status, "active"), eq(outreachEnrollments.status, "paused"))!,
+      isLiveEnrollment(),
     ))
     .limit(1);
   if (live) return;

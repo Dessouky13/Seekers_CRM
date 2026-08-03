@@ -20,10 +20,12 @@ import { isEmailCapableAgent } from "../services/agents";
 import {
   enrollLead, processDueSends, autoEnrollIfMatchingCategory, handleReply,
   getAutoEnrollCandidates, cleanWeeksFor, computeNextSendAtFromNow,
+  LIVE_ENROLLMENT_STATUSES,
 } from "../services/outreach";
 import { fireEventAsync } from "../services/webhooks";
 import { checkDomainAuth } from "../services/domain-auth";
 import { effectiveDailyCap, slotsRemainingToday, type WarmupStage } from "../services/sending-policy";
+import { configuredSenderAddress, loadSendingMailbox } from "../services/mailbox";
 import { phoneFields } from "../services/phone";
 import type { AppEnv } from "../types";
 
@@ -410,7 +412,12 @@ outreach.get("/sequences", authMiddleware, async (c) => {
         count:      sql<number>`COUNT(*)::int`,
       })
       .from(outreachEnrollments)
-      .where(eq(outreachEnrollments.status, "active"))
+      // Every LIVE status, not just 'active'. This number drives the delete
+      // confirmation on the sequence editor: counting only 'active' told an
+      // admin "no leads enrolled" for a sequence whose leads were all parked
+      // in awaiting_action or paused, and they would then delete it.
+      // Over-warning is safe; under-warning destroys live enrollments.
+      .where(inArray(outreachEnrollments.status, [...LIVE_ENROLLMENT_STATUSES]))
       .groupBy(outreachEnrollments.sequenceId),
   ]);
 
@@ -438,7 +445,11 @@ outreach.get("/sequences/:id", authMiddleware, async (c) => {
       .where(eq(outreachSteps.sequenceId, id))
       .orderBy(outreachSteps.position),
     db.select({
-      active: sql<number>`COUNT(*) FILTER (WHERE ${outreachEnrollments.status} = 'active')::int`,
+      // Same LIVE definition as the list endpoint above — the two must agree,
+      // and both feed the "N leads enrolled" delete warning.
+      active: sql<number>`COUNT(*) FILTER (
+        WHERE ${outreachEnrollments.status} IN ('active','paused','awaiting_action')
+      )::int`,
       total:  sql<number>`COUNT(*)::int`,
     })
       .from(outreachEnrollments)
@@ -1315,8 +1326,10 @@ outreach.get("/analytics/sequence/:id", jwtOrApiKey, adminOrApiKey, async (c) =>
 // mailbox and its cap, the three DNS records, the suppression list size, and
 // recent failures grouped by cause.
 outreach.get("/deliverability", authMiddleware, adminOnly, async (c) => {
-  const [mailbox] = await db.select().from(mailboxes).limit(1);
-  const address = mailbox?.address ?? process.env.EMAIL_FROM ?? "";
+  // Same deterministic lookup the scheduler uses, so the cap this panel shows
+  // is provably the cap being enforced. A bare `LIMIT 1` read an arbitrary row.
+  const mailbox = await loadSendingMailbox();
+  const address = mailbox?.address ?? configuredSenderAddress();
   const domain  = address.split("@")[1] ?? "";
 
   const [auth, sentToday, suppressionRows, failureRows] = await Promise.all([
