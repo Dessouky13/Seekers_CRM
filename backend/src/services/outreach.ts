@@ -117,6 +117,11 @@ function computeNextSendAt(enrolledAt: Date, dayOffset: number): Date {
   return sendAt;
 }
 
+/** Next send slot `gapDays` from now, honouring the Cairo window and weekend. */
+export function computeNextSendAtFromNow(gapDays: number): Date {
+  return computeNextSendAt(new Date(), gapDays);
+}
+
 // ── Enrollment ────────────────────────────────────────────
 export interface EnrollOptions {
   leadId:      string;

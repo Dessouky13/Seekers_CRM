@@ -19,7 +19,7 @@ import { createMiddleware } from "hono/factory";
 import { isEmailCapableAgent } from "../services/agents";
 import {
   enrollLead, processDueSends, autoEnrollIfMatchingCategory, handleReply,
-  getAutoEnrollCandidates, cleanWeeksFor,
+  getAutoEnrollCandidates, cleanWeeksFor, computeNextSendAtFromNow,
 } from "../services/outreach";
 import { fireEventAsync } from "../services/webhooks";
 import { checkDomainAuth } from "../services/domain-auth";
@@ -1362,6 +1362,151 @@ outreach.get("/deliverability", authMiddleware, adminOnly, async (c) => {
       example: r.latest,
     })),
   });
+});
+
+/**
+ * Put a manual-step enrollment back into the running sequence.
+ *
+ * Sets status back to active and schedules the next step, so the cadence
+ * resumes from now rather than from the original enrolment date — otherwise a
+ * step actioned three days late would fire the remaining steps in a burst.
+ */
+async function resumeAndAdvance(enrollment: typeof outreachEnrollments.$inferSelect) {
+  const steps = await db.select().from(outreachSteps)
+    .where(eq(outreachSteps.sequenceId, enrollment.sequenceId))
+    .orderBy(outreachSteps.position);
+
+  const nextIdx = enrollment.currentStep + 1;
+  if (nextIdx >= steps.length) {
+    await db.update(outreachEnrollments)
+      .set({ status: "completed", completedAt: new Date(), nextSendAt: null })
+      .where(eq(outreachEnrollments.id, enrollment.id));
+    return;
+  }
+
+  const prev = steps[enrollment.currentStep];
+  const next = steps[nextIdx];
+  const gapDays = Math.max(1, (next.dayOffset ?? 0) - (prev?.dayOffset ?? 0));
+
+  await db.update(outreachEnrollments)
+    .set({
+      status:              "active",
+      currentStep:         nextIdx,
+      pausedReason:        null,
+      lastStepCompletedAt: new Date(),
+      nextSendAt:          computeNextSendAtFromNow(gapDays),
+    })
+    .where(eq(outreachEnrollments.id, enrollment.id));
+}
+
+/** Members may only action enrollments on leads assigned to them. */
+async function canTouchEnrollment(
+  user: { id: string; role?: string },
+  enrollmentId: string,
+): Promise<boolean> {
+  if (user.role === "admin") return true;
+  const [row] = await db
+    .select({ assigneeId: leads.assigneeId })
+    .from(outreachEnrollments)
+    .innerJoin(leads, eq(leads.id, outreachEnrollments.leadId))
+    .where(eq(outreachEnrollments.id, enrollmentId))
+    .limit(1);
+  return !!row && row.assigneeId === user.id;
+}
+
+// ── POST /outreach/enrollments/:id/touch-outcome ──────────
+// What happened when a human actioned a manual step. This is the only way an
+// awaiting_action enrollment moves, and it is where the lead list learns which
+// numbers are actually on WhatsApp — there is no compliant free way to check
+// that up front.
+const touchOutcomeSchema = z.object({
+  outcome: z.enum(["sent", "no_whatsapp", "wrong_number", "not_interested", "replied"]),
+  notes:   z.string().max(1000).optional(),
+});
+
+outreach.post("/enrollments/:id/touch-outcome", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const id   = c.req.param("id");
+  const body = touchOutcomeSchema.parse(await c.req.json());
+
+  const [row] = await db
+    .select({
+      enrollment: outreachEnrollments,
+      leadId:     leads.id,
+      leadName:   leads.name,
+      channel:    outreachSteps.channel,
+    })
+    .from(outreachEnrollments)
+    .innerJoin(leads, eq(leads.id, outreachEnrollments.leadId))
+    .leftJoin(outreachSteps, and(
+      eq(outreachSteps.sequenceId, outreachEnrollments.sequenceId),
+      eq(outreachSteps.position, outreachEnrollments.currentStep),
+    ))
+    .where(eq(outreachEnrollments.id, id))
+    .limit(1);
+
+  if (!row) return c.json({ error: "Enrollment not found" }, 404);
+  // Members may only action their own leads, same rule as every other route.
+  if (!(await canTouchEnrollment(user, id))) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+  if (row.enrollment.status !== "awaiting_action") {
+    return c.json({ error: "This enrollment is not waiting on a manual step" }, 409);
+  }
+
+  const activity = async (description: string) => {
+    await db.insert(leadActivities).values({
+      leadId:      row.leadId,
+      type:        row.channel === "call" ? "call" : "note",
+      description: description.slice(0, 1000),
+      createdBy:   user.id,
+    });
+  };
+
+  switch (body.outcome) {
+    case "sent": {
+      // A message that went through IS the confirmation the number is on
+      // WhatsApp, so success teaches the list as well as failure does.
+      if (row.channel === "whatsapp") {
+        await db.update(leads).set({ whatsappStatus: "yes" }).where(eq(leads.id, row.leadId));
+      }
+      await activity(`${row.channel === "call" ? "Called" : "WhatsApp sent"}${body.notes ? ` — ${body.notes}` : ""}`);
+      await resumeAndAdvance(row.enrollment);
+      break;
+    }
+    case "no_whatsapp": {
+      await db.update(leads).set({ whatsappStatus: "no" }).where(eq(leads.id, row.leadId));
+      await activity("No WhatsApp on this number — routing to another channel");
+      // Re-route rather than stop: the lead may still have a working email.
+      await resumeAndAdvance(row.enrollment);
+      break;
+    }
+    case "wrong_number": {
+      await db.update(leads)
+        .set({ phone: null, phoneE164: null, phoneType: null, whatsappStatus: "no" })
+        .where(eq(leads.id, row.leadId));
+      await activity("Wrong number — cleared");
+      await resumeAndAdvance(row.enrollment);
+      break;
+    }
+    case "not_interested": {
+      await db.update(leads).set({ stage: "closed_lost" }).where(eq(leads.id, row.leadId));
+      await db.update(outreachEnrollments)
+        .set({ status: "completed", completedAt: new Date(), nextSendAt: null })
+        .where(eq(outreachEnrollments.id, id));
+      await activity(`Not interested${body.notes ? ` — ${body.notes}` : ""}`);
+      break;
+    }
+    case "replied": {
+      await db.update(outreachEnrollments)
+        .set({ status: "replied", completedAt: new Date(), nextSendAt: null })
+        .where(eq(outreachEnrollments.id, id));
+      await activity(`Replied${body.notes ? ` — ${body.notes}` : ""}`);
+      break;
+    }
+  }
+
+  return c.json({ ok: true, outcome: body.outcome });
 });
 
 export default outreach;
