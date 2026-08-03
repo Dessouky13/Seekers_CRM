@@ -43,7 +43,26 @@ export async function fetchWorklist(
   const mine  = admin ? sql`TRUE` : sql`l.assignee_id = ${user.id}`;
   const empty = Promise.resolve({ rows: [] as any[] });
 
-  const [replies, hotLeads, blocked, dueTasks, staleLeads, unassigned, manualTouches] = await Promise.all([
+  /**
+   * Task scoping, which is deliberately NOT the same as `mine`.
+   *
+   * Leads are the company's; tasks are a person's. An admin can pick up any
+   * lead and message them, so `mine` widens to everything for an admin. Nobody
+   * can do somebody else's task, so an admin's *personal* queue showing one is
+   * pure noise with an "Open task" button that leads nowhere useful. Measured
+   * on this database: the admin's queue carried seven overdue tasks, two of
+   * them assigned to a member.
+   *
+   * Orphans are the exception and the reason this isn't simply
+   * `t.assignee_id = user.id` for everyone: a task with no assignee is nobody's
+   * and would otherwise appear in no queue at all. It surfaces to admins, whose
+   * job it is to hand it out.
+   */
+  const myTasks = admin
+    ? sql`(t.assignee_id = ${user.id} OR t.assignee_id IS NULL)`
+    : sql`t.assignee_id = ${user.id}`;
+
+  const [replies, hotLeads, blocked, dueTasks, staleLeads, unassigned, manualTouches, followUps] = await Promise.all([
     // A reply needs a human until a human actually does something about it.
     // "Something" = any activity logged BY A PERSON (created_by IS NOT NULL —
     // the sequencer and the inbox poller both write with a null author) after
@@ -94,20 +113,16 @@ export async function fetchWorklist(
            LIMIT 20`)
       : empty,
 
-    admin
-      ? db.execute(sql`
-          SELECT t.id, t.title, t.due_date, t.priority, p.name AS project_name
-            FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
-           WHERE t.status <> 'done' AND t.due_date IS NOT NULL
-             AND t.due_date <= CURRENT_DATE
-           ORDER BY t.due_date ASC LIMIT 50`)
-      : db.execute(sql`
-          SELECT t.id, t.title, t.due_date, t.priority, p.name AS project_name
-            FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
-           WHERE t.status <> 'done' AND t.due_date IS NOT NULL
-             AND t.due_date <= CURRENT_DATE
-             AND t.assignee_id = ${user.id}
-           ORDER BY t.due_date ASC LIMIT 50`),
+    // CURRENT_DATE, not a TypeScript day-string: this database runs with
+    // TimeZone = Africa/Cairo, so CURRENT_DATE already is the Cairo calendar
+    // day the team means by "due today".
+    db.execute(sql`
+      SELECT t.id, t.title, t.due_date, t.priority, p.name AS project_name
+        FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
+       WHERE t.status <> 'done' AND t.due_date IS NOT NULL
+         AND t.due_date <= CURRENT_DATE
+         AND ${myTasks}
+       ORDER BY t.due_date ASC LIMIT 50`),
 
     // Ownerless leads are deliberately excluded here — they come back as
     // `unassigned_lead` instead. A lead with no owner isn't a follow-up
@@ -122,6 +137,15 @@ export async function fetchWorklist(
          AND ${mine}
          AND (l.last_activity IS NULL
               OR l.last_activity < CURRENT_DATE - (${STALE_DAYS} || ' days')::interval)
+         -- A follow-up already scheduled for a future day is a decision, and
+         -- this card exists to catch leads nobody has decided about. Without
+         -- this clause, booking "call them Thursday" changed nothing: the lead
+         -- kept raising a "nothing for 9 days" card every day until Thursday,
+         -- and the only way to quieten it was Today's client-side Skip, which
+         -- forgets on reload. A follow-up that is due or overdue is NOT
+         -- excluded — it comes back as the higher-ranked follow_up_due card,
+         -- and the deduper keeps just that one.
+         AND (l.follow_up_at IS NULL OR l.follow_up_at <= CURRENT_DATE)
        ORDER BY l.deal_value DESC NULLS LAST
        LIMIT 50`),
 
@@ -167,6 +191,21 @@ export async function fetchWorklist(
          AND ${mine}
        ORDER BY e.enrolled_at
        LIMIT 50`),
+
+    // Follow-ups whose day has come. Scoped with `mine` like every other
+    // lead-based source (an admin oversees the whole pipeline and can action
+    // any lead), unlike tasks — see the myTasks comment above for why those
+    // two differ.
+    db.execute(sql`
+      SELECT l.id, l.name, l.company, l.deal_value, l.stage,
+             l.follow_up_at, l.follow_up_note
+        FROM leads l
+       WHERE l.follow_up_at IS NOT NULL
+         AND l.follow_up_at <= CURRENT_DATE
+         AND ${ACTIVE_ONLY}
+         AND ${mine}
+       ORDER BY l.follow_up_at ASC
+       LIMIT 50`),
   ]);
 
   const num  = (v: unknown) => Number(v ?? 0);
@@ -198,6 +237,11 @@ export async function fetchWorklist(
     unassigned: (unassigned.rows as any[]).map((r) => ({
       leadId: r.id, name: r.name, company: r.company,
       dealValue: num(r.deal_value), createdAt: date(r.created_at),
+    })),
+    followUps: (followUps.rows as any[]).map((r) => ({
+      leadId: r.id, name: r.name, company: r.company, dealValue: num(r.deal_value),
+      stage: r.stage, dueDate: String(r.follow_up_at).slice(0, 10),
+      note: r.follow_up_note ?? null,
     })),
     // Route every manual touch through channels.ts before it becomes a card.
     // manualTouchRow is where the "WhatsApp must never target a landline"

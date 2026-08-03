@@ -230,6 +230,13 @@ export const leads = pgTable("leads", {
   assigneeId:   uuid("assignee_id").references(() => profiles.id, { onDelete: "set null" }),
   lastActivity: date("last_activity"),
   notes:        text("notes"),
+  // ── Follow-up: the date a human promised to come back to this lead ──
+  // A calendar day in Cairo, like every other `date` column here. Two jobs:
+  // it raises a `follow_up_due` card on the day, and until then it SUPPRESSES
+  // this lead's stale card — a lead you have already decided to chase on
+  // Thursday is not a lead going quiet on you.
+  followUpAt:   date("follow_up_at"),
+  followUpNote: text("follow_up_note"),
   // ── v2 Lead Intelligence (populated by n8n via /intel/* ingest) ──
   domain:          text("domain"),                        // company website domain, for matching
   emailStatus:     text("email_status"),                  // verified | risky | invalid | unknown | bounced
@@ -258,6 +265,10 @@ export const leads = pgTable("leads", {
   domainIdx:   index("idx_leads_domain").on(t.domain),
   phoneTypeIdx:      index("idx_leads_phone_type").on(t.phoneType),
   whatsappStatusIdx: index("idx_leads_whatsapp_status").on(t.whatsappStatus),
+  // Partial in the migration (WHERE follow_up_at IS NOT NULL) — only a small
+  // minority of leads carry one. Drizzle 0.20 has no partial-index builder, so
+  // the declaration here is the unfiltered shape; migration 0018 is authoritative.
+  followUpIdx:       index("idx_leads_follow_up_at").on(t.followUpAt),
 }));
 
 // ── Events (append-only fact log — the learning-loop training data) ──

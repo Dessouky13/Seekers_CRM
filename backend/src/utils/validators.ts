@@ -190,6 +190,14 @@ export const updateLeadSchema = createLeadSchema.partial().extend({
     "new_lead", "contacted", "call_scheduled",
     "proposal_sent", "negotiation", "closed_won", "closed_lost",
   ]).optional(),
+  // Follow-up: "come back to this lead on this day".
+  //
+  // Explicitly `.nullable()` — unlike the fields above, clearing a follow-up is
+  // a first-class action ("actually, no need to chase them"), so the handler
+  // has to be able to tell `null` (clear it) from absent (leave it alone). A
+  // calendar day in Cairo, same format every other date field here uses.
+  follow_up_at:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD").nullable().optional(),
+  follow_up_note: z.string().max(500).nullable().optional(),
 });
 
 export const createLeadActivitySchema = z.object({

@@ -235,6 +235,11 @@ crm.patch("/leads/:id", authMiddleware, async (c) => {
       stage:        (body.stage      ?? existing.stage) as any,
       assigneeId:   body.assignee_id !== undefined ? (body.assignee_id || null) : existing.assigneeId,
       notes:        body.notes       !== undefined ? (body.notes || null) : existing.notes,
+      // `!== undefined` rather than `||`: null is a real value here (clear the
+      // follow-up), and `body.follow_up_at || existing.followUpAt` would
+      // silently ignore every attempt to clear one.
+      followUpAt:   body.follow_up_at   !== undefined ? body.follow_up_at   : existing.followUpAt,
+      followUpNote: body.follow_up_note !== undefined ? (body.follow_up_note || null) : existing.followUpNote,
       lastActivity: stageChanged ? cairoToday() : existing.lastActivity,
       updatedAt:    new Date(),
     })
@@ -424,7 +429,9 @@ crm.post("/leads/:id/activities", authMiddleware, async (c) => {
   const user   = c.get("user");
   const body   = createLeadActivitySchema.parse(await c.req.json());
 
-  const [lead] = await db.select({ id: leads.id, assigneeId: leads.assigneeId }).from(leads).where(eq(leads.id, leadId)).limit(1);
+  const [lead] = await db
+    .select({ id: leads.id, assigneeId: leads.assigneeId, followUpAt: leads.followUpAt })
+    .from(leads).where(eq(leads.id, leadId)).limit(1);
   if (!lead) return c.json({ error: "Lead not found" }, 404);
   if (!canAccessOwned(user, lead.assigneeId)) {
     return c.json({ error: "Lead not found" }, 404);
@@ -442,9 +449,24 @@ crm.post("/leads/:id/activities", authMiddleware, async (c) => {
     })
     .returning();
 
+  // Logging the activity IS keeping the promise, so the follow-up clears
+  // itself. Without this, doing the thing you scheduled left the reminder
+  // standing and the lead kept raising a "follow-up overdue" card until
+  // somebody remembered to go and clear it by hand.
+  //
+  // Only clears a follow-up that has actually come due (`<= activity.date`).
+  // A note logged on Tuesday against a follow-up booked for Thursday is
+  // progress, not the promise — that one must survive.
+  const clearsFollowUp =
+    lead.followUpAt !== null && lead.followUpAt <= activity.date;
+
   await db
     .update(leads)
-    .set({ lastActivity: activity.date, updatedAt: new Date() })
+    .set({
+      lastActivity: activity.date,
+      ...(clearsFollowUp ? { followUpAt: null, followUpNote: null } : {}),
+      updatedAt: new Date(),
+    })
     .where(eq(leads.id, leadId));
 
   return c.json(activity, 201);

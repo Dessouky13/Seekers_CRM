@@ -35,6 +35,15 @@ const stale = (over: Partial<WorklistInputs["staleLeads"][0]> = {}) => ({
   ...over,
 });
 
+// NOW is 2026-08-03T12:00Z, which is 2026-08-03 in Cairo — so a dueDate of
+// "2026-08-03" is "today" and anything earlier is overdue.
+const followUp = (over: Partial<NonNullable<WorklistInputs["followUps"]>[0]> = {}) => ({
+  leadId: "lead-followup", name: "Hany Sabry", company: "FutureScale",
+  dealValue: 50_000, stage: "negotiation", dueDate: "2026-08-03",
+  note: "Said to call back after their board meeting",
+  ...over,
+});
+
 describe("rankWorklist — ordering", () => {
   it("puts an unanswered reply above everything else", () => {
     const out = rankWorklist(inputs({
@@ -145,6 +154,80 @@ describe("rankWorklist — manual_touch", () => {
     }));
     expect(out[0].type).toBe("manual_touch");
     expect(out.map((a) => a.type)).toEqual(["manual_touch", "stale_lead"]);
+  });
+});
+
+describe("rankWorklist — follow_up_due", () => {
+  it("emits a follow-up as its own action, carrying the note as the detail", () => {
+    const out = rankWorklist(inputs({ followUps: [followUp()] }));
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe("follow_up_due");
+    expect(out[0].leadId).toBe("lead-followup");
+    expect(out[0].detail).toBe("Said to call back after their board meeting");
+    expect(out[0].deepLink).toBe("/crm?lead=lead-followup");
+  });
+
+  it("says 'due today' on the day, and counts the days once it slips", () => {
+    // The boundary that matters: a follow-up dated today must not read as
+    // "0 days overdue".
+    expect(rankWorklist(inputs({ followUps: [followUp()] }))[0].reason)
+      .toBe("Follow-up due today · Negotiation");
+    expect(rankWorklist(inputs({ followUps: [followUp({ dueDate: "2026-08-02" })] }))[0].reason)
+      .toBe("Follow-up 1 day overdue · Negotiation");
+    expect(rankWorklist(inputs({ followUps: [followUp({ dueDate: "2026-07-29" })] }))[0].reason)
+      .toBe("Follow-up 5 days overdue · Negotiation");
+  });
+
+  it("escalates the longer a follow-up is missed", () => {
+    const onTime = rankWorklist(inputs({ followUps: [followUp()] }))[0];
+    const missed = rankWorklist(inputs({ followUps: [followUp({ dueDate: "2026-07-27" })] }))[0];
+    expect(missed.score).toBeGreaterThan(onTime.score);
+  });
+
+  it("outranks a task and a stale lead, but not a reply or a hot lead", () => {
+    // A promise with a date on it beats generic chasing; a live signal (they
+    // are reading the audit right now) and an unanswered reply still beat it.
+    //
+    // Asserted as positions rather than one exact ordering of all five: how
+    // task_due and stale_lead sort against EACH OTHER depends on deal value
+    // and priority (a 40k stale lead does outrank a critical task due today),
+    // and that pre-existing tuning is not what this test is about.
+    const out = rankWorklist(inputs({
+      replies:    [reply({ leadId: "r" })],
+      hotLeads:   [{ leadId: "h", name: "Hot", company: "C", dealValue: 50_000, views: 4, slug: "s", lastViewAt: hoursAgo(1) }],
+      followUps:  [followUp()],
+      dueTasks:   [{ taskId: "t", title: "Task", dueDate: "2026-08-03", priority: "critical", projectName: null }],
+      staleLeads: [stale()],
+    }));
+    const at = (t: string) => out.findIndex((a) => a.type === t);
+    expect(at("follow_up_due")).toBeGreaterThan(at("reply_waiting"));
+    expect(at("follow_up_due")).toBeGreaterThan(at("hot_lead"));
+    expect(at("follow_up_due")).toBeLessThan(at("task_due"));
+    expect(at("follow_up_due")).toBeLessThan(at("stale_lead"));
+  });
+
+  it("shows a lead that is both stale and due for follow-up once, as the follow-up", () => {
+    // worklist.ts only lets both reach the ranker when the follow-up is due or
+    // overdue (a FUTURE one filters the stale row out in SQL). When they do
+    // both arrive, the follow-up is the one with the context on it.
+    const out = rankWorklist(inputs({
+      followUps:  [followUp({ leadId: "same" })],
+      staleLeads: [stale({ leadId: "same" })],
+    }));
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe("follow_up_due");
+  });
+
+  it("survives a follow-up with no note", () => {
+    const out = rankWorklist(inputs({ followUps: [followUp({ note: null })] }));
+    expect(out[0].detail).toBeNull();
+    expect(out[0].score).toBeGreaterThan(0);
+  });
+
+  it("treats a missing followUps array as no follow-ups", () => {
+    // Every other caller of rankWorklist predates this source; leaving it
+    // undefined must not throw.
+    expect(rankWorklist(inputs({ followUps: undefined }))).toEqual([]);
   });
 });
 

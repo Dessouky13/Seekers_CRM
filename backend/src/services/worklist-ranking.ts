@@ -12,6 +12,7 @@ import { cairoDate } from "../utils/dates";
 export type ActionType =
   | "reply_waiting"
   | "hot_lead"
+  | "follow_up_due"
   | "sequence_blocked"
   | "task_due"
   | "stale_lead"
@@ -69,6 +70,15 @@ export interface WorklistInputs {
     leadId: string; name: string; company: string | null;
     dealValue: number; stage: string; lastActivity: Date | null;
   }[];
+  /**
+   * Leads whose promised follow-up date has arrived (or passed). `dueDate` is a
+   * Cairo calendar day, same as a task's — see the `follow_up_due` block below
+   * for why this is a separate source rather than a flavour of stale_lead.
+   */
+  followUps?: {
+    leadId: string; name: string; company: string | null;
+    dealValue: number; stage: string; dueDate: string; note: string | null;
+  }[];
   unassigned: {
     leadId: string; name: string; company: string | null;
     dealValue: number; createdAt: Date;
@@ -112,6 +122,11 @@ const BASE: Record<ActionType, number> = {
   reply_waiting:    1000,
   manual_touch:      900,
   hot_lead:          800,
+  // A date a human chose and told the lead about. It outranks a task because
+  // breaking it is visible to the customer, and sits under hot_lead because
+  // someone reading their audit right now is a live signal rather than a diary
+  // entry.
+  follow_up_due:     700,
   sequence_blocked:  520,
   task_due:          420,
   stale_lead:        300,
@@ -232,6 +247,41 @@ export function rankWorklist(input: WorklistInputs): WorklistAction[] {
       detail: null,
       deepLink: `/tasks?task=${t.taskId}`,
       leadId: null, taskId: t.taskId, dealValue: 0, ageHours: Math.max(0, daysOverdue) * 24,
+    });
+  }
+
+  // A follow-up is a promise with a date on it: "I'll call you Thursday".
+  //
+  // Deliberately NOT folded into stale_lead, even though both are "this lead
+  // needs chasing". They are opposites in the one way that matters here — a
+  // stale lead is one nobody decided anything about, a follow-up is one
+  // somebody did — and that difference drives three behaviours a shared type
+  // could not express: it ranks far higher (a missed commitment is worse than
+  // a lead drifting), it carries the note the person left themselves, and
+  // until the date arrives it SUPPRESSES the stale card entirely (the
+  // `follow_up_at > CURRENT_DATE` clause in worklist.ts). That last one is the
+  // point: scheduling a follow-up is how you make Today quieter without
+  // dropping anything.
+  for (const f of input.followUps ?? []) {
+    const daysOverdue = daysBetweenDates(toIso(now), f.dueDate);
+    out.push({
+      id: `followup:${f.leadId}`,
+      type: "follow_up_due",
+      urgency: "today",
+      // Same 40/day climb as an overdue task — the two are the same kind of
+      // "you said you would" and should escalate at the same rate.
+      score: BASE.follow_up_due + valueBonus(f.dealValue) + cap(Math.max(0, daysOverdue) * 40, 300),
+      title: f.name,
+      subtitle: f.company,
+      reason: daysOverdue > 0
+        ? `Follow-up ${daysOverdue} day${daysOverdue === 1 ? "" : "s"} overdue · ${prettyStage(f.stage)}`
+        : `Follow-up due today · ${prettyStage(f.stage)}`,
+      // The note you left yourself is the whole reason this is actionable in
+      // seconds rather than needing the lead's history re-read.
+      detail: f.note,
+      deepLink: `/crm?lead=${f.leadId}`,
+      leadId: f.leadId, taskId: null, dealValue: f.dealValue,
+      ageHours: Math.max(0, daysOverdue) * 24,
     });
   }
 

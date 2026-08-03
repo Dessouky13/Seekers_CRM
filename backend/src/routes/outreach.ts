@@ -27,6 +27,7 @@ import { checkDomainAuth } from "../services/domain-auth";
 import { effectiveDailyCap, slotsRemainingToday, type WarmupStage } from "../services/sending-policy";
 import { configuredSenderAddress, loadSendingMailbox } from "../services/mailbox";
 import { phoneFields } from "../services/phone";
+import { cairoToday } from "../utils/dates";
 import {
   fillNameCompany, pairKey, emailKey, planLeadImport, type ImportRow,
 } from "../services/lead-import";
@@ -1528,13 +1529,24 @@ outreach.post("/enrollments/:id/touch-outcome", authMiddleware, async (c) => {
 
     // Single place that writes the lead, so no outcome can skip the decided
     // whatsapp_status or substitute a value of its own.
+    //
+    // Every outcome bumps last_activity, because every outcome means a human
+    // just dealt with this lead. It previously did not: the handler inserted a
+    // lead_activities row but left leads.last_activity untouched, and that
+    // column — not the activity table — is what "stale" is computed from
+    // (services/worklist.ts, services/notifications.ts, routes/users.ts). So
+    // WhatsApping a lead and pressing Sent cleared the enrollment and then left
+    // the lead reappearing as "nothing for 9 days", both in Today and in the
+    // daily stale-lead digest. The only way to actually silence it was to go to
+    // the CRM sheet and log a SECOND, duplicate activity by hand, because
+    // POST /crm/leads/:id/activities is the one path that did write the column.
     const updateLead = async (extra: Partial<typeof leads.$inferInsert> = {}) => {
-      const set = {
+      await tx.update(leads).set({
         ...extra,
         ...(effects.whatsappStatus ? { whatsappStatus: effects.whatsappStatus } : {}),
-      };
-      if (Object.keys(set).length === 0) return;
-      await tx.update(leads).set(set).where(eq(leads.id, row.leadId));
+        lastActivity: cairoToday(),
+        updatedAt:    new Date(),
+      }).where(eq(leads.id, row.leadId));
     };
 
     switch (body.outcome) {
@@ -1569,6 +1581,11 @@ outreach.post("/enrollments/:id/touch-outcome", authMiddleware, async (c) => {
         await tx.update(outreachEnrollments)
           .set({ status: "replied", completedAt: new Date(), nextSendAt: null })
           .where(eq(outreachEnrollments.id, id));
+        // The only outcome that used to touch the lead not at all. A reply is
+        // the strongest possible signal the lead is alive, so it must bump
+        // last_activity too or the hottest lead on the board keeps being
+        // reported as one that has gone quiet.
+        await updateLead();
         await activity();
         break;
       }
