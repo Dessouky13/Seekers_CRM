@@ -1,0 +1,12 @@
+-- Index leads.assignee_id — the tenant-isolation key.
+--
+-- Every member-scoped read filters on this column (the CRM list, the lead
+-- detail, stale leads, the team work summary, and all five worklist queries),
+-- and it was unindexed. EXPLAIN showed a Seq Scan over the whole leads table on
+-- every member page load, five times per worklist request.
+--
+-- Idempotent and safe on an empty table, so it applies cleanly from scratch.
+-- Not CONCURRENTLY: the deploy runner wraps each migration file in a
+-- transaction, and CREATE INDEX CONCURRENTLY cannot run inside one. At 600 rows
+-- the exclusive lock is sub-millisecond; revisit only if leads grows past ~1M.
+CREATE INDEX IF NOT EXISTS "idx_leads_assignee" ON "leads" ("assignee_id");

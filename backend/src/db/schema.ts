@@ -248,6 +248,10 @@ export const leads = pgTable("leads", {
   updatedAt:    timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   stageIdx:    index("idx_leads_stage").on(t.stage),
+  // The tenant-isolation key. Every member-scoped read filters on it — the
+  // worklist alone does so five times per request — and it was unindexed, so
+  // EXPLAIN showed a Seq Scan over the whole table on every member page load.
+  assigneeIdx: index("idx_leads_assignee").on(t.assigneeId),
   categoryIdx: index("idx_leads_category").on(t.category),
   nameIdx:     index("idx_leads_name").on(t.name),
   companyIdx:  index("idx_leads_company").on(t.company),

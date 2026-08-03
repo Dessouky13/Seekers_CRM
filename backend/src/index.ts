@@ -63,6 +63,14 @@ const ADMIN_ONLY_MODULES = [
   "/knowledge",  // internal knowledge base / RAG
   "/vault",      // stored credentials — most sensitive
   "/agents",     // paid AI agent runs
+  // Webhook subscriptions carry the shared X-Webhook-Secret this CRM signs
+  // outbound events with, and the delivery log stores full event payloads —
+  // other users' lead names, deal values, phone numbers, and for the digest
+  // event another person's entire ranked action list. Every MUTATING route on
+  // that router was already adminOnly, but both GETs were authMiddleware only,
+  // so any member could read the credential and the payloads. Gating the module
+  // closes both at once and keeps the rule in one place.
+  "/webhooks",   // automation credentials + delivered event payloads
 ] as const;
 
 for (const mod of ADMIN_ONLY_MODULES) {

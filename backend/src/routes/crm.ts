@@ -268,8 +268,12 @@ const bulkDeleteSchema = z.object({
   // Explicit selection from the UI (tick boxes). Capped — a runaway client
   // should not be able to ask for the whole table in one call.
   ids:            z.array(z.string().uuid()).max(1000).optional(),
-  keep_sources:   z.array(z.string()).optional(),
-  delete_sources: z.array(z.string()).optional(),
+  // .min(1): an EMPTY array must not be accepted. `![]` is false in JS, so an
+  // empty array slipped past the "did you provide a filter?" guard below while
+  // contributing no SQL condition — which produced an unfiltered DELETE. See the
+  // defence-in-depth check at the filter-mode branch.
+  keep_sources:   z.array(z.string().min(1)).min(1).optional(),
+  delete_sources: z.array(z.string().min(1)).min(1).optional(),
   dry_run:        z.boolean().optional(),
   confirm:        z.literal("DELETE_LEADS"),
 });
@@ -330,6 +334,19 @@ crm.post("/leads/bulk-delete", authMiddleware, adminOnly, async (c) => {
   if (body.delete_sources && body.delete_sources.length > 0) {
     conditions.push(sql`${leads.source} IN (${sql.join(body.delete_sources.map((s) => sql`${s}`), sql`, `)})`);
   }
+  // Defence in depth. The Zod `.min(1)` above already rejects an empty array,
+  // but this is the last line before an irreversible DELETE that cascades to
+  // lead_activities, outreach_enrollments and outreach_sends, so it does not
+  // rely on validation alone. If `conditions` were ever empty, `where` would be
+  // `undefined`, Drizzle would omit the clause entirely, and this would delete
+  // EVERY lead in the database. Never build the statement in that state.
+  if (conditions.length === 0) {
+    return c.json({
+      error: "Refusing to delete: no source filter resolved to a condition. " +
+             "Provide a non-empty keep_sources or delete_sources.",
+    }, 400);
+  }
+
   const where = conditions.length > 1 ? sql`(${conditions[0]}) AND (${conditions[1]})` : conditions[0];
 
   // True total count (uncapped) + 50-row preview + per-source breakdown

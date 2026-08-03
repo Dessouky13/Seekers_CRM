@@ -5,19 +5,22 @@
 // mid-flight, overdue tasks, a finance cycle that straddles the 21st boundary)
 // so pages can be reviewed with plausible content instead of empty states.
 //
-// Refuses to run against anything other than localhost, and is purely additive:
-// it never deletes. Re-running is a no-op once the marker client exists, so it
-// cannot stack duplicates either. To start over, drop the local database by hand.
+// Purely additive: it never deletes. Re-running is a no-op once the marker
+// client exists, so it cannot stack duplicates either. To start over, drop the
+// local database by hand.
+//
+// ⚠️  It also UPSERTS PASSWORDS for dessouky@, mostafa@ and gomaa@. Its previous
+// guard was "host must be localhost" — which is true ON THE PRODUCTION VPS,
+// whose DATABASE_URL is `…@localhost:5432/seekersai`. Running this there would
+// have passed that check and then reset all three real accounts' credentials and
+// injected fictional revenue. It now uses the shared guard, which also refuses
+// any database that already contains business records.
 import "dotenv/config";
 import { Client } from "pg";
 import bcrypt from "bcrypt";
+import { assertSafeToSeed } from "./lib/seed-guard";
 
 const URL_ = process.env.DATABASE_URL!;
-const host = new URL(URL_).hostname;
-if (!["localhost", "127.0.0.1"].includes(host)) {
-  console.error(`refusing to seed non-local database (host=${host})`);
-  process.exit(1);
-}
 
 const c = new Client({ connectionString: URL_ });
 
@@ -31,8 +34,9 @@ const day = (n: number) => {
 const hour = (n: number) => new Date(Date.now() + n * 3600_000).toISOString();
 
 async function main() {
+  await assertSafeToSeed({ scriptName: "seed-dev.ts" });
   await c.connect();
-  console.log("seeding", host);
+  console.log("seeding", new URL(URL_).hostname);
 
   // ── People ──────────────────────────────────────────────
   const pw = await bcrypt.hash("admin123!", 12);

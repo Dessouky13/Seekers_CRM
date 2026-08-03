@@ -1,12 +1,19 @@
 /**
- * Seed script — bootstraps first admin user and sample data.
+ * Seed script — bootstraps the first admin user and DEMO data for local dev.
  * Run from the `backend/` directory:
  *   npm run seed
- * or:
- *   npx tsx scripts/seed.ts
+ *
+ * ⚠️  This inserts fictional people (Jordan Reeves, Priya Nair, Leo Brandt),
+ * six fictional clients and fictional revenue. It is a LOCAL DEVELOPMENT tool
+ * and must never touch a real database. It used to have no guard at all: a
+ * single `npm run seed` with a production DATABASE_URL would have mixed fake
+ * clients and fake income into live business data and P&L reporting, with no
+ * way to tell them apart afterwards. The guards below make that impossible by
+ * accident.
  */
 import "dotenv/config";
 import { db } from "../src/db/client";
+import { assertSafeToSeed } from "./lib/seed-guard";
 import {
   profiles, clients, projects, tasks, subtasks,
   transactions, leads, leadActivities, goals,
@@ -14,7 +21,8 @@ import {
 import { hashPassword } from "../src/services/auth";
 
 async function seed() {
-  console.log("🌱 Seeding Seekers AI OS database...\n");
+  await assertSafeToSeed({ scriptName: "seed.ts" });
+  console.log("🌱 Seeding Seekers AI OS database (local dev only)...\n");
 
   // ── Admin user ────────────────────────────────────────────
   const adminPassword = await hashPassword("admin123!");
