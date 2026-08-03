@@ -183,10 +183,14 @@ export default function CRM() {
   const handleAdd = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    // Company is optional in the form (mirrors QuickAdd) — default it to the
+    // name here so the two "Add Lead" surfaces behave identically instead of
+    // one silently requiring a field the other doesn't.
+    const name = (fd.get("name") as string).trim();
     createLead.mutate(
       {
-        name:        fd.get("name") as string,
-        company:     fd.get("company") as string,
+        name,
+        company:     (fd.get("company") as string).trim() || name,
         email:       (fd.get("email") as string)       || undefined,
         phone:       (fd.get("phone") as string)       || undefined,
         source:      (fd.get("source") as string)      || undefined,

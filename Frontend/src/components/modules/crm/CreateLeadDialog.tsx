@@ -33,8 +33,11 @@ export function CreateLeadDialog({
         <DialogHeader><DialogTitle>Add Lead</DialogTitle></DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div><Label>Name</Label><Input name="name" required className="mt-1" /></div>
-            <div><Label>Company</Label><Input name="company" required className="mt-1" /></div>
+            <div><Label>Name</Label><Input name="name" required className="mt-1" placeholder="Contact name" /></div>
+            <div>
+              <Label>Company <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Input name="company" className="mt-1" placeholder="Defaults to the name" />
+            </div>
             <div><Label>Email</Label><Input name="email" type="email" className="mt-1" /></div>
             <div><Label>Phone</Label><Input name="phone" className="mt-1" placeholder="+20..." /></div>
             <div>
