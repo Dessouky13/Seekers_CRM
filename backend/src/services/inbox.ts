@@ -1,10 +1,11 @@
-import { ImapFlow } from "imapflow";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { events, leads, profiles } from "../db/schema";
 import { handleReply } from "./outreach";
 import { createNotification } from "./notifications";
 import { suppress } from "./suppressions";
+import { sweepMailbox } from "./mailbox-sweep";
+import { cleanAddress, readAddressHeader, readHeader, splitBody, splitHeaders } from "./rfc5322";
 
 // ── Inbox poller ─────────────────────────────────────────────────────────
 // We SEND over SMTP and APPEND to Sent over IMAP (services/email.ts), but
@@ -12,6 +13,10 @@ import { suppress } from "./suppressions";
 // would happily keep emailing them. This closes that loop: every N minutes we
 // read unseen INBOX mail, classify it (bounce / auto-reply / real reply) and
 // hand real replies to the existing handleReply() pipeline.
+//
+// The connection, marker negotiation, date bound, per-run cap and
+// flag-before-process ordering all live in services/mailbox-sweep.ts, shared
+// with the Sent-folder sweep in services/sent-sync.ts.
 
 export interface PollInboxResult {
   processed: number;
@@ -19,24 +24,7 @@ export interface PollInboxResult {
   bounces:   number;
 }
 
-// Cap per run so a mailbox with a big unread backlog can't stall the sweep
-// (or fire hundreds of notifications) on the first tick.
-const MAX_PER_RUN = 25;
 const PREVIEW_CHARS = 500;
-// Custom IMAP keyword used as our "already handled" marker, so we never have
-// to touch the mailbox owner's read/unread state. See the note in pollInbox().
-const PROCESSED_KEYWORD = "SeekersProcessed";
-// Ignore anything older than this. Bounds the very first run on a mailbox with
-// a large history, and outreach replies are only relevant while fresh anyway.
-const LOOKBACK_DAYS = Number(process.env.INBOX_LOOKBACK_DAYS ?? 14);
-// Headers are small; the body chunk only feeds a 500-char preview and bounce
-// address extraction, so there's no reason to pull whole (attachment-laden)
-// messages down.
-const MAX_SOURCE_BYTES = 32 * 1024;
-
-// The creds warning is logged once per process — this sweep runs every couple
-// of minutes and would otherwise spam the logs forever on a dev machine.
-let warnedNoCreds = false;
 
 const BOUNCE_SENDER_RE  = /^(mailer-daemon|postmaster|no-?reply-?daemon)@/i;
 const BOUNCE_SUBJECT_RE = /undeliverable|delivery status|returned mail|delivery has failed|mail delivery failed|failure notice/i;
@@ -46,126 +34,56 @@ const AUTOREPLY_SUBJECT_RE = /out of (the )?office|auto[-\s]?reply|automatic rep
 export async function pollInbox(): Promise<PollInboxResult> {
   const result: PollInboxResult = { processed: 0, replies: 0, bounces: 0 };
 
-  // Same connection shape as appendRawToImapSent() in services/email.ts —
-  // one mailbox, one credential pair for both send and read.
-  const host = process.env.IMAP_HOST ?? "mail.privateemail.com";
-  const port = Number(process.env.IMAP_PORT ?? 993);
-  const user = process.env.BREVO_SMTP_USER;
-  const pass = process.env.BREVO_SMTP_PASS;
+  const processed = await sweepMailbox({
+    label:   "inbox",
+    what:    "poller",
+    mailbox: "INBOX",
+    // On INBOX, unread genuinely means unhandled, so \Seen is a usable last
+    // resort on a server that will not keep a custom keyword.
+    markerFallback: "seen",
+    onMessage: async (msg) => {
+      const raw     = msg.source ? msg.source.toString("utf8") : "";
+      const headers = splitHeaders(raw);
+      const subject = msg.envelope?.subject ?? readHeader(headers, "subject") ?? "";
+      const from    = (msg.envelope?.from?.[0]?.address ?? readAddressHeader(headers, "from") ?? "")
+        .toLowerCase()
+        .trim();
 
-  if (!user || !pass) {
-    if (!warnedNoCreds) {
-      warnedNoCreds = true;
-      console.warn("[inbox] poller disabled — no IMAP creds (BREVO_SMTP_USER / BREVO_SMTP_PASS)");
-    }
-    return result;
-  }
+      if (!from) return;
 
-  const client = new ImapFlow({
-    host,
-    port,
-    secure: true,
-    auth: { user, pass },
-    logger: false,
+      // Our own address: Sent-folder copies, self-CCs, loops.
+      const ownAddress = (process.env.EMAIL_FROM ?? "").toLowerCase().trim();
+      if (ownAddress && from === ownAddress) return;
+
+      if (isBounce(from, subject)) {
+        await recordBounce({ raw, headers, from, subject, ownAddress });
+        result.bounces++;
+        return;
+      }
+
+      // Vacation responders would otherwise mark a live lead as "replied"
+      // and kill their sequence.
+      if (isAutoReply(headers, subject)) return;
+
+      const preview = extractTextPreview(raw);
+
+      // All the real work (pause enrollments, log activity, advance stage,
+      // fire lead.replied webhook) already lives in outreach.handleReply.
+      const reply = await handleReply({
+        fromEmail:   from,
+        subject:     subject || null,
+        bodyPreview: preview || null,
+      });
+
+      if (!reply.matched || !reply.leadId) return;
+      result.replies++;
+
+      await notifyReply(reply.leadId, subject, preview);
+    },
   });
 
-  try {
-    await client.connect();
-    // Read-write: we need to write our idempotency marker.
-    const mailbox = await client.mailboxOpen("INBOX");
-
-    // ── Idempotency marker ────────────────────────────────────────────
-    // Prefer a CUSTOM keyword over \Seen. This mailbox is a real human inbox,
-    // not a robot drop-box: marking every unread message as read would silently
-    // clear the owner's unread state on mail that has nothing to do with leads.
-    // A custom keyword is invisible in normal mail clients and leaves read/
-    // unread untouched. Most IMAP servers (Dovecot, which Namecheap PE runs)
-    // advertise `\*` in PERMANENTFLAGS meaning "custom keywords allowed".
-    // If this server doesn't, fall back to \Seen — correctness beats tidiness,
-    // because without *some* marker we would re-notify on every sweep forever.
-    const permanent = (mailbox as { permanentFlags?: Set<string> | string[] }).permanentFlags;
-    const permanentList = permanent ? Array.from(permanent as Iterable<string>) : [];
-    const supportsKeywords = permanentList.includes("\\*") || permanentList.includes(PROCESSED_KEYWORD);
-    const marker = supportsKeywords ? PROCESSED_KEYWORD : "\\Seen";
-
-    // Only look at recent mail. Without a date bound, an inbox with years of
-    // archived messages would return thousands of unmarked UIDs and the poller
-    // would crawl through ancient history 25 at a time.
-    const since = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000);
-    const criteria = supportsKeywords
-      ? { unKeyword: PROCESSED_KEYWORD, since }
-      : { seen: false, since };
-
-    const pending = await client.search(criteria, { uid: true });
-    if (!pending || pending.length === 0) return result;
-
-    // Oldest-first so replies land in the lead timeline in the order they
-    // actually arrived; the tail beyond the cap is picked up next tick.
-    const uids = pending.slice(0, MAX_PER_RUN);
-
-    // Drain the whole fetch before issuing any other IMAP command — running
-    // STORE mid-iteration on an open fetch is not safe with ImapFlow.
-    const messages = await client.fetchAll(
-      uids,
-      { uid: true, envelope: true, source: { maxLength: MAX_SOURCE_BYTES } },
-      { uid: true },
-    );
-
-    for (const msg of messages) {
-      try {
-        // Flag FIRST, process second. If a message somehow makes the handler
-        // throw, we lose one reply — but we never re-notify on every sweep
-        // for the rest of time, which is the worse failure.
-        await client.messageFlagsAdd([msg.uid], [marker], { uid: true });
-        result.processed++;
-
-        const raw     = msg.source ? msg.source.toString("utf8") : "";
-        const headers = splitHeaders(raw);
-        const subject = msg.envelope?.subject ?? readHeader(headers, "subject") ?? "";
-        const from    = (msg.envelope?.from?.[0]?.address ?? readAddressHeader(headers, "from") ?? "")
-          .toLowerCase()
-          .trim();
-
-        if (!from) continue;
-
-        // Our own address: Sent-folder copies, self-CCs, loops.
-        const ownAddress = (process.env.EMAIL_FROM ?? "").toLowerCase().trim();
-        if (ownAddress && from === ownAddress) continue;
-
-        if (isBounce(from, subject)) {
-          await recordBounce({ raw, headers, from, subject, ownAddress });
-          result.bounces++;
-          continue;
-        }
-
-        // Vacation responders would otherwise mark a live lead as "replied"
-        // and kill their sequence.
-        if (isAutoReply(headers, subject)) continue;
-
-        const preview = extractTextPreview(raw);
-
-        // All the real work (pause enrollments, log activity, advance stage,
-        // fire lead.replied webhook) already lives in outreach.handleReply.
-        const reply = await handleReply({
-          fromEmail:   from,
-          subject:     subject || null,
-          bodyPreview: preview || null,
-        });
-
-        if (!reply.matched || !reply.leadId) continue;
-        result.replies++;
-
-        await notifyReply(reply.leadId, subject, preview);
-      } catch (err) {
-        // One malformed message must never abort the rest of the batch.
-        console.error(`[inbox] failed to process uid=${msg.uid}:`, (err as Error)?.message ?? err);
-      }
-    }
-
-    return result;
-  } finally {
-    try { await client.logout(); } catch { /* connection already gone */ }
-  }
+  result.processed = processed ?? 0;
+  return result;
 }
 
 // ── Notify the humans ────────────────────────────────────────────────────
@@ -308,37 +226,9 @@ function isAutoReply(headers: string, subject: string): boolean {
   return AUTOREPLY_SUBJECT_RE.test(subject);
 }
 
-// ── Raw message helpers ──────────────────────────────────────────────────
-// Deliberately hand-rolled: mailparser is not a dependency and we only need a
-// sender, a subject and a short human-readable preview.
-
-function splitHeaders(raw: string): string {
-  const end = raw.search(/\r?\n\r?\n/);
-  return end === -1 ? raw : raw.slice(0, end);
-}
-
-function splitBody(raw: string): string {
-  const match = /\r?\n\r?\n/.exec(raw);
-  return match ? raw.slice(match.index + match[0].length) : "";
-}
-
-// Unfolds RFC 5322 continuation lines before matching, so a header wrapped
-// across lines still reads as one value.
-function readHeader(headers: string, name: string): string | null {
-  const unfolded = headers.replace(/\r?\n[ \t]+/g, " ");
-  const re = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:\\s*(.*)$`, "im");
-  const m = re.exec(unfolded);
-  return m ? m[1].trim() : null;
-}
-
-function readAddressHeader(headers: string, name: string): string | null {
-  const value = readHeader(headers, name);
-  if (!value) return null;
-  const angle = /<([^<>]+@[^<>]+)>/.exec(value);
-  if (angle) return angle[1].trim();
-  const bare = /([^\s<>,;:"]+@[^\s<>,;:"]+)/.exec(value);
-  return bare ? bare[1].trim() : null;
-}
+// ── Bounce / preview parsing ─────────────────────────────────────────────
+// The generic RFC 5322 readers this uses (splitHeaders, readHeader, …) live in
+// services/rfc5322.ts, shared with the Sent-folder sweep.
 
 // DSNs put the dead address in a machine-readable header; the free-text scan is
 // the fallback for servers that only bounce a human-readable notice.
@@ -358,10 +248,6 @@ function extractBouncedRecipient(raw: string, headers: string, ownAddress: strin
     return address;
   }
   return null;
-}
-
-function cleanAddress(value: string): string {
-  return value.replace(/^[<"'\s]+|[>"'\s.,;:]+$/g, "").toLowerCase();
 }
 
 // Best-effort plaintext preview: pick the text/plain leaf of a multipart body,

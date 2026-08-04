@@ -38,6 +38,7 @@ import { processDueSends } from "./services/outreach";
 import { sweepIntervalMinutes } from "./services/sending-policy";
 import { configuredSenderAddress } from "./services/mailbox";
 import { pollInbox } from "./services/inbox";
+import { syncManualSentEmails } from "./services/sent-sync";
 import { maybeSendDailyDigest } from "./services/digest";
 import type { AppEnv } from "./types";
 
@@ -282,9 +283,15 @@ void (async () => {
   }
 })();
 
-// ── Inbox poller: read INBOX replies/bounces every N minutes ────────
+// ── Mailbox poller: INBOX replies/bounces + manual Sent mail every N mins ──
 // Runs tighter than the outreach sweep so a reply pauses the sequence before
 // the next scheduled touch goes out.
+//
+// Both sweeps share this one tick rather than getting a timer each: they hit the
+// same IMAP server with the same single credential pair, and two independent
+// intervals would eventually overlap into concurrent logins on a mailbox that
+// allows very few. Sequential, and the Sent sweep is awaited separately so a
+// failure in either one still lets the other run.
 const inboxPollMinutes = Number(process.env.INBOX_POLL_MINUTES ?? 2);
 setInterval(async () => {
   try {
@@ -294,6 +301,15 @@ setInterval(async () => {
     }
   } catch (error) {
     console.error("[inbox] poll failed", error);
+  }
+
+  try {
+    const sent = await syncManualSentEmails();
+    if (sent.imported > 0 || sent.processed > 0) {
+      console.log(`[sent] tick: processed=${sent.processed} imported=${sent.imported} crm_sends=${sent.crmSends}`);
+    }
+  } catch (error) {
+    console.error("[sent] manual-send sweep failed", error);
   }
 }, Math.max(1, inboxPollMinutes) * 60_000);
 

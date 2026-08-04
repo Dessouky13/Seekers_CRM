@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { ImapFlow } from "imapflow";
+import { randomUUID } from "crypto";
 
 function getTransporter() {
   return nodemailer.createTransport({
@@ -121,6 +122,14 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+// The right-hand side of the Message-IDs we mint. Must be a domain we actually
+// send from — a Message-ID whose domain doesn't match the sending domain is a
+// small but real spam signal, and this is cold outreach.
+function senderDomain(): string {
+  const address = process.env.EMAIL_FROM ?? "team@seekersai.org";
+  return address.split("@")[1]?.trim().toLowerCase() || "seekersai.org";
+}
+
 // Generic outreach send. body can be plain text (we'll wrap it in HTML) or HTML directly.
 // signatureHtml is appended AFTER the body in the rendered HTML.
 // signatureText is the plain-text equivalent (defaults to stripping signatureHtml).
@@ -161,6 +170,21 @@ export async function sendOutreachEmail(opts: {
     html,
     text,
     replyTo:  opts.replyTo,
+    // Pin the Message-ID ourselves instead of letting nodemailer mint one.
+    //
+    // This message is handed to nodemailer TWICE below — once to a stream
+    // transport to get the raw bytes we append to Sent, once to the real SMTP
+    // transport. Nodemailer generates a Message-ID per sendMail() call, so those
+    // two calls produced two DIFFERENT ids (measured: `<c44ea837-…@b.com>` vs
+    // `<1def1e3a-…@b.com>` from the same mailOpts). The id we recorded in
+    // `outreach_sends.message_id` was therefore never the id in the Sent-folder
+    // copy of the same email.
+    //
+    // That is not cosmetic: services/sent-sync.ts identifies the CRM's own Sent
+    // copies by exactly that id, so without this line every sequence email would
+    // come back in as a "manual" email in the lead timeline. Supplying the id
+    // makes both calls carry it (verified: header and info.messageId both match).
+    messageId: `<${randomUUID()}@${senderDomain()}>`,
   };
 
   // Compose the raw RFC-822 bytes locally — used for both SMTP and IMAP-APPEND
