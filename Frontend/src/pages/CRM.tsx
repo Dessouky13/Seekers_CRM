@@ -53,6 +53,8 @@ export default function CRM() {
   const [catFilter,    setCatFilter]    = useState("");
   const [stageFilter,  setStageFilter]  = useState("");
   const [reachability, setReachability] = useState("");
+  // "" = All Leads, "unassigned" = no assignee, otherwise a profile id.
+  const [assigneeFilter, setAssigneeFilter] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const debouncedSearch = useDebouncedValue(search.trim(), 350);
 
@@ -88,6 +90,7 @@ export default function CRM() {
     category:     catFilter || undefined,
     stage:        stageFilter || undefined,
     reachability: (reachability as "unreachable" | "reachable" | "") || undefined,
+    assignee_id:  assigneeFilter || undefined,
     limit:        200,
   });
 
@@ -97,6 +100,13 @@ export default function CRM() {
   const { data: categories = [] } = useLeadCategories();
   const createLead = useCreateLead();
   const updateLead = useUpdateLead();
+
+  // The assignee filter's options. Derived from the real team rather than a
+  // hardcoded pair of names, so it stays correct as people join or leave.
+  const assignees = useMemo(
+    () => users.map((u) => ({ id: u.id, name: u.name })),
+    [users],
+  );
 
   // Deduplicate by id to prevent any double-render glitches
   const leads = useMemo(
@@ -209,7 +219,8 @@ export default function CRM() {
     );
   };
 
-  const activeFilterCount = (catFilter ? 1 : 0) + (stageFilter ? 1 : 0) + (reachability ? 1 : 0);
+  const activeFilterCount =
+    (catFilter ? 1 : 0) + (stageFilter ? 1 : 0) + (reachability ? 1 : 0) + (assigneeFilter ? 1 : 0);
 
   if (isLoading) {
     return <LeadsPageSkeleton view={view} />;
@@ -269,8 +280,14 @@ export default function CRM() {
         onCatFilterChange={setCatFilter}
         reachability={reachability}
         onReachabilityChange={setReachability}
+        assigneeFilter={assigneeFilter}
+        onAssigneeFilterChange={setAssigneeFilter}
+        assignees={assignees}
         categories={categories}
-        onReset={() => { setSearch(""); setCatFilter(""); setStageFilter(""); setReachability(""); }}
+        onReset={() => {
+          setSearch(""); setCatFilter(""); setStageFilter("");
+          setReachability(""); setAssigneeFilter("");
+        }}
         resultCount={leads.length}
       />
 

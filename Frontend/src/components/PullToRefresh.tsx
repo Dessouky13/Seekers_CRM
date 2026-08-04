@@ -45,8 +45,23 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
   }, [qc]);
 
   useEffect(() => {
-    const el = document.querySelector("main");
-    if (!el) return;
+    // Listen on the window and measure the DOCUMENT's scroll offset.
+    //
+    // This used to bind to <main> and test `main.scrollTop`, on the assumption
+    // that <main> was the scroll container. It never was — its ancestors are all
+    // `min-h-*`, so it grows to fit content and never overflows (measured at
+    // clientHeight === scrollHeight === 2635px in a 900px viewport). `scrollTop`
+    // on an element that cannot scroll is permanently 0, which quietly inverted
+    // both guards below: the "only arm at the very top" test was always true,
+    // and the "the page has started scrolling, disarm" test could never fire.
+    //
+    // The result was that a downward drag ANYWHERE on the page — including at
+    // the very bottom — was captured as a pull instead of a scroll. Since
+    // dragging down is how you scroll up, scrolling up could be swallowed
+    // outright and a stray refetch fired in its place. That is the
+    // "sometimes it wouldn't let me scroll up" report.
+    const scrollY = () =>
+      window.scrollY ?? document.documentElement.scrollTop ?? 0;
 
     // Written straight to the DOM: no React involvement, so dragging costs one
     // style write per frame instead of a full page re-render.
@@ -66,7 +81,7 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
     const onStart = (e: TouchEvent) => {
       // Arm only at the very top, and only for a single finger — a two-finger
       // gesture is a zoom, not a pull.
-      startY.current = el.scrollTop <= 0 && e.touches.length === 1
+      startY.current = scrollY() <= 0 && e.touches.length === 1
         ? e.touches[0].clientY
         : null;
     };
@@ -77,7 +92,7 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
 
       // Finger moved up, or the page has begun scrolling: this is a scroll, not
       // a pull. Disarm and get out of the way for the rest of the gesture.
-      if (delta <= 0 || el.scrollTop > 0) {
+      if (delta <= 0 || scrollY() > 0) {
         startY.current = null;
         if (pull.current !== 0) { pull.current = 0; schedule(); }
         return;
@@ -101,16 +116,16 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
     // All passive. The browser keeps its fast scrolling path, and this handler
     // can never block a scroll.
     const opts = { passive: true } as const;
-    el.addEventListener("touchstart", onStart, opts);
-    el.addEventListener("touchmove", onMove, opts);
-    el.addEventListener("touchend", onEnd, opts);
-    el.addEventListener("touchcancel", onEnd, opts);
+    window.addEventListener("touchstart", onStart, opts);
+    window.addEventListener("touchmove", onMove, opts);
+    window.addEventListener("touchend", onEnd, opts);
+    window.addEventListener("touchcancel", onEnd, opts);
     return () => {
       if (frame.current) cancelAnimationFrame(frame.current);
-      el.removeEventListener("touchstart", onStart);
-      el.removeEventListener("touchmove", onMove);
-      el.removeEventListener("touchend", onEnd);
-      el.removeEventListener("touchcancel", onEnd);
+      window.removeEventListener("touchstart", onStart);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onEnd);
+      window.removeEventListener("touchcancel", onEnd);
     };
   }, [refresh]);
 

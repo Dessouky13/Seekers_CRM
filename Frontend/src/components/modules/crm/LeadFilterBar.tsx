@@ -11,21 +11,33 @@ export function LeadFilterBar({
   stageFilter, onStageFilterChange,
   catFilter, onCatFilterChange,
   reachability, onReachabilityChange,
+  assigneeFilter, onAssigneeFilterChange, assignees,
   categories, onReset, resultCount,
 }: {
-  search:               string;
-  onSearchChange:       (value: string) => void;
-  stageFilter:          string;
-  onStageFilterChange:  (value: string) => void;
-  catFilter:            string;
-  onCatFilterChange:    (value: string) => void;
-  reachability:         string;
-  onReachabilityChange: (value: string) => void;
-  categories:           string[];
-  onReset:              () => void;
-  resultCount:          number;
+  search:                 string;
+  onSearchChange:         (value: string) => void;
+  stageFilter:            string;
+  onStageFilterChange:    (value: string) => void;
+  catFilter:              string;
+  onCatFilterChange:      (value: string) => void;
+  reachability:           string;
+  onReachabilityChange:   (value: string) => void;
+  /** Empty string = All Leads. Otherwise a profile id, or "unassigned". */
+  assigneeFilter:         string;
+  onAssigneeFilterChange: (value: string) => void;
+  /** The real team, from GET /users — never a hardcoded name list. */
+  assignees:              { id: string; name: string }[];
+  categories:             string[];
+  onReset:                () => void;
+  resultCount:            number;
 }) {
-  const activeFilterCount = (catFilter ? 1 : 0) + (stageFilter ? 1 : 0) + (reachability ? 1 : 0);
+  const activeFilterCount =
+    (catFilter ? 1 : 0) + (stageFilter ? 1 : 0) + (reachability ? 1 : 0) + (assigneeFilter ? 1 : 0);
+
+  const assigneeLabel =
+    assigneeFilter === "unassigned"
+      ? "Unassigned"
+      : assignees.find((a) => a.id === assigneeFilter)?.name ?? assigneeFilter;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -81,6 +93,32 @@ export function LeadFilterBar({
           </select>
           <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 pointer-events-none text-muted-foreground" />
         </div>
+        {/* Assignee — "who is working this list?", the most common way the team
+            slices the pipeline. Options come from GET /users so a new team
+            member appears without a code change; "Unassigned" is offered
+            explicitly because leads with a null assignee are the ones most
+            likely to be dropped. */}
+        <div className="relative">
+          <select
+            value={assigneeFilter}
+            onChange={(e) => onAssigneeFilterChange(e.target.value)}
+            aria-label="Filter by assignee"
+            className={cn(
+              "h-8 appearance-none rounded-md pl-7 pr-7 text-xs cursor-pointer transition-colors",
+              "border bg-transparent",
+              assigneeFilter
+                ? "border-foreground/30 text-foreground bg-muted/40"
+                : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border",
+            )}
+          >
+            <option value="">All Leads</option>
+            <option value="unassigned">Unassigned</option>
+            {assignees.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+          <Filter className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 pointer-events-none text-muted-foreground" />
+        </div>
         <select
           value={reachability}
           onChange={(e) => onReachabilityChange(e.target.value)}
@@ -108,6 +146,9 @@ export function LeadFilterBar({
           label={`Contactability: ${reachability === "unreachable" ? "Unreachable" : "Reachable"}`}
           onRemove={() => onReachabilityChange("")}
         />
+      )}
+      {assigneeFilter && (
+        <FilterPill label={`Assignee: ${assigneeLabel}`} onRemove={() => onAssigneeFilterChange("")} />
       )}
 
       {(search || activeFilterCount > 0) && (

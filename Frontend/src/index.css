@@ -96,6 +96,14 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    /* The document is the app's scroll container (see AppLayout), so overscroll
+       containment belongs here. It used to sit on <main>, which never scrolled,
+       making it inert. Without it the browser's OWN pull-to-refresh fires on top
+       of the in-app one, so a single downward drag at the top of a page could
+       both refetch the page and reload the whole SPA. `contain` keeps the
+       rubber-band suppressed without `none`, which would also kill the
+       trackpad/keyboard overscroll cues desktop users rely on. */
+    overscroll-behavior-y: contain;
   }
 
   /* Scrollbar */

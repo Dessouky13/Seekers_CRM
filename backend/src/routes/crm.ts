@@ -1,7 +1,7 @@
 // Sprint 3 — CRM / Leads endpoints
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, and, not, inArray, ilike, or, sql, gte, desc } from "drizzle-orm";
+import { eq, and, not, inArray, ilike, or, sql, gte, desc, isNull } from "drizzle-orm";
 import { db } from "../db/client";
 import { leads, leadActivities, profiles, events } from "../db/schema";
 import { authMiddleware, adminOnly, forcedAssigneeId, canAccessOwned, isAdmin } from "../middleware/auth";
@@ -26,7 +26,16 @@ crm.get("/leads", authMiddleware, async (c) => {
 
   const conditions = [];
   if (q.stage)       conditions.push(eq(leads.stage, q.stage as any));
-  if (q.assignee_id) conditions.push(eq(leads.assigneeId, q.assignee_id));
+  // assignee_id is normally a profile uuid. The literal "unassigned" is the one
+  // non-uuid value accepted, because "which leads has nobody picked up?" is the
+  // question the filter exists to answer and a null cannot be matched with eq().
+  // Handled before the uuid branch: passing it through to eq() would send the
+  // string to Postgres and fail on the uuid cast rather than filter anything.
+  if (q.assignee_id === "unassigned") {
+    conditions.push(isNull(leads.assigneeId));
+  } else if (q.assignee_id) {
+    conditions.push(eq(leads.assigneeId, q.assignee_id));
+  }
   if (q.category)    conditions.push(eq(leads.category, q.category));
 
   // "Unreachable" means every channel is dead: no usable number, and no email

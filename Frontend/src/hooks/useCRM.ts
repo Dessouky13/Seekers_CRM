@@ -1,6 +1,46 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type { ApiLead, ApiLeadDetail } from "@/lib/types";
+
+/**
+ * Every cached query whose answer changes when the set of leads changes.
+ *
+ * Each lead mutation used to list its own invalidations, and the five of them
+ * had drifted into five different lists. The gaps were not theoretical:
+ *
+ *   • NONE of them invalidated ["dashboard-summary"], which is where the
+ *     "Active Leads" KPI comes from and which caches for 60s. Add a lead, open
+ *     the Dashboard, and the number had not moved — reported as the counter
+ *     being wrong when in fact the query was never re-run.
+ *   • Create, update and delete all skipped ["pipeline-summary"]. Since
+ *     useUpdateLead is what moves a lead between stages, the one mutation most
+ *     certain to change the per-stage counts and pipeline value was the one
+ *     that left them stale.
+ *   • useDeleteLead invalidated ["leads"] alone, so a deleted lead stayed in
+ *     the category list, the pipeline totals and Today's queue.
+ *
+ * Listing the dependants in one place means a new mutation gets all of them,
+ * and a new lead-derived query is added once. Prefix matching means
+ * ["leads", {...params}] and ["lead", id] are covered by their prefixes.
+ */
+const LEAD_DEPENDENT_KEYS = [
+  ["leads"],
+  ["lead-categories"],
+  ["pipeline-summary"],
+  ["dashboard-summary"],
+  ["worklist"],
+  ["stale-leads"],
+  ["crm-insights"],
+] as const;
+
+function invalidateLeadQueries(qc: QueryClient, leadId?: string) {
+  for (const key of LEAD_DEPENDENT_KEYS) {
+    qc.invalidateQueries({ queryKey: key });
+  }
+  // The single-lead detail cache is keyed by id, so it needs the id to target.
+  if (leadId) qc.invalidateQueries({ queryKey: ["lead", leadId] });
+}
 
 export interface CrmInsights {
   period: { from: string; to: string; granularity: string };
@@ -55,10 +95,7 @@ export function useCreateLead() {
   return useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       apiFetch<ApiLead>("/crm/leads", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["leads"] });
-      qc.invalidateQueries({ queryKey: ["lead-categories"] });
-    },
+    onSuccess: () => invalidateLeadQueries(qc),
   });
 }
 
@@ -79,10 +116,7 @@ export function useUpdateLead() {
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) ctx.prev.forEach(([key, data]) => qc.setQueryData(key, data));
     },
-    onSettled: (_data, _err, { id }) => {
-      qc.invalidateQueries({ queryKey: ["leads"] });
-      qc.invalidateQueries({ queryKey: ["lead", id] });
-    },
+    onSettled: (_data, _err, { id }) => invalidateLeadQueries(qc, id),
   });
 }
 
@@ -108,11 +142,7 @@ export function useSetLeadFollowUp() {
           ...(note !== undefined ? { follow_up_note: note } : {}),
         }),
       }),
-    onSuccess: (_data, { id }) => {
-      qc.invalidateQueries({ queryKey: ["worklist"] });
-      qc.invalidateQueries({ queryKey: ["leads"] });
-      qc.invalidateQueries({ queryKey: ["lead", id] });
-    },
+    onSuccess: (_data, { id }) => invalidateLeadQueries(qc, id),
   });
 }
 
@@ -120,7 +150,7 @@ export function useDeleteLead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => apiFetch(`/crm/leads/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    onSuccess: (_res, id) => invalidateLeadQueries(qc, id),
   });
 }
 
@@ -147,10 +177,7 @@ export function useBulkDeleteLeads() {
       }),
     onSuccess: (_res, vars) => {
       if (vars.dryRun) return;               // preview must not disturb the list
-      qc.invalidateQueries({ queryKey: ["leads"] });
-      qc.invalidateQueries({ queryKey: ["pipeline-summary"] });
-      qc.invalidateQueries({ queryKey: ["lead-categories"] });
-      qc.invalidateQueries({ queryKey: ["worklist"] });
+      invalidateLeadQueries(qc);
     },
   });
 }
@@ -160,10 +187,7 @@ export function useAddLeadActivity() {
   return useMutation({
     mutationFn: ({ leadId, ...body }: { leadId: string } & Record<string, unknown>) =>
       apiFetch(`/crm/leads/${leadId}/activities`, { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: (_data, { leadId }) => {
-      qc.invalidateQueries({ queryKey: ["lead", leadId] });
-      qc.invalidateQueries({ queryKey: ["leads"] });
-    },
+    onSuccess: (_data, { leadId }) => invalidateLeadQueries(qc, leadId),
   });
 }
 

@@ -29,13 +29,32 @@ const SheetOverlay = React.forwardRef<
 SheetOverlay.displayName = SheetPrimitive.Overlay.displayName;
 
 const sheetVariants = cva(
-  "fixed z-50 gap-4 bg-background p-6 shadow-lg transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
+  [
+    "fixed z-50 gap-4 bg-background p-6 shadow-lg transition ease-in-out",
+    "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
+    // Scroll belongs in the base, not in each caller.
+    //
+    // The variants below bound a sheet's height (h-full on the sides, max-h on
+    // top/bottom) but nothing let it scroll, so any sheet taller than the
+    // viewport simply clipped — with no scrollbar and no way to reach the rest.
+    // Two of the four call sites had each pasted `overflow-y-auto` into their
+    // own className to work around it; the two that had not were broken:
+    // QuickAdd's bottom sheet (a form of up to six fields, unbounded) and the
+    // mobile sidebar. Fixing it here means a new sheet cannot forget.
+    //
+    // overscroll-contain so flicking to the end of a sheet's content does not
+    // chain into scrolling the page underneath it.
+    "overflow-y-auto overscroll-contain",
+  ].join(" "),
   {
     variants: {
       side: {
-        top: "inset-x-0 top-0 border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
+        // max-h + inset-x rather than a bare edge anchor: without a ceiling a
+        // content-sized top/bottom sheet grows past the viewport, and the
+        // overflow above cannot help what has no height limit to overflow.
+        top: "inset-x-0 top-0 max-h-[90dvh] border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
         bottom:
-          "inset-x-0 bottom-0 border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
+          "inset-x-0 bottom-0 max-h-[90dvh] border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
         left: "inset-y-0 left-0 h-full w-3/4 border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-sm",
         right:
           "inset-y-0 right-0 h-full w-3/4  border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
