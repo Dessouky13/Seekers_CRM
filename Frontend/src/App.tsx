@@ -26,6 +26,7 @@ const Clients   = lazy(() => import("./pages/Clients"));
 const Outreach  = lazy(() => import("./pages/Outreach"));
 const Outbound  = lazy(() => import("./pages/Outbound"));
 const Goals     = lazy(() => import("./pages/Goals"));
+const Quotations = lazy(() => import("./pages/Quotations"));
 const Notes     = lazy(() => import("./pages/Notes"));
 const Vault     = lazy(() => import("./pages/Vault"));
 const Settings  = lazy(() => import("./pages/Settings"));
@@ -69,6 +70,10 @@ function AppRoutes() {
           <Route path="/outreach" element={<Outreach />} />
           <Route path="/outbound" element={<AdminOnly><Outbound /></AdminOnly>} />
           <Route path="/goals"    element={<AdminOnly><Goals /></AdminOnly>} />
+          {/* Prices, discounts and the P&L rows a paid invoice writes — admin only,
+              matching ADMIN_ONLY_MODULES on the server. The public share pages are
+              served by the API at /q/:token, not by this SPA. */}
+          <Route path="/quotations" element={<AdminOnly><Quotations /></AdminOnly>} />
           <Route path="/notes"    element={<Notes />} />
           <Route path="/vault"    element={<AdminOnly><Vault /></AdminOnly>} />
           <Route path="/team"     element={<AdminOnly><Team /></AdminOnly>} />

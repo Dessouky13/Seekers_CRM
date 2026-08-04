@@ -4,7 +4,7 @@ import { OPEN_COMMAND_PALETTE } from "@/lib/command-palette";
 import {
   Search, Users, Building2, CheckSquare, StickyNote, LayoutDashboard,
   DollarSign, Send, Target, Lock, Settings, Sparkles, Sun, Radar,
-  UsersRound,
+  UsersRound, FileText,
 } from "lucide-react";
 import {
   CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup,
@@ -25,6 +25,7 @@ const PAGES: { label: string; path: string; icon: typeof LayoutDashboard; keywor
   { label: "Tasks",      path: "/tasks",     icon: CheckSquare,     keywords: "todo kanban projects" },
   { label: "Clients",    path: "/clients",   icon: Building2,       keywords: "customers accounts" },
   { label: "CRM Leads",  path: "/crm",       icon: Users,           keywords: "pipeline prospects deals" },
+  { label: "Quotations", path: "/quotations", icon: FileText,       keywords: "quote proposal invoice billing pdf retainer setup fee estimate" },
   { label: "Outreach",   path: "/outreach",  icon: Send,            keywords: "sequences email enrollments campaigns" },
   { label: "Outbound",   path: "/outbound",  icon: Radar,           keywords: "intel enrichment deliverability mailbox audits" },
   { label: "Goals",      path: "/goals",     icon: Target,          keywords: "okr targets" },

@@ -169,6 +169,123 @@ export interface ApiKbDocument {
   createdAt: string;
 }
 
+// ── Quotations & Invoices ─────────────────────────────────
+// Money crosses the wire as fixed-precision STRINGS ("25000.00"), never as
+// numbers — see Frontend/src/lib/document-money.ts.
+
+export type DiscountType = "none" | "percent" | "amount";
+export type LineKind     = "one_off" | "recurring";
+
+export type QuotationStatus = "draft" | "sent" | "accepted" | "rejected" | "expired";
+export type InvoiceStatus   = "draft" | "sent" | "paid" | "overdue" | "void";
+
+export interface ApiDocumentItem {
+  description: string;
+  quantity:    string;
+  unitPrice:   string;
+  kind:        LineKind;
+  position:    number;
+}
+
+/** Server-computed, always authoritative. The form's live preview is only a preview. */
+export interface ApiDocumentTotals {
+  one_off_subtotal:   string;
+  monthly_total:      string;
+  recurring_subtotal: string;
+  subtotal:           string;
+  discount:           string;
+  taxable:            string;
+  tax:                string;
+  total:              string;
+  lines:              { line_total: string; extended: string }[];
+}
+
+interface ApiDocumentBase {
+  id:              string;
+  number:          string;
+  title:           string | null;
+  clientId:        string | null;
+  clientName:      string | null;
+  clientCompany:   string | null;
+  clientEmail:     string | null;
+  clientPhone:     string | null;
+  clientAddress:   string | null;
+  currency:        string;
+  setupFee:        string;
+  monthlyRetainer: string;
+  retainerMonths:  number;
+  discountType:    DiscountType;
+  discountValue:   string;
+  taxRate:         string;
+  notes:           string | null;
+  terms:           string | null;
+  shareToken:      string;
+  createdBy:       string | null;
+  createdAt:       string;
+  updatedAt:       string;
+  items:           ApiDocumentItem[];
+  totals:          ApiDocumentTotals;
+  share_url:       string;
+}
+
+export interface ApiQuotation extends ApiDocumentBase {
+  status:      QuotationStatus;
+  validUntil:  string | null;
+  sentAt:      string | null;
+  decidedAt:   string | null;
+  is_expired:  boolean;
+  /** Present on the list endpoint when this quotation has been converted. */
+  invoice_id?:     string | null;
+  invoice_number?: string | null;
+}
+
+export interface ApiInvoice extends ApiDocumentBase {
+  status:           InvoiceStatus;
+  quotationId:      string | null;
+  issueDate:        string;
+  dueDate:          string | null;
+  paidAt:           string | null;
+  recurring:        boolean;
+  recurrenceMonths: number;
+  recurrenceIndex:  number;
+  recurrenceTotal:  number | null;
+  nextInvoiceDate:  string | null;
+  parentInvoiceId:  string | null;
+  /** The P&L row this invoice wrote when it was marked paid; null = nothing recorded. */
+  transactionId:    string | null;
+  is_overdue:       boolean;
+  /** Only on a status response: create | none | remove. */
+  ledger_action?:   "create" | "none" | "remove";
+  already_existed?: boolean;
+}
+
+export interface ApiCompanySettings {
+  id:                  string;
+  companyName:         string;
+  tagline:             string | null;
+  address:             string | null;
+  email:               string | null;
+  phone:               string | null;
+  website:             string | null;
+  taxNumber:           string | null;
+  registrationNumber:  string | null;
+  /** null = the white Seekers mark bundled with the API (see default_logo). */
+  logo:                string | null;
+  brandPrimary:        string;
+  brandSecondary:      string;
+  brandDark:           string;
+  defaultCurrency:     string;
+  defaultPaymentTerms: string | null;
+  defaultTaxRate:      string;
+  quotationPrefix:     string;
+  invoicePrefix:       string;
+  quotationFooter:     string | null;
+  invoiceFooter:       string | null;
+  bankDetails:         string | null;
+  updatedAt:           string;
+  default_logo:        string;
+}
+
 export interface DashboardSummary {
   finance: {
     total_income: number;
