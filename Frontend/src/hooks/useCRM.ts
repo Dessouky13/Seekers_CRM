@@ -34,7 +34,14 @@ const LEAD_DEPENDENT_KEYS = [
   ["crm-insights"],
 ] as const;
 
-function invalidateLeadQueries(qc: QueryClient, leadId?: string) {
+/**
+ * Exported so lead mutations living OUTSIDE this file get the same complete
+ * list. `useBulkIngest` in useOutreach.ts was invalidating only ["leads"] and
+ * ["dashboard-summary"], so a 500-row CSV import left the pipeline summary, the
+ * category filter, Today's queue and the stale-lead list showing pre-import
+ * numbers — the same class of drift this helper was created to end.
+ */
+export function invalidateLeadQueries(qc: QueryClient, leadId?: string) {
   for (const key of LEAD_DEPENDENT_KEYS) {
     qc.invalidateQueries({ queryKey: key });
   }

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
+import { invalidateLeadQueries } from "@/hooks/useCRM";
 
 export type Channel = "email" | "linkedin" | "note" | "whatsapp" | "call";
 // Kept in sync with the backend enum (backend/src/db/schema.ts,
@@ -373,10 +374,9 @@ export function useBulkIngest() {
         method: "POST",
         body:   JSON.stringify(body),
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["leads"] });
-      qc.invalidateQueries({ queryKey: ["dashboard-summary"] });
-    },
+    // A bulk import is the single biggest change the lead set ever undergoes, so
+    // it needs the FULL dependant list, not the two keys this used to name.
+    onSuccess: () => invalidateLeadQueries(qc),
   });
 }
 

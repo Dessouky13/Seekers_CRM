@@ -30,7 +30,7 @@ a list gets built:
 | **Apollo / Snov.io** | Native webhook from your Apollo sequence or Snov.io export. | `seekers-apollo-workflow.json`, `seekers-snov-workflow.json` |
 | **Firecrawl search** | Web search + AI extraction — good for niche directories or blog roundups nothing else covers. | `seekers-firecrawl-search.json` |
 | **RB2B** | Identifies anonymous website visitors as inbound leads. | `seekers-rb2b-workflow.json` |
-| **A spreadsheet someone already has** | Exported from anywhere, or just typed up by hand. | Paste or CSV — see below, no n8n needed |
+| **A spreadsheet someone already has** | Exported from anywhere, or just typed up by hand. | Paste, CSV or Excel (.xlsx) — see below, no n8n needed |
 
 All the n8n workflow files live in **Outreach → Setup & Ingestion**, each
 with a one-line description and a **Download .json** button. Import the
@@ -44,7 +44,7 @@ straight to section 3.
 
 ---
 
-## 3. Importing a list — paste, CSV, or API
+## 3. Importing a list — paste, CSV, Excel, or API
 
 Go to **Outreach → Setup & Ingestion**, scroll to **Import Leads**.
 
@@ -59,12 +59,28 @@ Go to **Outreach → Setup & Ingestion**, scroll to **Import Leads**.
 Tabs, commas, and semicolons are all detected automatically — paste exactly
 what you copied, no reformatting needed.
 
-### CSV file
+### CSV or Excel file
 
-1. Switch to the **CSV file** tab.
-2. Drop a `.csv` file onto the box, or click it to browse. Works from Apollo,
-   Sales Navigator, Snov.io, ZoomInfo exports, or anything else that exports
-   CSV.
+1. Switch to the **CSV / Excel** tab.
+2. Drop a `.csv`, `.tsv` or `.xlsx` file onto the box, or click it to browse.
+   Works from Apollo, Sales Navigator, Snov.io, ZoomInfo exports, or a
+   spreadsheet someone just typed up in Excel or Google Sheets ("Download →
+   Microsoft Excel (.xlsx)").
+
+You don't need to convert an Excel file to CSV first. The workbook is opened
+**in your browser** — nothing is uploaded anywhere until you press Import — and
+the first sheet is used. A few Excel-specific things it handles for you:
+
+- A **title row above your headers** is skipped; the real header row is found.
+- The **hundreds of formatted-but-empty rows** an export leaves at the bottom
+  are dropped instead of becoming hundreds of blank leads.
+- A **phone column stored as a number** (`201001234567`) keeps every digit
+  instead of turning into `2.01e+11`.
+- A **date column** comes through as a plain `YYYY-MM-DD` date.
+
+Password-protected workbooks can't be read — save an unprotected copy first.
+`.xls` (the pre-2007 format) mostly works but re-saving as `.xlsx` is more
+reliable.
 
 ### Either way — map columns, then import
 
@@ -74,8 +90,25 @@ Company, Email, Phone, Source, Category/Niche, Deal value, Notes, or *Skip
 column*). Common header names (`email`, `phone_number`, `full name`,
 `company_name`, etc.) are auto-detected — you're just confirming or fixing.
 
-Below the mapping you'll see a **preview** of the first few rows exactly as
-they'll be saved, and an **"If a lead already exists"** control:
+Under the mapping you'll get a **row check** before anything is saved. It looks
+at every row (the first 2,000 for very large files) and reports:
+
+| What it finds | What happens |
+|---|---|
+| **Row is completely empty** — no name, company, email or phone | Left out of the import |
+| **Invalid email** (`jane@`, `not-an-email`) | Left out of the import — see below |
+| **Duplicate email** in your file, or already in the CRM | Imported once; the repeat is counted as *Skipped* or *Updated* |
+| **Phone with no country code** (`0100 123 4567`) | Still imported and saved as text, but it can't be dialled or WhatsApp'd until someone fixes it |
+| **Landline number** | Still imported — just be aware WhatsApp outreach skips it |
+| **Phone already on a different lead** | ⚠️ **Imported as a second lead.** This is the one duplicate we detect but do not prevent — two people at one company can genuinely share a switchboard, so it's your call. Check the flagged rows. |
+
+Why invalid emails are dropped rather than blocking the whole file: one
+malformed email cell used to make the entire batch fail, so 499 good leads
+never landed because of one typo in row 417. Now the bad rows are named, left
+out, and everything else imports.
+
+Below that you'll see a **preview** of the first few rows exactly as they'll be
+saved, and an **"If a lead already exists"** control:
 
 - **Update missing fields** (default) — fills in anything blank on the
   existing lead (phone, source, category); never overwrites what's already
@@ -84,6 +117,31 @@ they'll be saved, and an **"If a lead already exists"** control:
 
 Click **Import N leads**. You'll get a result screen: **Created / Updated /
 Skipped / Errors**, with a reason for every failed row if there are any.
+
+### Handing the file to n8n as well
+
+When you import an actual **file** (not a paste), there's a checkbox:
+**"Also send \<filename\> to the n8n import workflow"**, on by default. That
+hands the raw file to n8n for enrichment and follow-up automation, *after* the
+leads are already saved in the CRM.
+
+The two are deliberately independent:
+
+- If n8n is down, times out, or rejects the file, **your leads still import.**
+  The result screen says the handoff failed and why, with a **Retry handoff**
+  button. You will never see a plain "success" when n8n didn't get the file.
+- Sending the **same file twice within 30 minutes is blocked**, so a double-tap
+  or a page refresh can't run the workflow twice. If you genuinely meant to
+  resend, the button changes to **Send anyway**.
+- Untick the box if you only want the leads in the CRM.
+
+The n8n webhook is called by our own server, never by your browser, so its
+credentials aren't in anything a visitor can read.
+
+Limits of the duplicate-send block, honestly: it's remembered in the server's
+memory, so a deploy or an API restart clears it, and it only matches the
+**exact same file bytes** — re-exporting the same data from Excel produces a
+slightly different file and will go through.
 
 ### API (for n8n or your own scripts)
 
@@ -150,6 +208,12 @@ the part that's guaranteed to work, and here's exactly how:
 4. Whatever isn't matched is a **new** lead — created and counted as
    *Created*.
 
+**The one gap: phone numbers.** Matching is on email, then name+company —
+*never* on phone. A row with a brand-new email but a phone number you already
+hold will create a second lead. The row check (section 3) flags exactly those
+rows before you import so you can decide, but nothing removes them
+automatically.
+
 So importing the exact same spreadsheet a second time always produces
 `Created: 0` — everything either **Updates** (fills in blanks) or **Skips**
 (if you chose "Skip it" mode), never duplicates. Every write path — the
@@ -190,7 +254,10 @@ straight the entire way.
 |---|---|
 | Add one lead right now | Round **+** button (phone) or **New** (desktop) → Lead |
 | Add a lead with more detail (source, category, deal value, assignee) | Leads page → **New** |
-| Import a spreadsheet I already have | Outreach → Setup & Ingestion → **Import Leads** → Paste or CSV |
+| Import a spreadsheet I already have | Outreach → Setup & Ingestion → **Import Leads** → Paste, or CSV / Excel |
+| Import an Excel file | Same place — drop the `.xlsx` straight in, no need to convert to CSV |
+| See what's wrong with my sheet before importing | Load it and read the **row check** under the column mapping |
+| Stop a file being sent to n8n | Untick "Also send … to the n8n import workflow" before importing |
 | Get a fresh list of businesses in a niche | Outreach → Setup & Ingestion → download the Apify Google Maps workflow |
 | Check if importing twice is safe | Yes — see section 4. Try it: import, note the counts, import again, `Created` will be `0`. |
 | Move a lead forward | Open the lead → change **Stage** |

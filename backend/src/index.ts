@@ -20,6 +20,7 @@ import notesRouter         from "./routes/notes";
 import vaultRouter         from "./routes/vault";
 import agentsRouter        from "./routes/agents";
 import outreachRouter      from "./routes/outreach";
+import leadImportsRouter   from "./routes/lead-imports";
 import webhooksRouter      from "./routes/webhooks";
 import worklistRouter      from "./routes/worklist";
 import quotationsRouter    from "./routes/quotations";
@@ -117,6 +118,10 @@ api.route("/notes",         notesRouter);
 api.route("/vault",         vaultRouter);
 api.route("/agents",        agentsRouter);
 api.route("/outreach",      outreachRouter);
+// Bulk-import support: pre-flight row validation + the server-side proxy that
+// holds the n8n secret. Both routes are adminOnly at the route, matching
+// /outreach/leads/ingest-bulk, rather than via ADMIN_ONLY_MODULES.
+api.route("/lead-imports",  leadImportsRouter);
 api.route("/webhooks",      webhooksRouter);
 // Not in ADMIN_ONLY_MODULES on purpose — the whole point is that a member
 // lands somewhere that tells them what to do. Rows are scoped per-user inside

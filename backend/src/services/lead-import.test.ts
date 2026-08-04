@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  fillNameCompany, pairKey, emailKey, planLeadImport,
+  fillNameCompany, pairKey, emailKey, planLeadImport, validateImportRows,
   type ImportRow, type ExistingLeadMatch,
 } from "./lead-import";
 
@@ -188,5 +188,160 @@ describe("planLeadImport", () => {
     });
     expect(second.toInsert).toHaveLength(0);
     expect(second.toUpdate).toHaveLength(2);
+  });
+});
+
+// ── Pre-flight validation ────────────────────────────────────────────────
+describe("validateImportRows", () => {
+  const vrow = (index: number, fields: Partial<{ name: string; company: string; email: string; phone: string }>) =>
+    ({ index, ...fields });
+
+  const codesFor = (report: ReturnType<typeof validateImportRows>, index: number) =>
+    report.rows.find((r) => r.index === index)?.issues.map((i) => i.code) ?? [];
+
+  it("reports nothing for a clean sheet", () => {
+    const report = validateImportRows({
+      rows: [
+        vrow(0, { name: "Jane", company: "Acme", email: "jane@acme.com", phone: "+201001234567" }),
+        vrow(1, { name: "Bob", company: "Widgets Co", email: "bob@widgets.co" }),
+      ],
+    });
+    expect(report.rows).toEqual([]);
+    expect(report.clean).toBe(2);
+    expect(report.blocking).toBe(0);
+    expect(report.warnings).toBe(0);
+  });
+
+  it("flags a row carrying none of name/company/email/phone as blocking", () => {
+    // Mirrors the ingest schema's .refine() — such a row has no lead in it.
+    const report = validateImportRows({ rows: [vrow(0, { name: "   ", company: "" })] });
+    expect(codesFor(report, 0)).toEqual(["missing_required"]);
+    expect(report.blocking).toBe(1);
+  });
+
+  it("treats a malformed email as BLOCKING, because one bad cell 400s the whole batch", () => {
+    const report = validateImportRows({
+      rows: [
+        vrow(0, { name: "Jane", company: "Acme", email: "jane@" }),
+        vrow(1, { name: "Bob",  company: "Acme", email: "not-an-email" }),
+      ],
+    });
+    expect(codesFor(report, 0)).toEqual(["invalid_email"]);
+    expect(codesFor(report, 1)).toEqual(["invalid_email"]);
+    expect(report.blocking).toBe(2);
+    expect(report.rows[0].issues[0].blocking).toBe(true);
+  });
+
+  it("flags an unparseable phone as a WARNING — the importer keeps the raw text", () => {
+    const report = validateImportRows({
+      rows: [vrow(0, { name: "Jane", company: "Acme", phone: "0100 123 4567" })],
+    });
+    expect(codesFor(report, 0)).toEqual(["invalid_phone"]);
+    expect(report.blocking).toBe(0);
+    expect(report.warnings).toBe(1);
+  });
+
+  it("does not treat scraper junk like 'N/A' as a phone at all", () => {
+    // normalisePhone() already maps the junk words to null, so this would
+    // otherwise be reported as an invalid number the user has to look at.
+    const report = validateImportRows({
+      rows: [vrow(0, { name: "Jane", company: "Acme", phone: "N/A" })],
+    });
+    expect(codesFor(report, 0)).toEqual(["invalid_phone"]);
+  });
+
+  it("flags a landline, because WhatsApp outreach will skip it", () => {
+    // +20 2… is a Cairo fixed line under the Egyptian dialling plan.
+    const report = validateImportRows({
+      rows: [vrow(0, { name: "Jane", company: "Acme", phone: "+20223456789" })],
+    });
+    expect(codesFor(report, 0)).toEqual(["landline_phone"]);
+  });
+
+  it("detects a duplicate email inside the file, case-insensitively, on the LATER row", () => {
+    const report = validateImportRows({
+      rows: [
+        vrow(0, { name: "Jane", company: "Acme", email: "jane@acme.com" }),
+        vrow(1, { name: "J. Doe", company: "Acme", email: "JANE@ACME.COM" }),
+      ],
+    });
+    expect(codesFor(report, 0)).toEqual([]);
+    expect(codesFor(report, 1)).toEqual(["duplicate_email_in_file"]);
+  });
+
+  it("detects a duplicate phone inside the file after normalising to E.164", () => {
+    // "00201..." and "+201..." are the same number; a raw string compare
+    // would call neither a duplicate.
+    const report = validateImportRows({
+      rows: [
+        vrow(0, { name: "Jane", company: "Acme", phone: "+20 100 123 4567" }),
+        vrow(1, { name: "Bob",  company: "Acme", phone: "00201001234567" }),
+      ],
+    });
+    expect(codesFor(report, 0)).toEqual([]);
+    expect(codesFor(report, 1)).toEqual(["duplicate_phone_in_file"]);
+  });
+
+  it("detects an email that already exists in the CRM", () => {
+    const report = validateImportRows({
+      rows: [vrow(0, { name: "Jane", company: "Acme", email: "Jane@Acme.com" })],
+      existingEmails: new Set(["jane@acme.com"]),
+    });
+    expect(codesFor(report, 0)).toEqual(["duplicate_email_existing"]);
+  });
+
+  it("detects an existing phone — the case planLeadImport does NOT dedupe", () => {
+    // Different email, same number: planLeadImport matches on email and would
+    // happily insert a second record for the same human. Detection is all
+    // there is today, which is why the message says WILL create a second record.
+    const report = validateImportRows({
+      rows: [vrow(0, { name: "Jane", company: "Acme", email: "new@acme.com", phone: "+201001234567" })],
+      existingEmails: new Set(),
+      existingPhones: new Set(["+201001234567"]),
+    });
+    expect(codesFor(report, 0)).toEqual(["duplicate_phone_existing"]);
+    expect(report.rows[0].issues[0].blocking).toBe(false);
+  });
+
+  it("prefers 'already in this file' over 'already in the CRM' for a repeat row", () => {
+    const report = validateImportRows({
+      rows: [
+        vrow(0, { name: "Jane", company: "Acme", email: "jane@acme.com" }),
+        vrow(1, { name: "Jane", company: "Acme", email: "jane@acme.com" }),
+      ],
+      existingEmails: new Set(["jane@acme.com"]),
+    });
+    expect(codesFor(report, 0)).toEqual(["duplicate_email_existing"]);
+    expect(codesFor(report, 1)).toEqual(["duplicate_email_in_file"]);
+  });
+
+  it("accumulates several issues on one row and counts it once", () => {
+    const report = validateImportRows({
+      rows: [vrow(0, { name: "Jane", company: "Acme", email: "jane@", phone: "12345" })],
+    });
+    expect(codesFor(report, 0)).toEqual(["invalid_email", "invalid_phone"]);
+    // One blocking issue makes the ROW blocking; it is not also a warning row.
+    expect(report.blocking).toBe(1);
+    expect(report.warnings).toBe(0);
+    expect(report.rows).toHaveLength(1);
+  });
+
+  it("reports per-code counts and omits clean rows from the row list", () => {
+    const report = validateImportRows({
+      rows: [
+        vrow(0, { name: "Jane", company: "Acme", email: "jane@acme.com" }),
+        vrow(1, { name: "Bob",  company: "Acme", email: "bob@" }),
+        vrow(2, { name: "Sue",  company: "Acme", email: "sue@" }),
+      ],
+    });
+    expect(report.total).toBe(3);
+    expect(report.clean).toBe(1);
+    expect(report.counts).toEqual({ invalid_email: 2 });
+    expect(report.rows.map((r) => r.index)).toEqual([1, 2]);
+  });
+
+  it("keeps sheet row indices so the UI can name the offending row", () => {
+    const report = validateImportRows({ rows: [vrow(417, { email: "jane@" })] });
+    expect(report.rows[0].index).toBe(417);
   });
 });
