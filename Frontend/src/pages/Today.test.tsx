@@ -6,13 +6,20 @@
 // tests would fail on the old code, where clicking that row just called
 // `navigate()` and rendered nothing but a plain title/reason line.
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import Today from "./Today";
 import type { WorklistAction, WorklistResponse } from "@/hooks/useWorklist";
 import { useWorklist } from "@/hooks/useWorklist";
 import { useCurrentUser } from "@/hooks/useAuth";
+import { cairoToday, addCalendarDays } from "@/lib/dates";
+
+// The snooze buttons go through the real useCRM hook, so the boundary mocked
+// here is the fetch itself — that way the test proves the request that would
+// actually be sent, not just that a mocked hook was called.
+vi.mock("@/lib/api", () => ({ apiFetch: vi.fn() }));
+import { apiFetch } from "@/lib/api";
 
 vi.mock("@/hooks/useWorklist", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/useWorklist")>();
@@ -127,5 +134,87 @@ describe("Today — a manual touch that isn't the top item", () => {
     fireEvent.click(skipButton);
 
     expect(screen.queryByText("Second Lead Co")).not.toBeInTheDocument();
+  });
+});
+
+// Today's "Skip for now" is React state — reload and the card is back. So a
+// lead you had consciously decided to chase next week had to be skipped again
+// every single day. These cover the snooze row that writes a real follow-up
+// date instead, and the rule about which cards can have one.
+describe("Today — snoozing a card to a real date", () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+    vi.mocked(apiFetch).mockReset();
+    vi.mocked(apiFetch).mockResolvedValue({});
+    vi.mocked(useCurrentUser).mockReturnValue({
+      id: "u1", name: "Test User", email: "t@test.com", avatar: null, role: "member",
+    });
+  });
+
+  it("offers three one-tap reminders on a lead-bearing focus card", () => {
+    mockWorklist([hotLead]);
+    renderToday();
+    expect(screen.getByText("Not today — remind me")).toBeInTheDocument();
+    for (const label of ["Tomorrow", "3 days", "Next week"]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it("PATCHes a follow-up date onto the lead, not just local state", async () => {
+    // The whole point: this has to survive a reload, so it must reach the API.
+    mockWorklist([hotLead]);
+    renderToday();
+    fireEvent.click(screen.getByRole("button", { name: "Tomorrow" }));
+
+    // react-query dispatches the mutation asynchronously.
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1));
+    const [path, init] = vi.mocked(apiFetch).mock.calls[0];
+    expect(path).toBe("/crm/leads/lead-1");
+    expect(init?.method).toBe("PATCH");
+    const body = JSON.parse(String(init?.body));
+    // Tomorrow, in Cairo — never the UTC day.
+    expect(body.follow_up_at).toBe(addCalendarDays(cairoToday(), 1));
+  });
+
+  it("sends the matching offset for each button", async () => {
+    mockWorklist([hotLead]);
+    renderToday();
+    fireEvent.click(screen.getByRole("button", { name: "Next week" }));
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(String(vi.mocked(apiFetch).mock.calls[0][1]?.body));
+    expect(body.follow_up_at).toBe(addCalendarDays(cairoToday(), 7));
+  });
+
+  it("shows no snooze row on a card with no lead behind it", () => {
+    // A follow-up date lives on the lead, so there is nowhere to write one for
+    // a task or a blocked sequence. Offering the buttons anyway would be a
+    // control that silently does nothing.
+    const task: WorklistAction = {
+      id: "task:t1", type: "task_due", urgency: "today", score: 420,
+      title: "Ship the thing", subtitle: null, reason: "Due today",
+      detail: null, deepLink: "/tasks?task=t1", leadId: null, taskId: "t1",
+      dealValue: 0, ageHours: 0,
+    };
+    mockWorklist([task]);
+    renderToday();
+    expect(screen.queryByText("Not today — remind me")).not.toBeInTheDocument();
+  });
+
+  it("renders a follow_up_due card with its badge and note", () => {
+    // Guards the frontend ActionType union against drifting from the backend:
+    // an unknown type makes STYLE[type] undefined and blanks the card.
+    const followUp: WorklistAction = {
+      id: "followup:lead-9", type: "follow_up_due", urgency: "today", score: 700,
+      title: "FutureScale", subtitle: "Hany Sabry",
+      reason: "Follow-up due today · Negotiation",
+      detail: "Said to call back after their board meeting",
+      deepLink: "/crm?lead=lead-9", leadId: "lead-9", taskId: null,
+      dealValue: 50000, ageHours: 0,
+    };
+    mockWorklist([followUp]);
+    renderToday();
+    expect(screen.getByText("Follow-up")).toBeInTheDocument();
+    expect(screen.getByText("Follow-up due today · Negotiation")).toBeInTheDocument();
+    expect(screen.getByText(/Said to call back after their board meeting/)).toBeInTheDocument();
   });
 });

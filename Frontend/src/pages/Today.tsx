@@ -3,7 +3,9 @@ import { useNavigate } from "react-router-dom";
 import {
   MessageSquareReply, Flame, AlertTriangle, CheckSquare,
   Clock, UserPlus, ArrowRight, CheckCircle2, TrendingDown, MessageCircle,
+  CalendarClock,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +13,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { GettingStarted } from "@/components/GettingStarted";
 import { ManualTouchCard } from "@/components/modules/ManualTouchCard";
+import { useSetLeadFollowUp } from "@/hooks/useCRM";
+import { cairoToday, addCalendarDays } from "@/lib/dates";
 import {
   useWorklist, usePipelineHealth,
   type WorklistAction, type ActionType,
@@ -23,6 +27,7 @@ const STYLE: Record<ActionType, { icon: typeof Flame; label: string; tone: strin
   reply_waiting:    { icon: MessageSquareReply, label: "Reply waiting", tone: "text-emerald-400 bg-emerald-500/10 border-emerald-500/25", dot: "bg-emerald-500" },
   hot_lead:         { icon: Flame,              label: "Hot",           tone: "text-red-400 bg-red-500/10 border-red-500/25",           dot: "bg-red-500" },
   sequence_blocked: { icon: AlertTriangle,      label: "Stuck",         tone: "text-violet-400 bg-violet-500/10 border-violet-500/25",  dot: "bg-violet-500" },
+  follow_up_due:    { icon: CalendarClock,      label: "Follow-up",     tone: "text-cyan-400 bg-cyan-500/10 border-cyan-500/25",        dot: "bg-cyan-500" },
   task_due:         { icon: CheckSquare,        label: "Task",          tone: "text-blue-400 bg-blue-500/10 border-blue-500/25",        dot: "bg-blue-500" },
   stale_lead:       { icon: Clock,              label: "Stale",         tone: "text-amber-400 bg-amber-500/10 border-amber-500/25",     dot: "bg-amber-500" },
   unassigned_lead:  { icon: UserPlus,           label: "No owner",      tone: "text-slate-400 bg-slate-500/10 border-slate-500/25",     dot: "bg-slate-500" },
@@ -33,6 +38,7 @@ const PRIMARY_CTA: Record<ActionType, string> = {
   reply_waiting:    "Open & reply",
   hot_lead:         "Open lead",
   sequence_blocked: "Fix sequence",
+  follow_up_due:    "Open lead",
   task_due:         "Open task",
   stale_lead:       "Chase",
   unassigned_lead:  "Assign",
@@ -50,6 +56,60 @@ function TypeBadge({ type }: { type: ActionType }) {
       <Icon className="h-3 w-3" />
       {s.label}
     </span>
+  );
+}
+
+// "Not today" — the answer Today did not have.
+//
+// "Skip for now" is React state: it survives until the page reloads, so a lead
+// you had consciously decided to chase next week came back every single day and
+// had to be skipped again. These write a real follow-up date on the lead, which
+// suppresses its card until that day and then brings it back as a follow_up_due
+// with the reason attached.
+//
+// Three fixed offsets rather than a date picker: this is a triage loop, and the
+// whole value is that it costs one tap. Snoozing removes the card, the next one
+// becomes the focus, and you can clear a backlog of stale leads in seconds.
+const SNOOZE: { label: string; days: number }[] = [
+  { label: "Tomorrow",  days: 1 },
+  { label: "3 days",    days: 3 },
+  { label: "Next week", days: 7 },
+];
+
+function SnoozeRow({ leadId }: { leadId: string }) {
+  const setFollowUp = useSetLeadFollowUp();
+
+  return (
+    <div className="mt-4 border-t border-border/50 pt-3">
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Not today — remind me
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {SNOOZE.map(({ label, days }) => (
+          <Button
+            key={days}
+            size="sm"
+            variant="outline"
+            // min-h-11 is the 44px touch target; `size="sm"` alone is 36px.
+            className="min-h-11 gap-1.5"
+            disabled={setFollowUp.isPending}
+            onClick={() => {
+              const date = addCalendarDays(cairoToday(), days);
+              setFollowUp.mutate(
+                { id: leadId, date },
+                {
+                  onSuccess: () => toast.success(`Back on your list ${label.toLowerCase()}`),
+                  onError:   (e) => toast.error(e.message),
+                },
+              );
+            }}
+          >
+            <CalendarClock className="h-3.5 w-3.5" />
+            {label}
+          </Button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -92,6 +152,10 @@ function FocusCard({ action, onGo, onSkip, position, total }: {
           <Button variant="ghost" onClick={onSkip}>Skip for now</Button>
         )}
       </div>
+
+      {/* Only for lead-bearing cards: a follow-up date lives on the lead, so
+          there is nowhere to write one for a task or a blocked sequence. */}
+      {action.leadId && <SnoozeRow leadId={action.leadId} />}
     </Card>
   );
 }

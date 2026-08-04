@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cairoDate, cairoToday, CAIRO_TZ } from "./dates";
+import { cairoDate, cairoToday, addCalendarDays, CAIRO_TZ } from "./dates";
 
 // Regression guard: every case below is one where `toISOString().slice(0, 10)`
 // — the implementation this replaced — gives a different, wrong answer. If
@@ -40,5 +40,35 @@ describe("cairoToday — the UTC regression guard", () => {
     expect(cairoDate(instant, "UTC")).toBe("2026-07-14");
     expect(cairoDate(instant, CAIRO_TZ)).toBe("2026-07-15");
     expect(cairoDate(instant, "America/Los_Angeles")).toBe("2026-07-14");
+  });
+});
+
+describe("addCalendarDays", () => {
+  it("shifts by whole days", () => {
+    expect(addCalendarDays("2026-08-04", 1)).toBe("2026-08-05");
+    expect(addCalendarDays("2026-08-04", 7)).toBe("2026-08-11");
+    expect(addCalendarDays("2026-08-04", 0)).toBe("2026-08-04");
+  });
+
+  it("crosses month and year ends", () => {
+    // What Today's "next week" button does on the 30th.
+    expect(addCalendarDays("2026-08-30", 3)).toBe("2026-09-02");
+    expect(addCalendarDays("2026-12-29", 7)).toBe("2027-01-05");
+  });
+
+  it("handles a leap day", () => {
+    expect(addCalendarDays("2028-02-28", 1)).toBe("2028-02-29");
+    expect(addCalendarDays("2028-02-28", 2)).toBe("2028-03-01");
+  });
+
+  it("goes backwards too", () => {
+    expect(addCalendarDays("2026-09-01", -1)).toBe("2026-08-31");
+  });
+
+  it("is not shifted by the host timezone", () => {
+    // The whole point of anchoring at UTC midnight: this must hold whether the
+    // machine running it is in Cairo, UTC or Los Angeles.
+    expect(addCalendarDays("2026-03-28", 1)).toBe("2026-03-29");
+    expect(addCalendarDays("2026-10-30", 1)).toBe("2026-10-31");
   });
 });

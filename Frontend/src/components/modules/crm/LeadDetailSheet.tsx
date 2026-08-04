@@ -3,7 +3,7 @@
 // dialog and the single-lead delete confirmation. Owns its own data hooks.
 
 import { useState } from "react";
-import { Mail, Phone, FileText, Trash2, Pencil, UserCheck, Plus } from "lucide-react";
+import { Mail, Phone, FileText, Trash2, Pencil, UserCheck, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -24,7 +24,7 @@ import { AgentPanel } from "@/components/modules/AgentPanel";
 import { LeadOutreachPanel } from "@/components/modules/LeadOutreachPanel";
 import { toast } from "sonner";
 import {
-  useLeadDetail, useUpdateLead, useDeleteLead, useAddLeadActivity,
+  useLeadDetail, useUpdateLead, useDeleteLead, useAddLeadActivity, useSetLeadFollowUp,
 } from "@/hooks/useCRM";
 import { useUsers, useCreateTask } from "@/hooks/useTasks";
 import { useCreateClient } from "@/hooks/useClients";
@@ -35,6 +35,7 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
   const addActivity  = useAddLeadActivity();
   const deleteLead   = useDeleteLead();
   const updateLead   = useUpdateLead();
+  const setFollowUp  = useSetLeadFollowUp();
   const createClient = useCreateClient();
   const { data: users = [] } = useUsers();
   const [activityOpen,  setActivityOpen]  = useState(false);
@@ -199,6 +200,72 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
                     ))}
                   </select>
                 </div>
+
+                {/* Follow-up, same commit-on-change treatment as Stage.
+                    Today's snooze buttons cover the common "remind me in N
+                    days" case in one tap; this is where an exact date and the
+                    reason go — "their board meets on the 12th". Setting it
+                    silences the lead's stale card until the day. */}
+                <div className="flex items-center justify-between gap-3">
+                  <label htmlFor="lead-followup" className="text-muted-foreground">Follow-up</label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      id="lead-followup"
+                      type="date"
+                      value={lead.followUpAt ?? ""}
+                      disabled={setFollowUp.isPending}
+                      min={cairoToday()}
+                      onChange={(e) => {
+                        const date = e.target.value || null;
+                        setFollowUp.mutate(
+                          { id: lead.id, date },
+                          {
+                            onSuccess: () => toast.success(date ? `Follow-up set for ${date}` : "Follow-up cleared"),
+                            onError:   (err) => toast.error(err.message),
+                          },
+                        );
+                      }}
+                      className="min-h-11 rounded-md border border-input bg-background px-2 text-xs
+                                 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2
+                                 focus-visible:ring-ring"
+                    />
+                    {lead.followUpAt && (
+                      <Button
+                        variant="ghost" size="icon"
+                        className="h-7 min-h-11 min-w-11 text-muted-foreground"
+                        aria-label="Clear follow-up" title="Clear follow-up"
+                        disabled={setFollowUp.isPending}
+                        onClick={() => setFollowUp.mutate(
+                          { id: lead.id, date: null, note: null },
+                          { onSuccess: () => toast.success("Follow-up cleared"),
+                            onError: (err) => toast.error(err.message) },
+                        )}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                {lead.followUpAt && (
+                  <div className="rounded-md border border-cyan-500/25 bg-cyan-500/5 px-3 py-2">
+                    <textarea
+                      defaultValue={lead.followUpNote ?? ""}
+                      placeholder="Why? e.g. their board meets Thursday"
+                      rows={2}
+                      // Commits on blur rather than per-keystroke: this is a
+                      // free-text note, and a PATCH per character would be
+                      // absurd. Uncontrolled so typing is never fought by a
+                      // refetch landing mid-sentence.
+                      onBlur={(e) => {
+                        const note = e.target.value.trim();
+                        if (note === (lead.followUpNote ?? "")) return;
+                        setFollowUp.mutate({ id: lead.id, date: lead.followUpAt!, note: note || null });
+                      }}
+                      className="w-full resize-none bg-transparent text-xs text-foreground/90 placeholder:text-muted-foreground
+                                 focus-visible:outline-none"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* The pipeline's obvious next step. Visible and one tap: no

@@ -123,6 +123,10 @@ export interface ApiLead {
   assigneeId: string | null;
   assignee_name: string | null;
   lastActivity: string | null;
+  // "Come back to this on this day", as YYYY-MM-DD. Until it arrives the lead
+  // raises no stale card in Today; on the day it raises a follow_up_due one.
+  followUpAt?:   string | null;
+  followUpNote?: string | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;

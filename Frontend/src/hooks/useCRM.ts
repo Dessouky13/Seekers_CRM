@@ -86,6 +86,36 @@ export function useUpdateLead() {
   });
 }
 
+/**
+ * Set or clear a lead's follow-up date.
+ *
+ * Separate from useUpdateLead for one reason: it invalidates `["worklist"]`.
+ * Setting a follow-up is the one lead edit whose whole purpose is to change
+ * Today's queue — it removes the lead's card until the date arrives — so
+ * without that invalidation the card sits there until the 60s refetch and the
+ * tap looks like it did nothing.
+ *
+ * Pass `date: null` to clear.
+ */
+export function useSetLeadFollowUp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, date, note }: { id: string; date: string | null; note?: string | null }) =>
+      apiFetch<ApiLead>(`/crm/leads/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          follow_up_at: date,
+          ...(note !== undefined ? { follow_up_note: note } : {}),
+        }),
+      }),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: ["worklist"] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["lead", id] });
+    },
+  });
+}
+
 export function useDeleteLead() {
   const qc = useQueryClient();
   return useMutation({

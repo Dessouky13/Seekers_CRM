@@ -8,7 +8,7 @@
 // The button sits above the tab bar in the thumb arc. Phone only: on desktop
 // the per-page buttons are already one click away and the command palette
 // (Ctrl+K) covers the keyboard path.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Users, CheckSquare, Receipt, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,8 +23,9 @@ import { useCreateTransaction } from "@/hooks/useFinance";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import { cairoToday } from "@/lib/dates";
+import { OPEN_QUICK_ADD, type QuickAddKind } from "@/lib/quick-add";
 
-type Kind = "lead" | "task" | "expense";
+type Kind = QuickAddKind;
 
 export function QuickAdd() {
   const user = useCurrentUser();
@@ -34,6 +35,28 @@ export function QuickAdd() {
   const createLead = useCreateLead();
   const createTask = useCreateTask();
   const createTx   = useCreateTransaction();
+
+  // Anything can now ask for this sheet — the command palette, a keyboard
+  // shortcut, a button on a page. Passing a kind skips the picker and opens
+  // straight onto that form, which is what makes "new lead" one keystroke
+  // instead of three taps.
+  //
+  // Registered before the `!user` early return would sit after it, which is why
+  // that return moved below: a hook cannot run conditionally.
+  const role = user?.role;
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const requested = (e as CustomEvent<Kind | undefined>).detail;
+      // Expenses are behind the admin-only finance module, so opening a member
+      // straight onto that form would hand them a submit button that 403s.
+      // Fall back to the picker, which already hides the option for them.
+      const allowed = requested === "expense" && role !== "admin" ? null : requested ?? null;
+      setKind(allowed);
+      setOpen(true);
+    };
+    window.addEventListener(OPEN_QUICK_ADD, onOpen);
+    return () => window.removeEventListener(OPEN_QUICK_ADD, onOpen);
+  }, [role]);
 
   if (!user) return null;
   const isAdmin = user.role === "admin";

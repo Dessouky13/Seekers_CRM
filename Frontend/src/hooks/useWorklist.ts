@@ -4,6 +4,10 @@ import { apiFetch } from "@/lib/api";
 export type ActionType =
   | "reply_waiting"
   | "hot_lead"
+  // A date somebody promised the lead. Mirrors the backend union in
+  // services/worklist-ranking.ts — adding one there without adding it here
+  // makes STYLE[type] undefined and blanks the card.
+  | "follow_up_due"
   | "sequence_blocked"
   | "task_due"
   | "stale_lead"

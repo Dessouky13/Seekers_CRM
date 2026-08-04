@@ -38,3 +38,22 @@ export function cairoDate(instant: Date = new Date(), tz: string = CAIRO_TZ): st
 export function cairoToday(now: Date = new Date()): string {
   return cairoDate(now);
 }
+
+/**
+ * Shift a `YYYY-MM-DD` by whole calendar days: `addCalendarDays("2026-08-30", 3)`
+ * is `"2026-09-02"`. Mirror of the backend helper of the same name.
+ *
+ * This is NOT "what day is it" — the caller has already decided the anchor
+ * (normally with `cairoToday()`); this only moves it. Anchoring at UTC midnight
+ * and reading the UTC fields back means no timezone can shift the result, which
+ * is the one place `toISOString().slice(0, 10)` is correct rather than the bug
+ * this module exists to prevent.
+ *
+ * Used by Today's snooze buttons: "next week" has to land on the same weekday
+ * seven days out, including across a month end or a DST change.
+ */
+export function addCalendarDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
