@@ -263,6 +263,12 @@ export const leads = pgTable("leads", {
   // Thursday is not a lead going quiet on you.
   followUpAt:   date("follow_up_at"),
   followUpNote: text("follow_up_note"),
+  // ── Archived: shelved, but not deleted ──
+  // Set when the third manual-contact strike lands AND the configured
+  // strike_limit_action is "archive" (see services/lead-strikes.ts). An archived
+  // lead is hidden from the leads list; the row, its timeline and its strike
+  // history all remain. NULL for every lead that has not been archived.
+  archivedAt:   timestamp("archived_at", { withTimezone: true }),
   // ── v2 Lead Intelligence (populated by n8n via /intel/* ingest) ──
   domain:          text("domain"),                        // company website domain, for matching
   emailStatus:     text("email_status"),                  // verified | risky | invalid | unknown | bounced
@@ -295,6 +301,9 @@ export const leads = pgTable("leads", {
   // minority of leads carry one. Drizzle 0.20 has no partial-index builder, so
   // the declaration here is the unfiltered shape; migration 0018 is authoritative.
   followUpIdx:       index("idx_leads_follow_up_at").on(t.followUpAt),
+  // Also partial in migration 0020 (WHERE archived_at IS NOT NULL) — same
+  // Drizzle 0.20 limitation, same authority.
+  archivedIdx:       index("idx_leads_archived_at").on(t.archivedAt),
 }));
 
 // ── Events (append-only fact log — the learning-loop training data) ──
@@ -358,6 +367,26 @@ export const leadActivities = pgTable("lead_activities", {
   createdAt:   timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   leadIdx: index("idx_lead_activities_lead").on(t.leadId),
+}));
+
+// ── Lead Strikes (manual contact attempts) ────────────────
+// One row per hand-made contact attempt. The strike COUNT is derived from these
+// rows (COUNT(*) per lead), never stored — see migration 0020 for why a history
+// table rather than an integer column, and services/lead-strikes.ts for what
+// happens when the count reaches the limit.
+export const leadStrikes = pgTable("lead_strikes", {
+  id:        uuid("id").primaryKey().defaultRandom(),
+  leadId:    uuid("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
+  // Nullable: "I chased them" with no channel recorded is still a strike.
+  channel:   text("channel", { enum: ["whatsapp", "call", "email", "meeting", "other"] }),
+  note:      text("note"),
+  // The Cairo calendar day the contact belongs to, same reading as
+  // lead_activities.date. Always written explicitly from utils/dates.ts.
+  date:      date("date").notNull().default(sql`CURRENT_DATE`),
+  createdBy: uuid("created_by").references(() => profiles.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  leadIdx: index("idx_lead_strikes_lead").on(t.leadId, t.createdAt),
 }));
 
 // ── Goals ─────────────────────────────────────────────────
@@ -687,6 +716,12 @@ export const companySettings = pgTable("company_settings", {
   quotationFooter:     text("quotation_footer"),
   invoiceFooter:       text("invoice_footer"),
   bankDetails:         text("bank_details"),
+  // ── What happens when a lead takes its third manual-contact strike ──
+  // Lives here rather than in a second settings store: this is already THE
+  // single-row company config table, and a strike policy is company policy.
+  // Default is the safer option — see services/lead-strikes.ts.
+  strikeLimitAction:   text("strike_limit_action", { enum: ["close_lost", "archive"] })
+                         .notNull().default("close_lost"),
   updatedAt:           timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
