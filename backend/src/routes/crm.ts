@@ -3,15 +3,23 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { eq, and, not, inArray, ilike, or, sql, gte, desc, isNull } from "drizzle-orm";
 import { db } from "../db/client";
-import { leads, leadActivities, profiles, events } from "../db/schema";
+import { leads, leadActivities, leadStrikes, profiles, events } from "../db/schema";
 import { authMiddleware, adminOnly, forcedAssigneeId, canAccessOwned, isAdmin } from "../middleware/auth";
 import {
   createLeadSchema, updateLeadSchema, createLeadActivitySchema,
-  crmInsightsQuerySchema,
+  crmInsightsQuerySchema, bulkUpdateLeadsSchema, bulkCommentLeadsSchema,
+  createLeadStrikeSchema,
 } from "../utils/validators";
 import { orChat } from "../services/openrouter";
 import { fireEventAsync } from "../services/webhooks";
 import { phoneFields } from "../services/phone";
+import {
+  resolveBulkScope, bulkLeadWhereTerms, buildBulkLeadPatch, assertBulkPatchAllowed,
+} from "../services/bulk-leads";
+import {
+  STRIKE_LIMIT, normalizeStrikeLimitAction, strikeActivity, strikeLimitEffects,
+} from "../services/lead-strikes";
+import { getCompanySettings } from "../services/documents";
 import { cairoToday, cairoDaysAgo } from "../utils/dates";
 import type { AppEnv } from "../types";
 
@@ -73,6 +81,14 @@ crm.get("/leads", authMiddleware, async (c) => {
   if (q.reachability === "unreachable") conditions.push(UNREACHABLE);
   if (q.reachability === "reachable")   conditions.push(sql`NOT ${UNREACHABLE}`);
 
+  // Archived leads (strike limit reached under the "archive" policy) are hidden
+  // by DEFAULT — that hiding is the only thing that makes "archive" different
+  // from "close lost". `?archived=only` is what stops archiving being a one-way
+  // door: without a way to list them, an archived lead would be unreachable
+  // except by remembering its id.
+  if (q.archived === "only")          conditions.push(sql`${leads.archivedAt} IS NOT NULL`);
+  else if (q.archived !== "include")  conditions.push(isNull(leads.archivedAt));
+
   // Members only ever see their OWN leads. Enforced server-side and applied
   // last so it cannot be widened by a client-supplied assignee_id filter.
   const forced = forcedAssigneeId(c.get("user"));
@@ -90,6 +106,12 @@ crm.get("/leads", authMiddleware, async (c) => {
     .select({
       lead:         leads,
       assigneeName: profiles.name,
+      // Correlated subquery rather than a LEFT JOIN + GROUP BY: the join would
+      // have to group by every column of `leads` (30 of them) and the count is
+      // one index-only lookup on idx_lead_strikes_lead per row. Kept out of the
+      // frontend as a computed field so the dot indicator never has to fetch
+      // per-lead history to draw three dots.
+      strikeCount:  sql<number>`(SELECT COUNT(*)::int FROM lead_strikes ls WHERE ls.lead_id = ${leads.id})`,
     })
     .from(leads)
     .leftJoin(profiles, eq(leads.assigneeId, profiles.id))
@@ -97,9 +119,11 @@ crm.get("/leads", authMiddleware, async (c) => {
     .orderBy(sql`${leads.updatedAt} DESC`)
     .limit(limit);
 
-  return c.json(rows.map(({ lead, assigneeName }) => ({
+  return c.json(rows.map(({ lead, assigneeName, strikeCount }) => ({
     ...lead,
     assignee_name: assigneeName,
+    strikeCount:   Number(strikeCount ?? 0),
+    strikeLimit:   STRIKE_LIMIT,
   })));
 });
 
@@ -182,13 +206,28 @@ crm.get("/leads/:id", authMiddleware, async (c) => {
   // Newest first. Ordering by `date` alone (a DATE column) left same-day
   // entries in arbitrary order, so a freshly logged call could appear above or
   // below the reply it followed; createdAt is the real tiebreaker.
-  const activities = await db
-    .select()
-    .from(leadActivities)
-    .where(eq(leadActivities.leadId, id))
-    .orderBy(desc(leadActivities.date), desc(leadActivities.createdAt));
+  const [activities, strikes, settings] = await Promise.all([
+    db
+      .select()
+      .from(leadActivities)
+      .where(eq(leadActivities.leadId, id))
+      .orderBy(desc(leadActivities.date), desc(leadActivities.createdAt)),
+    leadStrikeHistory(id),
+    // The policy travels with the lead. /company-settings is admin-gated as a
+    // module, so a member could not read it — and the UI needs to be able to say
+    // "the next strike will close this lead" before they tap.
+    getCompanySettings(),
+  ]);
 
-  return c.json({ ...row.lead, assignee_name: row.assigneeName, activities });
+  return c.json({
+    ...row.lead,
+    assignee_name:      row.assigneeName,
+    activities,
+    strikes,
+    strikeCount:        strikes.length,
+    strikeLimit:        STRIKE_LIMIT,
+    strikeLimitAction:  normalizeStrikeLimitAction(settings.strikeLimitAction),
+  });
 });
 
 // PATCH /crm/leads/:id — auto-activity on stage change
@@ -249,6 +288,11 @@ crm.patch("/leads/:id", authMiddleware, async (c) => {
       // silently ignore every attempt to clear one.
       followUpAt:   body.follow_up_at   !== undefined ? body.follow_up_at   : existing.followUpAt,
       followUpNote: body.follow_up_note !== undefined ? (body.follow_up_note || null) : existing.followUpNote,
+      // Archive / restore. `new Date()` is an instant, not a calendar day, so
+      // there is no Cairo-day question here — unlike every `date` column above.
+      archivedAt:   body.archived === undefined
+                      ? existing.archivedAt
+                      : (body.archived ? (existing.archivedAt ?? new Date()) : null),
       lastActivity: stageChanged ? cairoToday() : existing.lastActivity,
       updatedAt:    new Date(),
     })
@@ -421,6 +465,197 @@ crm.post("/leads/bulk-delete", authMiddleware, adminOnly, async (c) => {
   });
 });
 
+// ── Bulk edit + bulk comment ──────────────────────────────
+//
+// Both mutate many rows from one request, so both are built the same way and
+// both carry the same three-layer guard against an unfiltered statement:
+//
+//   1. Zod `.min(1)` on `ids` (utils/validators.ts) — the wire.
+//   2. resolveBulkScope()    (services/bulk-leads.ts) — refuses again without
+//      depending on Zod, and pins members to their own leads.
+//   3. `conditions.length === 0` below — the last line before the statement is
+//      built, because `where(undefined)` makes Drizzle omit the clause entirely
+//      and that is how 735 leads were deleted in one request.
+//
+// Layer 3 looks redundant next to 1 and 2. It is not: the two earlier layers are
+// about the INPUT, and this one is about the STATEMENT. It is the only one that
+// still holds if a future field is added to the plan and forgotten here.
+
+/**
+ * Turn a resolved scope into Drizzle conditions, or refuse.
+ *
+ * Returns `null` when no WHERE term resolved. Every caller must treat `null` as
+ * a hard 400 and must not build a statement.
+ */
+function bulkLeadConditions(scope: { ids: string[]; forcedAssigneeId: string | null }) {
+  const conditions = bulkLeadWhereTerms(scope).map((term) =>
+    term.kind === "id_in"
+      ? inArray(leads.id, term.ids)
+      : eq(leads.assigneeId, term.assigneeId),
+  );
+  return conditions.length === 0 ? null : conditions;
+}
+
+const REFUSED_UNFILTERED = {
+  error: "Refusing to run a bulk update with no WHERE condition. " +
+         "This would have matched every lead in the database.",
+} as const;
+
+// POST /crm/leads/bulk-update — apply the same field changes to many leads.
+// Not admin-only: a member may already PATCH their own leads one at a time, and
+// row scoping means this reaches exactly the same set. Reassignment is the one
+// field a member cannot touch (assertBulkPatchAllowed).
+crm.post("/leads/bulk-update", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const body = bulkUpdateLeadsSchema.parse(await c.req.json());
+
+  const allowed = assertBulkPatchAllowed(body.patch, user);
+  if (!allowed.ok) return c.json({ error: "Forbidden", message: allowed.error }, allowed.status);
+
+  const scope = resolveBulkScope({ ids: body.ids, user });
+  if (!scope.ok) return c.json({ error: scope.error }, scope.status);
+
+  const patch = buildBulkLeadPatch(body.patch);
+  // An empty `.set()` is either a syntax error or a pointless updated_at bump,
+  // and either way the request asked for nothing. Zod's refine already catches
+  // `patch: {}`; this catches a patch whose only key was a blank stage.
+  if (patch.changed.length === 0) {
+    return c.json({ error: "Choose at least one field to change" }, 400);
+  }
+
+  const conditions = bulkLeadConditions(scope);
+  if (!conditions) return c.json(REFUSED_UNFILTERED, 400);
+
+  // The exact rows this will touch, resolved BEFORE the write. Doubles as the
+  // dry-run answer and as the per-lead activity list for a stage move — a
+  // member's request may name leads they do not own, and those must be reported
+  // as "not yours", not silently counted.
+  const targets = await db
+    .select({ id: leads.id, stage: leads.stage })
+    .from(leads)
+    .where(and(...conditions));
+
+  if (body.dry_run) {
+    return c.json({
+      updated:      0,
+      would_update: targets.length,
+      skipped:      body.ids.length - targets.length,
+      fields:       patch.changed,
+    });
+  }
+
+  if (targets.length === 0) {
+    return c.json({ updated: 0, skipped: body.ids.length, fields: patch.changed });
+  }
+
+  const updated = await db
+    .update(leads)
+    .set({
+      ...patch.columns,
+      // A stage move IS activity on the lead — same rule the single-lead PATCH
+      // follows. cairoToday(), never toISOString(): between Cairo midnight and
+      // 02:00 the UTC day is still yesterday, which would backdate the move and
+      // immediately make the lead look stale.
+      ...(patch.stageChanged ? { lastActivity: cairoToday() } : {}),
+      updatedAt: new Date(),
+    } as never)
+    .where(and(...conditions))
+    .returning({ id: leads.id });
+
+  // One activity per lead, so each lead's own timeline explains itself. The
+  // single-lead PATCH writes the identically-worded row; a bulk move must not be
+  // the one path that leaves the history silent.
+  // Leads already in the target stage are skipped: "Stage moved to contacted" on
+  // a lead that was already contacted is a lie, and selecting a whole column in
+  // the kanban would have written one per lead.
+  const moved = patch.stageChanged
+    ? targets.filter((t) => t.stage !== patch.columns.stage)
+    : [];
+  // `values([])` is a runtime error in Drizzle, not a no-op.
+  if (moved.length > 0) {
+    const label = String(patch.columns.stage).replace(/_/g, " ");
+    await db.insert(leadActivities).values(
+      moved.map((t) => ({
+        leadId:      t.id,
+        type:        "note" as const,
+        description: `Stage moved to ${label}`,
+        date:        cairoToday(),
+        createdBy:   user.id,
+      })),
+    );
+  }
+
+  // Audit trail. A single request that rewrote 200 leads should be visible after
+  // the fact, for the same reason bulk-delete records itself.
+  await db.insert(events).values({
+    leadId: null,
+    type:   "leads_bulk_updated",
+    source: "crm",
+    payload: {
+      by:     user.id,
+      count:  updated.length,
+      fields: patch.changed,
+      patch:  patch.columns,
+    },
+  });
+
+  return c.json({
+    updated: updated.length,
+    skipped: body.ids.length - updated.length,
+    fields:  patch.changed,
+  });
+});
+
+// POST /crm/leads/bulk-comment — the same comment on many leads, as one
+// activity per lead. Deliberately not a single shared note: the timeline is
+// per-lead, and a lead whose history pointed at a batch record somewhere else
+// would be unreadable six months later.
+crm.post("/leads/bulk-comment", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const body = bulkCommentLeadsSchema.parse(await c.req.json());
+
+  const scope = resolveBulkScope({ ids: body.ids, user });
+  if (!scope.ok) return c.json({ error: scope.error }, scope.status);
+
+  const conditions = bulkLeadConditions(scope);
+  if (!conditions) return c.json(REFUSED_UNFILTERED, 400);
+
+  // Resolve the real, scoped set first: activities are inserted by lead id, so
+  // without this a member could write onto somebody else's lead by id alone.
+  const targets = await db
+    .select({ id: leads.id })
+    .from(leads)
+    .where(and(...conditions));
+
+  if (targets.length === 0) {
+    return c.json({ commented: 0, skipped: body.ids.length });
+  }
+
+  // A comment logged at 22:00 Cairo belongs to that evening, not to tomorrow.
+  const date = body.date ?? cairoToday();
+
+  const inserted = await db
+    .insert(leadActivities)
+    .values(targets.map((t) => ({
+      leadId:      t.id,
+      type:        body.type ?? ("note" as const),
+      description: body.description,
+      date,
+      createdBy:   user.id,
+    })))
+    .returning({ id: leadActivities.id });
+
+  // Logging activity moves last_activity, exactly as the single-lead endpoint
+  // does — otherwise commenting on 50 leads would leave all 50 still flagged as
+  // going quiet.
+  await db
+    .update(leads)
+    .set({ lastActivity: date, updatedAt: new Date() })
+    .where(and(...conditions));
+
+  return c.json({ commented: inserted.length, skipped: body.ids.length - inserted.length });
+});
+
 // DELETE /crm/leads/:id — admin only
 crm.delete("/leads/:id", authMiddleware, adminOnly, async (c) => {
   const [deleted] = await db
@@ -479,6 +714,151 @@ crm.post("/leads/:id/activities", authMiddleware, async (c) => {
     .where(eq(leads.id, leadId));
 
   return c.json(activity, 201);
+});
+
+// ── Manual contact strikes ────────────────────────────────
+//
+// Three hand-made attempts to reach a lead, then a configurable decision. The
+// COUNT is always derived from the rows — there is no counter column to drift.
+// All the decisions (which activity type a strike may claim, whether the limit is
+// reached, what reaching it writes) live in services/lead-strikes.ts so they are
+// unit-testable without a database.
+
+/** The strikes for one lead, newest first, with the person who recorded each. */
+async function leadStrikeHistory(leadId: string) {
+  return db
+    .select({
+      id:        leadStrikes.id,
+      leadId:    leadStrikes.leadId,
+      channel:   leadStrikes.channel,
+      note:      leadStrikes.note,
+      date:      leadStrikes.date,
+      createdBy: leadStrikes.createdBy,
+      createdAt: leadStrikes.createdAt,
+      by_name:   profiles.name,
+    })
+    .from(leadStrikes)
+    .leftJoin(profiles, eq(leadStrikes.createdBy, profiles.id))
+    .where(eq(leadStrikes.leadId, leadId))
+    .orderBy(desc(leadStrikes.createdAt));
+}
+
+// POST /crm/leads/:id/strikes — record one manual contact attempt.
+crm.post("/leads/:id/strikes", authMiddleware, async (c) => {
+  const leadId = c.req.param("id");
+  const user   = c.get("user");
+  const body   = createLeadStrikeSchema.parse(await c.req.json().catch(() => ({})));
+
+  const [lead] = await db
+    .select({ id: leads.id, assigneeId: leads.assigneeId, stage: leads.stage })
+    .from(leads).where(eq(leads.id, leadId)).limit(1);
+  if (!lead) return c.json({ error: "Lead not found" }, 404);
+  // 404 not 403, so a member cannot probe which lead ids exist — same as the
+  // single-lead GET and PATCH above.
+  if (!canAccessOwned(user, lead.assigneeId)) {
+    return c.json({ error: "Lead not found" }, 404);
+  }
+
+  const [strike] = await db
+    .insert(leadStrikes)
+    .values({
+      leadId,
+      channel: body.channel ?? null,
+      note:    body.note?.trim() || null,
+      // A WhatsApp sent at 23:30 Cairo belongs to that evening. cairoToday(),
+      // never toISOString().slice(0, 10) — that is the UTC day.
+      date:    body.date ?? cairoToday(),
+      createdBy: user.id,
+    })
+    .returning();
+
+  // Counted from the rows, after the insert, so the number in the response and
+  // the number in the history can never disagree.
+  const [{ count }] = await db
+    .select({ count: sql<number>`COUNT(*)::int` })
+    .from(leadStrikes)
+    .where(eq(leadStrikes.leadId, leadId));
+  const strikeCount = Number(count);
+
+  const timeline = [{
+    leadId,
+    ...strikeActivity({ count: strikeCount, channel: body.channel, note: body.note }),
+    date:      strike.date,
+    createdBy: user.id,
+  }];
+
+  // The policy is read per request rather than cached: it is one indexed row on a
+  // single-row table, and an admin changing it in Settings must take effect on
+  // the very next strike rather than after a restart.
+  const action  = normalizeStrikeLimitAction((await getCompanySettings()).strikeLimitAction);
+  const effects = strikeLimitEffects({ count: strikeCount, action, now: new Date() });
+
+  if (effects.activity) {
+    timeline.push({ leadId, ...effects.activity, date: strike.date, createdBy: user.id });
+  }
+
+  await db.insert(leadActivities).values(timeline);
+
+  await db
+    .update(leads)
+    .set({
+      ...effects.patch,
+      lastActivity: strike.date,
+      updatedAt:    new Date(),
+    })
+    .where(eq(leads.id, leadId));
+
+  if (effects.reached && lead.stage !== "closed_lost") {
+    fireEventAsync("lead.stage_changed", {
+      lead_id:      leadId,
+      from_stage:   lead.stage,
+      to_stage:     "closed_lost",
+      reason:       `strike_limit_${effects.applied}`,
+      strike_count: strikeCount,
+    });
+  }
+
+  return c.json({
+    strike,
+    strike_count:  strikeCount,
+    strike_limit:  STRIKE_LIMIT,
+    limit_action:  action,
+    limit_applied: effects.applied,
+    strikes:       await leadStrikeHistory(leadId),
+  }, 201);
+});
+
+// DELETE /crm/leads/:leadId/strikes/:strikeId — undo a strike recorded in error.
+//
+// Deliberately available: the count is derived, so removing the row is the only
+// correct way to fix a mis-tap, and without this a stray strike would be
+// permanent. It does NOT reverse an automatic close/archive — that is a stage
+// change the user can see and undo themselves, and silently reopening a lead
+// because a strike was deleted would be a surprise.
+crm.delete("/leads/:leadId/strikes/:strikeId", authMiddleware, async (c) => {
+  const leadId = c.req.param("leadId");
+
+  const [lead] = await db
+    .select({ assigneeId: leads.assigneeId })
+    .from(leads).where(eq(leads.id, leadId)).limit(1);
+  if (!lead) return c.json({ error: "Strike not found" }, 404);
+  if (!canAccessOwned(c.get("user"), lead.assigneeId)) {
+    return c.json({ error: "Strike not found" }, 404);
+  }
+
+  const [deleted] = await db
+    .delete(leadStrikes)
+    .where(and(
+      eq(leadStrikes.id,     c.req.param("strikeId")),
+      eq(leadStrikes.leadId, leadId),
+    ))
+    .returning({ id: leadStrikes.id });
+  if (!deleted) return c.json({ error: "Strike not found" }, 404);
+
+  return c.json({
+    strike_count: (await leadStrikeHistory(leadId)).length,
+    strike_limit: STRIKE_LIMIT,
+  });
 });
 
 // DELETE /crm/leads/:leadId/activities/:activityId — remove an activity from the timeline

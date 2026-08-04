@@ -54,6 +54,9 @@ router.patch("/", authMiddleware, async (c) => {
   set("quotation_footer",      "quotationFooter",     (v) => v || null);
   set("invoice_footer",        "invoiceFooter",       (v) => v || null);
   set("bank_details",          "bankDetails",         (v) => v || null);
+  // NOT NULL in the database — no `|| null` transform, and the Zod enum has
+  // already restricted it to one of the two known actions.
+  set("strike_limit_action",   "strikeLimitAction");
 
   const [updated] = await db
     .update(companySettings)

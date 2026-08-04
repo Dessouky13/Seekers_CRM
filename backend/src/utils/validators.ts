@@ -198,12 +198,81 @@ export const updateLeadSchema = createLeadSchema.partial().extend({
   // calendar day in Cairo, same format every other date field here uses.
   follow_up_at:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD").nullable().optional(),
   follow_up_note: z.string().max(500).nullable().optional(),
+  /**
+   * Shelve or restore a lead. `false` clears `archived_at`, which is the ONLY
+   * way back from the "archive" strike-limit action — without it archiving would
+   * be a one-way door. A boolean rather than a timestamp so the client never
+   * chooses when it happened.
+   */
+  archived:       z.boolean().optional(),
 });
 
 export const createLeadActivitySchema = z.object({
   type:        z.enum(["email", "call", "meeting", "form", "note"]),
   description: z.string().min(1).max(1000),
   date:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+const leadStage = z.enum([
+  "new_lead", "contacted", "call_scheduled",
+  "proposal_sent", "negotiation", "closed_won", "closed_lost",
+]);
+
+/**
+ * The selection every bulk endpoint acts on.
+ *
+ * `.min(1)` is not cosmetic. An empty array is falsy-adjacent in a way that has
+ * already cost this database every one of its 735 leads: the old bulk-delete
+ * guard was `if (!body.keep_sources && !body.delete_sources)`, `![]` is `false`,
+ * so an empty array passed the guard, contributed no SQL condition, and the
+ * DELETE ran with no WHERE clause at all. Rejecting it here is the first of two
+ * layers — services/bulk-leads.ts refuses it again after validation, and the
+ * routes refuse a third time if no WHERE term resolves.
+ *
+ * `.max(500)` caps the blast radius of one request. The UI pages at 200.
+ */
+const bulkLeadIds = z.array(z.string().uuid()).min(1, "Select at least one lead").max(500);
+
+/**
+ * PATCH-like bulk edit. Only fields that exist on `leads` AND are meaningful to
+ * set to one shared value across many rows — see BulkLeadPatchInput in
+ * services/bulk-leads.ts for what is deliberately absent and why.
+ *
+ * The clearable fields are `.nullable()` so the UI can genuinely unset them;
+ * `.optional()` alone would make them write-once (the same bug the follow-up
+ * fields carry a comment about above).
+ */
+export const bulkUpdateLeadsSchema = z.object({
+  ids:   bulkLeadIds,
+  patch: z.object({
+    stage:       leadStage.optional(),
+    assignee_id: z.string().uuid().nullable().optional(),
+    category:    z.string().max(100).nullable().optional(),
+    source:      z.string().max(100).nullable().optional(),
+  }),
+  dry_run: z.boolean().optional(),
+}).refine(
+  (body) => Object.keys(body.patch).length > 0,
+  { message: "Choose at least one field to change", path: ["patch"] },
+);
+
+/**
+ * The same comment against every selected lead, written as a per-lead activity
+ * so each lead's own history stays complete and independent.
+ */
+export const bulkCommentLeadsSchema = z.object({
+  ids:         bulkLeadIds,
+  type:        z.enum(["email", "call", "meeting", "form", "note"]).optional(),
+  description: z.string().trim().min(1, "Write a comment").max(1000),
+  // A Cairo calendar day. Defaults server-side to cairoToday() when omitted.
+  date:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD").optional(),
+});
+
+/** One manual contact attempt. Everything except the lead is optional. */
+export const createLeadStrikeSchema = z.object({
+  channel: z.enum(["whatsapp", "call", "email", "meeting", "other"]).optional(),
+  note:    z.string().trim().max(500).nullable().optional(),
+  date:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD").optional(),
 });
 
 // ── Goals ─────────────────────────────────────────────────
@@ -392,6 +461,9 @@ export const updateCompanySettingsSchema = z.object({
   quotation_footer:      z.string().max(2000).nullable().optional(),
   invoice_footer:        z.string().max(2000).nullable().optional(),
   bank_details:          z.string().max(2000).nullable().optional(),
+  // What the third manual-contact strike does to a lead. Enumerated rather than
+  // free text so "delete" can never be configured: neither option destroys data.
+  strike_limit_action:   z.enum(["close_lost", "archive"]).optional(),
 });
 
 // ── CRM Insights ─────────────────────────────────────────
