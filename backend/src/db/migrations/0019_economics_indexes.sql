@@ -9,7 +9,7 @@
 --   2. `client_name` is matched case- and whitespace-insensitively. An index on
 --      the raw column cannot serve that, so this indexes the same normalised
 --      expression the service uses (lower + trim), keeping the two definitions
---      in step. This one matters more than the row count suggests: 137,800 EGP
+--      in step. This one matters more than the row count suggests: 139,800 EGP
 --      of client revenue on this database is reachable ONLY via that text name.
 --
 -- No new columns and no new data-entry burden — the report is built entirely

@@ -214,7 +214,7 @@ export interface RetainerReport {
  * A completed income transaction is attributed to a client when EITHER
  * `client_id` points at a client row, OR `client_name` normalises to exactly
  * one client's `name` or `company`. The second rule is not a nicety: on this
- * database 137,800 EGP of real client revenue carries only the text name, so a
+ * database 139,800 EGP of real client revenue carries only the text name, so a
  * report keyed on `client_id` alone shows Rajac at 44,000 when it has paid
  * 109,800.
  *
