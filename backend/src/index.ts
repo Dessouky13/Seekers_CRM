@@ -25,6 +25,7 @@ import worklistRouter      from "./routes/worklist";
 import quotationsRouter    from "./routes/quotations";
 import invoicesRouter      from "./routes/invoices";
 import companySettingsRouter from "./routes/company-settings";
+import economicsRouter     from "./routes/economics";
 import { publicQuotations, publicInvoices } from "./routes/public-documents";
 import {
   intel as intelRouter, eventsRouter, mailboxesRouter,
@@ -85,6 +86,10 @@ const ADMIN_ONLY_MODULES = [
   "/quotations",
   "/invoices",
   "/company-settings",   // branding + bank details printed on every document
+  // Per-client revenue, the cost base and the margin between them — the same
+  // class of data as /finance, and the concentration figures are arguably more
+  // sensitive than either side on its own.
+  "/economics",
 ] as const;
 
 for (const mod of ADMIN_ONLY_MODULES) {
@@ -120,6 +125,7 @@ api.route("/worklist",      worklistRouter);
 api.route("/quotations",       quotationsRouter);
 api.route("/invoices",         invoicesRouter);
 api.route("/company-settings", companySettingsRouter);
+api.route("/economics",        economicsRouter);
 
 // v2 Outbound Machine — automation ingest (API-key auth; for n8n)
 api.route("/intel",      intelRouter);
