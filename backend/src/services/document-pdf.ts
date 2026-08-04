@@ -16,7 +16,7 @@
  * repeat the table header) obvious.
  */
 import PDFDocument from "pdfkit";
-import { SEEKERS_LOGO_PNG } from "./brand-logo";
+import { SEEKERS_LOGO_PNG, SEEKERS_LOGO_BOX } from "./brand-logo";
 import type { RenderableDocument } from "./documents";
 
 // A4 in PostScript points.
@@ -36,12 +36,8 @@ const COL_QTY_R    = M + 300;
 const COL_UNIT_R   = M + 396;
 const COL_AMOUNT_R = PAGE_W - M;
 
-/**
- * The white wordmark occupies only part of its 1080×1080 canvas — the rest is
- * transparent padding. Measured alpha bounding box, used to crop by clipping so
- * the artwork itself is untouched.
- */
-const LOGO = { canvas: 1080, x: 273, y: 515, w: 534, h: 50 };
+/** Where the artwork sits inside the transparent canvas — see brand-logo.ts. */
+const LOGO = SEEKERS_LOGO_BOX;
 
 const INK        = "#111827";
 const INK_MUTED  = "#6B7280";

@@ -160,3 +160,16 @@ export const SEEKERS_LOGO_PNG: Buffer = Buffer.from(BASE64, "base64");
 
 /** The same bytes as a data URI, for the HTML share page. */
 export const SEEKERS_LOGO_DATA_URI = `data:image/png;base64,${BASE64}`;
+
+/**
+ * Where the artwork actually sits inside the 1080x1080 canvas.
+ *
+ * The wordmark is a 534x50 strip floating in transparent padding, so drawing
+ * the whole canvas at a sane height makes it about one pixel tall. Every
+ * renderer crops to this box instead — the PDF with a clip window, the HTML
+ * share page with an overflow-hidden wrapper — which leaves the shipped asset
+ * byte-identical to Seeekers_logo_white.png.
+ *
+ * Measured from the alpha channel. Re-measure if the PNG is ever replaced.
+ */
+export const SEEKERS_LOGO_BOX = { canvas: 1080, x: 273, y: 515, w: 534, h: 50 } as const;

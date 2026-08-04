@@ -11,6 +11,7 @@ import { Dialog, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ResponsiveTable, type ResponsiveColumn } from "@/components/ui/responsive-table";
 import { TableSkeleton } from "@/components/ui/skeletons";
+import { QueryError } from "@/components/QueryError";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -79,8 +80,17 @@ export default function Quotations() {
   const confirm = useConfirm();
   const { data: settings }              = useCompanySettings();
   const { data: clients = [] }          = useClients();
-  const { data: quotations = [], isLoading: loadingQuotations } = useQuotations({ search, status });
-  const { data: invoices  = [], isLoading: loadingInvoices }    = useInvoices();
+  // Errors are surfaced, never folded into the empty state. "No quotations
+  // yet." after a 500 or a dropped connection reads as "your documents are
+  // gone", which is a different and much worse sentence than the truth.
+  const {
+    data: quotations = [], isLoading: loadingQuotations,
+    error: quotationsError, refetch: refetchQuotations, isRefetching: refetchingQuotations,
+  } = useQuotations({ search, status });
+  const {
+    data: invoices = [], isLoading: loadingInvoices,
+    error: invoicesError, refetch: refetchInvoices, isRefetching: refetchingInvoices,
+  } = useInvoices();
 
   const createQuotation  = useCreateQuotation();
   const updateQuotation  = useUpdateQuotation();
@@ -289,6 +299,11 @@ export default function Quotations() {
 
           {loadingQuotations ? (
             <TableSkeleton columns={["Number", "Client", "Status", "Total", ""]} rows={5} />
+          ) : quotationsError ? (
+            <QueryError
+              what="your quotations" error={quotationsError}
+              onRetry={refetchQuotations} isRetrying={refetchingQuotations}
+            />
           ) : (
             <ResponsiveTable
               rows={quotations}
@@ -391,6 +406,11 @@ export default function Quotations() {
         <TabsContent value="invoices" className="mt-4 space-y-4">
           {loadingInvoices ? (
             <TableSkeleton columns={["Number", "Client", "Status", "Total", ""]} rows={5} />
+          ) : invoicesError ? (
+            <QueryError
+              what="your invoices" error={invoicesError}
+              onRetry={refetchInvoices} isRetrying={refetchingInvoices}
+            />
           ) : (
             <ResponsiveTable
               rows={invoices}

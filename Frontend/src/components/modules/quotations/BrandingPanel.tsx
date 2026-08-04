@@ -122,11 +122,9 @@ export function BrandingPanel() {
             className="flex h-16 w-44 shrink-0 items-center justify-center rounded-md px-3"
             style={{ backgroundColor: draft.brand_dark }}
           >
-            <img
-              src={logo ?? settings.default_logo}
-              alt="Logo preview"
-              className="max-h-12 max-w-full object-contain"
-            />
+            {logo
+              ? <img src={logo} alt="Logo preview" className="max-h-12 max-w-full object-contain" />
+              : <BundledMarkPreview src={settings.default_logo} />}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <label
@@ -214,6 +212,34 @@ export function BrandingPanel() {
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * The bundled Seekers mark is a 534x50 wordmark floating in a 1080x1080
+ * transparent canvas, so rendering it at a sane height makes the artwork about
+ * one pixel tall. Cropped to its measured alpha bounding box, matching what the
+ * PDF and the share page do (SEEKERS_LOGO_BOX in backend/src/services/brand-logo.ts).
+ *
+ * An uploaded logo is shown as-is: we know nothing about its padding.
+ */
+const MARK = { canvas: 1080, x: 273, y: 515, w: 534, h: 50 };
+
+function BundledMarkPreview({ src }: { src: string }) {
+  const width = 132;
+  const k = width / MARK.w;   // rendered px per source px
+  return (
+    <div
+      className="relative overflow-hidden"
+      style={{ width, height: MARK.h * k }}
+    >
+      <img
+        src={src}
+        alt="Seekers logo preview"
+        className="absolute max-w-none"
+        style={{ width: MARK.canvas * k, left: -MARK.x * k, top: -MARK.y * k }}
+      />
+    </div>
   );
 }
 

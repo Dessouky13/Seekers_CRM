@@ -9,7 +9,7 @@
  * quotation is a document we hand to a third party, so a stray `<script>` in a
  * line-item description must render as text.
  */
-import { SEEKERS_LOGO_DATA_URI } from "./brand-logo";
+import { SEEKERS_LOGO_DATA_URI, SEEKERS_LOGO_BOX } from "./brand-logo";
 import type { RenderableDocument } from "./documents";
 
 export function escapeHtml(value: unknown): string {
@@ -119,14 +119,15 @@ export function renderSharePage(doc: RenderableDocument, pdfUrl: string): string
   .brand { display: flex; flex-wrap: wrap; gap: 18px; justify-content: space-between; align-items: flex-start; }
   .brand img { max-height: 34px; max-width: 200px; width: auto; display: block; }
   /* Bounding-box crop for the bundled wordmark — see usingBundledLogo above.
-     --k is points of rendered size per source pixel; 273/515/534/50 is the
-     measured alpha bounding box inside the 1080x1080 canvas. */
-  .logo-crop { --logo-w: 150px; --k: calc(var(--logo-w) / 534);
+     --k is rendered size per source pixel; the figures come from
+     SEEKERS_LOGO_BOX, so the artwork is described in exactly one place. */
+  .logo-crop { --logo-w: 150px; --k: calc(var(--logo-w) / ${SEEKERS_LOGO_BOX.w});
                position: relative; overflow: hidden;
-               width: var(--logo-w); height: calc(50 * var(--k)); }
+               width: var(--logo-w); height: calc(${SEEKERS_LOGO_BOX.h} * var(--k)); }
   .logo-crop img { position: absolute; max-height: none; max-width: none;
-                   width: calc(1080 * var(--k));
-                   left: calc(-273 * var(--k)); top: calc(-515 * var(--k)); }
+                   width: calc(${SEEKERS_LOGO_BOX.canvas} * var(--k));
+                   left: calc(${-SEEKERS_LOGO_BOX.x} * var(--k));
+                   top: calc(${-SEEKERS_LOGO_BOX.y} * var(--k)); }
   .tagline { color: #a5b4fc; font-size: 12px; margin-top: 10px; }
   .contact { color: #c7d2fe; font-size: 11px; margin-top: 6px; line-height: 1.7; }
   .doctype { text-align: left; }
