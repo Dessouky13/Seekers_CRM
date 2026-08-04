@@ -93,6 +93,38 @@
     @apply border-border;
   }
 
+  /* Tell the browser this app is dark.
+
+     The theme lives entirely on :root (--background is 244 48% 8%) with no
+     `.dark` class ever applied, so nothing informed the BROWSER of that — and
+     native widgets are painted by the platform, not by our CSS. The visible
+     symptom was the lead filter dropdowns: the closed control picked up its
+     Tailwind classes and looked right, then the open <option> menu rendered as
+     the Windows default, white-on-black-text, against a dark page.
+
+     color-scheme is the actual fix rather than a workaround: it switches the
+     whole family of platform-drawn UI to its dark variant in one declaration —
+     the select popup, the scrollbars, date/number spinners, checkbox and radio
+     glyphs, and the focus rings on all of them. Doing it per-element with
+     background-color would have left each of those inconsistent. */
+  :root {
+    color-scheme: dark;
+  }
+
+  /* Belt and braces for the popup itself.
+
+     color-scheme gets the menu dark on Chromium, Firefox and Edge, but how far
+     an <option> honours author styling still varies by platform, and this is a
+     filter people use constantly on the busiest screen in the CRM. Setting the
+     colours explicitly costs two declarations and removes the browser variance.
+     --popover is the right token, not --background: this IS a popover, and it
+     keeps the menu one step lighter than the page so its edge is visible. */
+  select option,
+  select optgroup {
+    background-color: hsl(var(--popover));
+    color: hsl(var(--popover-foreground));
+  }
+
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
