@@ -324,6 +324,32 @@ router.post("/:id/status", authMiddleware, async (c) => {
   return c.json(await present(updated));
 });
 
+// ── POST /quotations/:id/rotate-share ─────────────────────
+// Revoke a share link.
+//
+// A link that has been sent cannot be un-sent — it lives in an inbox, a
+// forwarded thread, a screenshot. Once a quotation goes to the wrong address,
+// or a deal dies and the pricing should stop being readable, the only real
+// remedy is to make the old URL stop working. Minting a new token does exactly
+// that in one write: the previous URL 404s immediately, and anyone who should
+// still have access gets the new link.
+router.post("/:id/rotate-share", authMiddleware, async (c) => {
+  const id = c.req.param("id");
+
+  const [updated] = await db.update(quotations)
+    .set({ shareToken: newShareToken(), updatedAt: new Date() })
+    .where(eq(quotations.id, id))
+    .returning();
+
+  if (!updated) return c.json({ error: "Quotation not found" }, 404);
+
+  return c.json({
+    ok:        true,
+    share_url: shareUrlFor("quotation", updated.shareToken),
+    note:      "The previous link no longer works.",
+  });
+});
+
 // ── POST /quotations/:id/duplicate ────────────────────────
 router.post("/:id/duplicate", authMiddleware, async (c) => {
   const user = c.get("user");

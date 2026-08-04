@@ -13,6 +13,18 @@
 //
 // The token is 256 bits of CSPRNG output, and both handlers 404 on a miss
 // without saying whether the row exists — there is nothing to enumerate.
+//
+// ── Why these routes are still rate limited ───────────────
+// Not to stop token guessing: 256 bits is not brute-forceable, and the limiter
+// would be security theatre if that were the goal. It is here because these are
+// the only unauthenticated routes in the app, they render a PDF on demand, and
+// a shared link ends up in inboxes and group chats outside anyone's control. A
+// link that gets passed around — or scraped — should not be able to spin the
+// VPS's two vCPUs generating the same document thousands of times.
+//
+// ── Revoking ──────────────────────────────────────────────
+// A token cannot be un-sent, so /quotations/:id/rotate-share and the invoice
+// equivalent mint a new one and invalidate the old link in the same write.
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client";
@@ -62,6 +74,38 @@ const PAGE_HEADERS = {
     "script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 } as const;
 
+// ── Rate limiting ─────────────────────────────────────────
+// In-process and per-IP, matching the limiter already used by
+// routes/notifications.ts rather than introducing a second style. One process
+// (ecosystem.config.js sets instances: 1), so a shared map is sufficient; if
+// this ever runs clustered the limit becomes per-worker and should move to
+// Redis, which is already running for BullMQ.
+const shareHits = new Map<string, { count: number; windowStart: number }>();
+const SHARE_LIMIT_PER_MINUTE = 60;
+
+function withinShareLimit(ip: string): boolean {
+  const now = Date.now();
+  const cur = shareHits.get(ip);
+  if (!cur || now - cur.windowStart >= 60_000) {
+    shareHits.set(ip, { count: 1, windowStart: now });
+    // Opportunistic sweep so a long-lived process does not accumulate an entry
+    // per IP forever; cheap because it only runs when a window rolls over.
+    if (shareHits.size > 5_000) {
+      for (const [k, v] of shareHits) if (now - v.windowStart >= 60_000) shareHits.delete(k);
+    }
+    return true;
+  }
+  if (cur.count >= SHARE_LIMIT_PER_MINUTE) return false;
+  cur.count += 1;
+  return true;
+}
+
+/** Client IP behind nginx, which sets X-Forwarded-For (see nginx/seekersai.conf). */
+function clientIp(c: { req: { header: (n: string) => string | undefined } }): string {
+  const fwd = c.req.header("x-forwarded-for");
+  return (fwd ? fwd.split(",")[0] : undefined)?.trim() || c.req.header("x-real-ip") || "unknown";
+}
+
 async function loadQuotation(token: string): Promise<RenderableDocument | null> {
   const [row] = await db.select().from(quotations).where(eq(quotations.shareToken, token)).limit(1);
   if (!row) return null;
@@ -99,6 +143,15 @@ function pdfResponse(pdf: Buffer, name: string) {
 // ── Quotations ────────────────────────────────────────────
 export const publicQuotations = new Hono<AppEnv>();
 
+// Applied as middleware rather than inside each handler, so a route added here
+// later cannot silently ship unlimited.
+publicQuotations.use("*", async (c, next) => {
+  if (!withinShareLimit(clientIp(c))) {
+    return c.text("Too many requests. Try again in a minute.", 429, { "Retry-After": "60" });
+  }
+  await next();
+});
+
 publicQuotations.get("/:token", async (c) => {
   const doc = await loadQuotation(c.req.param("token"));
   if (!doc) return htmlNotFound();
@@ -116,6 +169,13 @@ publicQuotations.get("/:token/pdf", async (c) => {
 
 // ── Invoices ──────────────────────────────────────────────
 export const publicInvoices = new Hono<AppEnv>();
+
+publicInvoices.use("*", async (c, next) => {
+  if (!withinShareLimit(clientIp(c))) {
+    return c.text("Too many requests. Try again in a minute.", 429, { "Retry-After": "60" });
+  }
+  await next();
+});
 
 publicInvoices.get("/:token", async (c) => {
   const doc = await loadInvoice(c.req.param("token"));

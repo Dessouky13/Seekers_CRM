@@ -91,7 +91,26 @@ export async function applyInvoiceStatus(
     }
 
     if (action.kind === "remove") {
-      await tx.delete(transactions).where(eq(transactions.id, action.transactionId));
+      // Cancel the income, do not delete it.
+      //
+      // Un-paying an invoice used to hard-delete the transaction row, which
+      // erased the fact that the money had ever been recorded — no trace of who
+      // marked it paid, when, or that it was reversed. For a financial record
+      // that is the wrong default: an accountant reconciling a month needs to
+      // see the correction, not a silent gap.
+      //
+      // Every P&L query in finance.ts filters on `status = 'completed'`
+      // (finance.ts:293, :328, :440, :452, :463), so flipping to 'cancelled'
+      // removes it from reporting exactly as a delete did, while keeping the
+      // audit trail. The note records why it stopped counting.
+      await tx
+        .update(transactions)
+        .set({
+          status:    "cancelled",
+          notes:     sql`COALESCE(${transactions.notes}, '') || ${` — reversed: invoice ${current.number} marked unpaid on ${cairoToday()}`}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(transactions.id, action.transactionId));
       transactionId = null;
     }
 

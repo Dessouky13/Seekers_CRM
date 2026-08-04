@@ -411,6 +411,27 @@ router.post("/:id/next", authMiddleware, async (c) => {
   return c.json(await present(created), 201);
 });
 
+// ── POST /invoices/:id/rotate-share ───────────────────────
+// Revoke a share link. See the equivalent on quotations for the reasoning; it
+// matters slightly more here, because an invoice carries payment terms and the
+// amount owed.
+router.post("/:id/rotate-share", authMiddleware, async (c) => {
+  const id = c.req.param("id");
+
+  const [updated] = await db.update(invoices)
+    .set({ shareToken: newShareToken(), updatedAt: new Date() })
+    .where(eq(invoices.id, id))
+    .returning();
+
+  if (!updated) return c.json({ error: "Invoice not found" }, 404);
+
+  return c.json({
+    ok:        true,
+    share_url: shareUrlFor("invoice", updated.shareToken),
+    note:      "The previous link no longer works.",
+  });
+});
+
 // ── POST /invoices/:id/duplicate ──────────────────────────
 router.post("/:id/duplicate", authMiddleware, async (c) => {
   const user = c.get("user");
