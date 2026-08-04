@@ -45,7 +45,7 @@ In n8n, go to **Credentials → New**.
 | Credential Type | **Header Auth** |
 | Name | `Seekers CRM API Key` *(exact name matters — workflow looks it up by name)* |
 | Header Name | `X-API-Key` |
-| Header Value | `<your AUTOMATION_API_KEY>` (e.g. `1e45849503f7445ab294ab5147cdec9d60a196d313719f7ce9794e53cd2dede7`) |
+| Header Value | `<your AUTOMATION_API_KEY>` — copy it from the IngestDocs tab in the app. Never paste it into a file under `Frontend/public/`. |
 
 ### Credential B: Outreach Email IMAP
 
