@@ -20,6 +20,7 @@ import Login from "./pages/Login";
 // so opening Today downloaded Finance, the KB and every chart library with it.
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Finance   = lazy(() => import("./pages/Finance"));
+const Economics = lazy(() => import("./pages/Economics"));
 const Tasks     = lazy(() => import("./pages/Tasks"));
 const CRM       = lazy(() => import("./pages/CRM"));
 const Clients   = lazy(() => import("./pages/Clients"));
@@ -64,6 +65,7 @@ function AppRoutes() {
           <Route path="/"          element={<Today />} />
           <Route path="/dashboard" element={<AdminOnly><Dashboard /></AdminOnly>} />
           <Route path="/finance"  element={<AdminOnly><Finance /></AdminOnly>} />
+          <Route path="/economics" element={<AdminOnly><Economics /></AdminOnly>} />
           <Route path="/tasks"    element={<Tasks />} />
           <Route path="/clients"  element={<AdminOnly><Clients /></AdminOnly>} />
           <Route path="/crm"      element={<CRM />} />
