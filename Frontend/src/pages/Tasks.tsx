@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { KanbanBoard } from "@/components/modules/KanbanBoard";
+import { TaskTemplatesDialog } from "@/components/modules/tasks/TaskTemplatesDialog";
 import { toast } from "sonner";
 import {
   useTasks, useProjects, useUsers, useCreateTask, useMoveTask, useUpdateTask,
@@ -290,6 +291,9 @@ export default function Tasks() {
               <List className="h-4 w-4" />
             </button>
           </div>
+
+          {/* Saved checklists — apply one instead of retyping it. */}
+          <TaskTemplatesDialog />
 
           {/* New Project */}
           <Dialog open={projOpen} onOpenChange={setProjOpen}>
