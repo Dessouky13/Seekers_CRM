@@ -166,9 +166,18 @@ export function LeadTable({
                     checked && "bg-primary/5",
                   )}
                 >
+                  {/* The cell stops the click reaching the row (which opens the
+                      detail sheet) and NOTHING ELSE. It used to also call
+                      toggleOne, while the Checkbox below called it again via
+                      onCheckedChange — so one click ran the toggle twice, adding
+                      the id and immediately removing it. Net effect: individual
+                      selection did nothing at all, while Select All worked
+                      because toggleAll is only wired once. Radix fires
+                      onCheckedChange for clicks AND for keyboard Space, so the
+                      Checkbox is the correct single owner of the toggle. */}
                   <td
                     className="px-3 py-2.5 align-middle"
-                    onClick={(e) => { e.stopPropagation(); toggleOne(l.id); }}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     <Checkbox checked={checked} onCheckedChange={() => toggleOne(l.id)} aria-label={`Select ${l.name}`} />
                   </td>
