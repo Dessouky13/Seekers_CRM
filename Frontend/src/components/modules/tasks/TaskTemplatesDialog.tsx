@@ -193,7 +193,7 @@ export function TaskTemplatesDialog() {
               <Label htmlFor="tpl-name">Template name</Label>
               <Input
                 id="tpl-name" value={name} onChange={(e) => setName(e.target.value)}
-                required autoFocus className="mt-1" placeholder="Client onboarding"
+                required autoFocus className="mt-1 h-11" placeholder="Client onboarding"
               />
             </div>
 
@@ -207,7 +207,9 @@ export function TaskTemplatesDialog() {
                     value={row.title}
                     onChange={(e) => setRow(idx, { title: e.target.value })}
                     placeholder={idx === 0 ? "Kickoff call" : "Next step"}
-                    className="flex-1"
+                    // h-11 rather than the base h-10: these rows are the one
+                    // place in the app you tap a dozen inputs in a row.
+                    className="h-11 flex-1"
                   />
                   <div className="flex items-center gap-2">
                     <select
@@ -225,7 +227,7 @@ export function TaskTemplatesDialog() {
                         type="number" inputMode="numeric" value={row.day_offset}
                         onChange={(e) => setRow(idx, { day_offset: e.target.value })}
                         aria-label="Days after start"
-                        className="w-16 text-center"
+                        className="h-11 w-16 text-center"
                       />
                       <span className="text-xs text-muted-foreground">d</span>
                     </div>

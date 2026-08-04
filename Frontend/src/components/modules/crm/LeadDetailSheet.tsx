@@ -303,7 +303,13 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
                 className="w-full gap-1.5"
                 onClick={() => setTaskOpen(true)}
               >
-                <Plus className="h-3.5 w-3.5" /> Create follow-up task
+                {/* Renamed away from "Create follow-up task": with a real
+                    Follow-up date control now a few rows above, two things
+                    called "follow-up" that behave differently is a coin toss.
+                    This one makes a task on the board — use it for work the
+                    lead generates ("write their proposal"), not for "remind
+                    me to chase them", which is the date field's job. */}
+                <Plus className="h-3.5 w-3.5" /> Create a task for this lead
               </Button>
 
               <div>
