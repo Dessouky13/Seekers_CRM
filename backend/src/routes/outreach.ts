@@ -27,7 +27,7 @@ import { checkDomainAuth } from "../services/domain-auth";
 import { effectiveDailyCap, slotsRemainingToday, type WarmupStage } from "../services/sending-policy";
 import { configuredSenderAddress, loadSendingMailbox } from "../services/mailbox";
 import { phoneFields } from "../services/phone";
-import { cairoToday } from "../utils/dates";
+import { cairoToday, cairoDaysAgo } from "../utils/dates";
 import {
   fillNameCompany, pairKey, emailKey, planLeadImport, type ImportRow,
 } from "../services/lead-import";
@@ -970,7 +970,10 @@ outreach.get("/analytics", jwtOrApiKey, adminOrApiKey, async (c) => {
   // ── EXTRA: by_niche, by_source, by_step, pipeline + stale leads ─────
   // Built with parallel aggregate queries merged in JS (same pattern as above).
   const STALE_THRESHOLD_DAYS = 7;
-  const staleCutoffStr = new Date(Date.now() - STALE_THRESHOLD_DAYS * 86400_000).toISOString().slice(0, 10);
+  // Cairo, not UTC. This is compared against `leads.last_activity`, a plain
+  // `date` column written in Cairo terms, so a UTC cutoff moved the staleness
+  // boundary by 2-3 hours and disagreed with every other stale check in the app.
+  const staleCutoffStr = cairoDaysAgo(STALE_THRESHOLD_DAYS);
 
   const [
     leadsByNiche,      // category → { leads_total, pipeline_value }
