@@ -37,7 +37,7 @@ export function Topbar() {
   // opened a dropdown that could not find a lead.
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-background/80 backdrop-blur-sm px-4">
-      <SidebarTrigger className="text-muted-foreground hover:text-foreground">
+      <SidebarTrigger className="min-h-11 min-w-11 text-muted-foreground hover:text-foreground">
         <Menu className="h-4 w-4" />
       </SidebarTrigger>
 
@@ -70,7 +70,7 @@ export function Topbar() {
         {/* Notifications bell */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"} className="relative h-8 w-8 text-muted-foreground hover:text-foreground">
+            <Button variant="ghost" size="icon" aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"} className="relative h-8 w-8 min-h-11 min-w-11 text-muted-foreground hover:text-foreground">
               <Bell className="h-4 w-4" />
               {unreadCount > 0 && (
                 <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-primary" />

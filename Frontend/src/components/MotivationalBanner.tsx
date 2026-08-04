@@ -40,10 +40,14 @@ export function MotivationalBanner() {
   }, [visible]);
 
   useEffect(() => {
-    // Re-show every 30 seconds with a new message
+    // Re-show every 30 seconds with a new message — but never un-dismiss.
+    //
+    // This used to call setDismissed(false) on every cycle, so the X had no
+    // lasting effect: close it and it was back 30 seconds later, forever. That
+    // is a WCAG 2.2.2 failure, and on a 375px screen it mattered more than it
+    // sounds — see the positioning note below.
     const cycle = setInterval(() => {
       setMsgIdx((i) => (i + 1) % MESSAGES.length);
-      setDismissed(false);
       setVisible(true);
     }, 30_000);
     return () => clearInterval(cycle);
@@ -51,10 +55,23 @@ export function MotivationalBanner() {
 
   const show = visible && !dismissed;
 
+  // Unmount rather than fade to opacity-0.
+  //
+  // The old version stayed mounted permanently, so its dismiss button sat in the
+  // tab order and its text in the accessibility tree on every page, invisible but
+  // reachable. Returning null is also what makes the dismissal honest: there is
+  // nothing left to re-appear.
+  if (dismissed) return null;
+
   return (
     <div
       className={cn(
-        "fixed top-4 right-4 z-50 max-w-xs transition-all duration-500",
+        // top-14 clears the Topbar (h-14). At `top-4 right-4` with max-w-xs this
+        // spanned x=39..359 of a 375px viewport — the full width — sitting over
+        // the hamburger, search, notification bell and user menu at z-50 against
+        // the Topbar's z-30. For 6 seconds in every 30, the primary navigation
+        // was covered by an inspirational quote that could not be closed.
+        "fixed right-4 top-[calc(3.5rem+0.5rem)] z-20 max-w-xs transition-all duration-500",
         show ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 -translate-y-2 pointer-events-none",
       )}
     >
@@ -69,7 +86,9 @@ export function MotivationalBanner() {
           onClick={() => setDismissed(true)}
           type="button"
           aria-label="Dismiss message"
-          className="absolute top-2 right-2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+          // 20x20 before — under half the 44px minimum, on the one control the
+          // user most wants to hit.
+          className="absolute right-1 top-1 grid h-11 w-11 place-items-center text-muted-foreground transition-colors hover:text-foreground"
         >
           <X className="h-3 w-3" />
         </button>
