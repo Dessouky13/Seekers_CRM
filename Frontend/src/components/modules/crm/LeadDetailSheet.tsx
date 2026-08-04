@@ -29,6 +29,7 @@ import {
 import { useUsers, useCreateTask } from "@/hooks/useTasks";
 import { useCreateClient } from "@/hooks/useClients";
 import { LEAD_STAGES, LEAD_SOURCES, LEAD_CATEGORIES, activityIcons, fmt } from "./constants";
+import { StrikePanel } from "./StrikePanel";
 
 export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; onClose: () => void }) {
   const { data: lead, isLoading } = useLeadDetail(leadId);
@@ -311,6 +312,13 @@ export function LeadDetailSheet({ leadId, onClose }: { leadId: string | null; on
                     me to chase them", which is the date field's job. */}
                 <Plus className="h-3.5 w-3.5" /> Create a task for this lead
               </Button>
+
+              {/* Manual contact strikes. Above the timeline because recording an
+                  attempt is a thing you DO, and the timeline is a thing you
+                  read — and on a phone the sheet is long. */}
+              <div className="border-t border-border pt-4">
+                <StrikePanel lead={lead} />
+              </div>
 
               <div>
                 <div className="flex items-center justify-between mb-3">

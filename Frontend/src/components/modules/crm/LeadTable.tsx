@@ -7,13 +7,17 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { LEAD_STAGES, CATEGORY_CHIP, SOURCE_CHIP, fmt } from "./constants";
+import { StrikeDots } from "./StrikeDots";
 import type { ApiLead } from "@/lib/types";
 
 const TABLE_COLUMNS = [
-  { label: "Name",        cls: "w-[20%]" },
-  { label: "Company",     cls: "w-[16%]" },
-  { label: "Stage",       cls: "w-[13%]" },
-  { label: "Niche",       cls: "w-[11%]" },
+  { label: "Name",        cls: "w-[18%]" },
+  { label: "Company",     cls: "w-[15%]" },
+  { label: "Stage",       cls: "w-[12%]" },
+  { label: "Niche",       cls: "w-[10%]" },
+  // Manual contact attempts, as three dots. Narrow on purpose: it is a glance
+  // column, and the number itself is on the lead's own sheet.
+  { label: "Strikes",     cls: "w-[7%]" },
   { label: "Deal Value",  cls: "w-[10%] text-right" },
   { label: "Source",      cls: "w-[8%]" },
   { label: "Last Activity", cls: "w-[10%]" },
@@ -96,6 +100,11 @@ export function LeadTable({
                     <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", CATEGORY_CHIP)}>
                       {l.category}
                     </span>
+                  )}
+                  {/* Only shown once there IS a strike: three empty circles on
+                      every one of 200 cards is noise, not information. */}
+                  {(l.strikeCount ?? 0) > 0 && (
+                    <StrikeDots count={l.strikeCount ?? 0} limit={l.strikeLimit ?? 3} />
                   )}
                   <span className="ml-auto text-sm font-semibold tabular-nums text-foreground">
                     {fmt(l.dealValue)}
@@ -183,6 +192,9 @@ export function LeadTable({
                       ? <span className={cn("inline-block text-[10px] font-medium px-1.5 py-0.5 rounded", CATEGORY_CHIP)}>{l.category}</span>
                       : <span className="text-muted-foreground/50">—</span>}
                   </td>
+                  <td className="px-3 py-2.5">
+                    <StrikeDots count={l.strikeCount ?? 0} limit={l.strikeLimit ?? 3} />
+                  </td>
                   <td className="px-3 py-2.5 tabular-nums text-foreground font-medium text-right">{fmt(l.dealValue)}</td>
                   <td className="px-3 py-2.5">
                     {l.source
@@ -236,6 +248,7 @@ export function LeadTableSkeleton({ rows = 8 }: { rows?: number }) {
                 <td className="px-3 py-2.5"><Skeleton className="h-3.5 w-24" /></td>
                 <td className="px-3 py-2.5"><Skeleton className="h-[18px] w-20 rounded" /></td>
                 <td className="px-3 py-2.5"><Skeleton className="h-[17px] w-16 rounded" /></td>
+                <td className="px-3 py-2.5"><Skeleton className="h-2 w-12 rounded-full" /></td>
                 <td className="px-3 py-2.5"><Skeleton className="h-3.5 w-16 ml-auto" /></td>
                 <td className="px-3 py-2.5"><Skeleton className="h-[17px] w-14 rounded" /></td>
                 <td className="px-3 py-2.5"><Skeleton className="h-3.5 w-20" /></td>

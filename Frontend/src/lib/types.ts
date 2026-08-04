@@ -130,6 +130,14 @@ export interface ApiLead {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  // ── Manual contact strikes ──
+  // Derived server-side (COUNT of lead_strikes rows), not a stored counter, so
+  // the number and the history can never disagree. Present on every lead in
+  // GET /crm/leads so the dot indicator draws without a per-lead fetch.
+  strikeCount?: number;
+  strikeLimit?: number;
+  /** Set when the strike limit archived this lead. null = not archived. */
+  archivedAt?:  string | null;
   // ── v2 lead intelligence ──
   // GET /crm/leads selects the whole leads row, so these have been on the wire
   // since the outbound-machine work landed; the type just never caught up.
@@ -142,8 +150,37 @@ export interface ApiLead {
   signals?:         Record<string, unknown> | null;
 }
 
+/** One recorded manual contact attempt. See backend migration 0020. */
+export interface ApiLeadStrike {
+  id:        string;
+  leadId:    string;
+  channel:   StrikeChannel | null;
+  note:      string | null;
+  /** The Cairo calendar day the contact belongs to, YYYY-MM-DD. */
+  date:      string;
+  createdBy: string | null;
+  createdAt: string;
+  /** The person who recorded it, resolved server-side. */
+  by_name:   string | null;
+}
+
+export type StrikeChannel = "whatsapp" | "call" | "email" | "meeting" | "other";
+
+/** What the third strike does to a lead. Configured in Settings. */
+export type StrikeLimitAction = "close_lost" | "archive";
+
 export interface ApiLeadDetail extends ApiLead {
   activities: ApiLeadActivity[];
+  /** Newest first. The count is `strikes.length` — there is no counter column. */
+  strikes:            ApiLeadStrike[];
+  strikeCount:        number;
+  strikeLimit:        number;
+  /**
+   * Travels with the lead rather than being read from /company-settings, which
+   * is admin-gated as a module — a member still needs to be told what the next
+   * strike will do.
+   */
+  strikeLimitAction:  StrikeLimitAction;
 }
 
 export interface ApiGoal {
@@ -286,6 +323,8 @@ export interface ApiCompanySettings {
   quotationFooter:     string | null;
   invoiceFooter:       string | null;
   bankDetails:         string | null;
+  /** What the third manual-contact strike does to a lead. */
+  strikeLimitAction:   StrikeLimitAction;
   updatedAt:           string;
   default_logo:        string;
 }

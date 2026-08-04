@@ -11,6 +11,7 @@ export function LeadFilterBar({
   stageFilter, onStageFilterChange,
   catFilter, onCatFilterChange,
   reachability, onReachabilityChange,
+  archivedFilter, onArchivedFilterChange,
   assigneeFilter, onAssigneeFilterChange, assignees,
   categories, onReset, resultCount,
 }: {
@@ -22,6 +23,13 @@ export function LeadFilterBar({
   onCatFilterChange:      (value: string) => void;
   reachability:           string;
   onReachabilityChange:   (value: string) => void;
+  /**
+   * "" = live leads (the server hides archived by default), "only" = the
+   * archive. This is the ONLY route back to a lead the strike limit archived, so
+   * it is not merely a convenience filter.
+   */
+  archivedFilter:         string;
+  onArchivedFilterChange: (value: string) => void;
   /** Empty string = All Leads. Otherwise a profile id, or "unassigned". */
   assigneeFilter:         string;
   onAssigneeFilterChange: (value: string) => void;
@@ -32,7 +40,8 @@ export function LeadFilterBar({
   resultCount:            number;
 }) {
   const activeFilterCount =
-    (catFilter ? 1 : 0) + (stageFilter ? 1 : 0) + (reachability ? 1 : 0) + (assigneeFilter ? 1 : 0);
+    (catFilter ? 1 : 0) + (stageFilter ? 1 : 0) + (reachability ? 1 : 0)
+    + (assigneeFilter ? 1 : 0) + (archivedFilter ? 1 : 0);
 
   const assigneeLabel =
     assigneeFilter === "unassigned"
@@ -129,6 +138,17 @@ export function LeadFilterBar({
           <option value="reachable">Reachable</option>
           <option value="unreachable">Unreachable</option>
         </select>
+        {/* Archived leads are hidden server-side by default. Without this select
+            a lead the strike limit archived would be findable only by its id. */}
+        <select
+          value={archivedFilter}
+          onChange={(e) => onArchivedFilterChange(e.target.value)}
+          aria-label="Show live or archived leads"
+          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+        >
+          <option value="">Live leads</option>
+          <option value="only">Archived only</option>
+        </select>
       </div>
 
       {/* Active filter pills */}
@@ -149,6 +169,9 @@ export function LeadFilterBar({
       )}
       {assigneeFilter && (
         <FilterPill label={`Assignee: ${assigneeLabel}`} onRemove={() => onAssigneeFilterChange("")} />
+      )}
+      {archivedFilter === "only" && (
+        <FilterPill label="Archived only" onRemove={() => onArchivedFilterChange("")} />
       )}
 
       {(search || activeFilterCount > 0) && (

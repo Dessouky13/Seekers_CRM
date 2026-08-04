@@ -5,6 +5,7 @@ import { memo } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { CATEGORY_CHIP, SOURCE_CHIP, fmt } from "./constants";
+import { StrikeDots } from "./StrikeDots";
 import type { ApiLead } from "@/lib/types";
 
 // memo: the board renders up to 25 of these per column, and a keystroke in the
@@ -45,6 +46,11 @@ export const LeadCard = memo(function LeadCard({ lead, onSelect }: { lead: ApiLe
       <div className="flex items-center justify-between pt-1 border-t border-border/40">
         <span className="text-xs font-semibold text-foreground tabular-nums">{fmt(lead.dealValue)}</span>
         <div className="flex items-center gap-1.5">
+          {/* Only once there IS a strike. Three empty circles on every card in a
+              seven-column board is decoration, not information. */}
+          {(lead.strikeCount ?? 0) > 0 && (
+            <StrikeDots count={lead.strikeCount ?? 0} limit={lead.strikeLimit ?? 3} />
+          )}
           {isStale && isActive && (
             <span className="text-[10px] text-destructive font-semibold" title="No activity in 2+ days">⚠</span>
           )}

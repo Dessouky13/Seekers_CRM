@@ -24,6 +24,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { useCurrentUser, useCurrentProfile } from "@/hooks/useAuth";
 import { BrandingPanel } from "@/components/modules/quotations/BrandingPanel";
+import { StrikePolicyPanel } from "@/components/modules/crm/StrikePolicyPanel";
 import { cn } from "@/lib/utils";
 import type { ApiUser } from "@/lib/types";
 import { QueryError } from "@/components/QueryError";
@@ -135,6 +136,9 @@ export default function Settings() {
 
       {/* Branding on every quotation / invoice PDF */}
       {isAdmin && <BrandingPanel />}
+
+      {/* What the third manual-contact strike does to a lead */}
+      {isAdmin && <StrikePolicyPanel />}
 
       {/* Outbound Webhooks */}
       {isAdmin && <WebhooksPanel />}
