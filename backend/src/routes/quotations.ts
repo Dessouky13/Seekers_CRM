@@ -54,11 +54,9 @@ function itemRows(
  * on their behalf is worse.
  */
 function retainerTermError(monthlyRetainer: string, retainerMonths: number): string | null {
-  if (Number(monthlyRetainer) > 0 && retainerMonths < 1) {
-    return "A monthly retainer needs a term of at least 1 month";
-  }
-  if (Number(monthlyRetainer) === 0 && retainerMonths > 0) return null;   // harmless
-  return null;
+  return Number(monthlyRetainer) > 0 && retainerMonths < 1
+    ? "A monthly retainer needs a term of at least 1 month"
+    : null;
 }
 
 /** The shape every quotation endpoint returns: the row + its items + its money. */
