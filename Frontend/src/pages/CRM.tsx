@@ -11,11 +11,14 @@ import { LeadTable } from "@/components/modules/crm/LeadTable";
 import { LeadDetailSheet } from "@/components/modules/crm/LeadDetailSheet";
 import { BulkActionBar } from "@/components/modules/crm/BulkActionBar";
 import { BulkDeleteDialog } from "@/components/modules/crm/BulkDeleteDialog";
+import { BulkEditDialog } from "@/components/modules/crm/BulkEditDialog";
+import { BulkCommentDialog } from "@/components/modules/crm/BulkCommentDialog";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import {
   useLeads, useCreateLead, useUpdateLead, useLeadCategories,
-  usePipelineSummary, useBulkDeleteLeads,
+  usePipelineSummary, useBulkDeleteLeads, useBulkUpdateLeads, useBulkCommentLeads,
+  type BulkLeadPatch,
 } from "@/hooks/useCRM";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useUsers } from "@/hooks/useTasks";
@@ -53,6 +56,10 @@ export default function CRM() {
   const [catFilter,    setCatFilter]    = useState("");
   const [stageFilter,  setStageFilter]  = useState("");
   const [reachability, setReachability] = useState("");
+  // "" = live leads only (archived hidden, which is the server default),
+  // "only" = the archive. Archiving is what the strike limit can do to a lead,
+  // and without a way to list them an archived lead would be unreachable.
+  const [archivedFilter, setArchivedFilter] = useState("");
   // "" = All Leads, "unassigned" = no assignee, otherwise a profile id.
   const [assigneeFilter, setAssigneeFilter] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -90,6 +97,7 @@ export default function CRM() {
     category:     catFilter || undefined,
     stage:        stageFilter || undefined,
     reachability: (reachability as "unreachable" | "reachable" | "") || undefined,
+    archived:     (archivedFilter as "only" | "") || undefined,
     assignee_id:  assigneeFilter || undefined,
     limit:        200,
   });
@@ -165,6 +173,54 @@ export default function CRM() {
     return count;
   };
 
+  // ── Bulk edit ──
+  // Not admin-only: the server scopes it to the caller's own leads, which is
+  // exactly the set a member can already PATCH one at a time. `canReassign`
+  // hides the assignee field for members rather than letting them submit a
+  // change the server will 403.
+  const bulkUpdate = useBulkUpdateLeads();
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+
+  const applyBulkEdit = (patch: BulkLeadPatch) => {
+    bulkUpdate.mutate(
+      { ids: Array.from(selectedIds), patch },
+      {
+        onSuccess: (res) => {
+          setBulkEditOpen(false);
+          clearSelection();
+          toast.success(
+            `Updated ${res.updated} lead${res.updated === 1 ? "" : "s"}` +
+            // A member can tick a lead they do not own only via a stale list, but
+            // reporting the gap beats silently updating fewer rows than asked.
+            (res.skipped > 0 ? ` · ${res.skipped} skipped (not yours, or already gone)` : ""),
+          );
+        },
+        onError: (err) => toast.error(err.message),
+      },
+    );
+  };
+
+  // ── Bulk comment ──
+  const bulkComment = useBulkCommentLeads();
+  const [bulkCommentOpen, setBulkCommentOpen] = useState(false);
+
+  const applyBulkComment = (body: { description: string; type: string; date: string }) => {
+    bulkComment.mutate(
+      { ids: Array.from(selectedIds), ...body },
+      {
+        onSuccess: (res) => {
+          setBulkCommentOpen(false);
+          clearSelection();
+          toast.success(
+            `Comment added to ${res.commented} lead${res.commented === 1 ? "" : "s"}` +
+            (res.skipped > 0 ? ` · ${res.skipped} skipped` : ""),
+          );
+        },
+        onError: (err) => toast.error(err.message),
+      },
+    );
+  };
+
   const handleBulkEnroll = (sequenceId: string) => {
     if (selectedIds.size === 0) return;
     bulkEnroll.mutate(
@@ -220,7 +276,8 @@ export default function CRM() {
   };
 
   const activeFilterCount =
-    (catFilter ? 1 : 0) + (stageFilter ? 1 : 0) + (reachability ? 1 : 0) + (assigneeFilter ? 1 : 0);
+    (catFilter ? 1 : 0) + (stageFilter ? 1 : 0) + (reachability ? 1 : 0)
+    + (assigneeFilter ? 1 : 0) + (archivedFilter ? 1 : 0);
 
   if (isLoading) {
     return <LeadsPageSkeleton view={view} />;
@@ -280,13 +337,15 @@ export default function CRM() {
         onCatFilterChange={setCatFilter}
         reachability={reachability}
         onReachabilityChange={setReachability}
+        archivedFilter={archivedFilter}
+        onArchivedFilterChange={setArchivedFilter}
         assigneeFilter={assigneeFilter}
         onAssigneeFilterChange={setAssigneeFilter}
         assignees={assignees}
         categories={categories}
         onReset={() => {
           setSearch(""); setCatFilter(""); setStageFilter("");
-          setReachability(""); setAssigneeFilter("");
+          setReachability(""); setAssigneeFilter(""); setArchivedFilter("");
         }}
         resultCount={leads.length}
       />
@@ -326,12 +385,35 @@ export default function CRM() {
           isLoadingSequences={sequencesLoading}
           onEnroll={handleBulkEnroll}
           isEnrolling={bulkEnroll.isPending}
+          onEdit={() => setBulkEditOpen(true)}
+          isEditing={bulkUpdate.isPending}
+          onComment={() => setBulkCommentOpen(true)}
+          isCommenting={bulkComment.isPending}
           canDelete={currentUser?.role === "admin"}
           isDeleting={bulkDelete.isPending}
           onDelete={openBulkDelete}
           onClear={clearSelection}
         />
       )}
+
+      <BulkEditDialog
+        open={bulkEditOpen}
+        onOpenChange={setBulkEditOpen}
+        selectedCount={selectedIds.size}
+        users={users}
+        categories={categories}
+        canReassign={currentUser?.role === "admin"}
+        isPending={bulkUpdate.isPending}
+        onApply={applyBulkEdit}
+      />
+
+      <BulkCommentDialog
+        open={bulkCommentOpen}
+        onOpenChange={setBulkCommentOpen}
+        selectedCount={selectedIds.size}
+        isPending={bulkComment.isPending}
+        onSubmit={applyBulkComment}
+      />
 
       <BulkDeleteDialog
         open={bulkDeleteOpen}

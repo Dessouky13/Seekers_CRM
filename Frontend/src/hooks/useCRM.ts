@@ -1,7 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
-import type { ApiLead, ApiLeadDetail } from "@/lib/types";
+import type {
+  ApiLead, ApiLeadDetail, ApiLeadStrike, StrikeChannel, StrikeLimitAction,
+} from "@/lib/types";
 
 /**
  * Every cached query whose answer changes when the set of leads changes.
@@ -64,6 +66,12 @@ export function useLeads(params: {
   search?: string;
   category?: string;
   reachability?: "unreachable" | "reachable";
+  /**
+   * Archived leads are hidden by default server-side. "only" is how the
+   * Archived view reaches them — without it a lead archived by the strike limit
+   * would be findable only by its id.
+   */
+  archived?: "only" | "include";
   limit?: number;
 } = {}) {
   const qs = new URLSearchParams();
@@ -72,6 +80,7 @@ export function useLeads(params: {
   if (params.search)       qs.set("search",        params.search);
   if (params.category)     qs.set("category",      params.category);
   if (params.reachability) qs.set("reachability",  params.reachability);
+  if (params.archived)     qs.set("archived",      params.archived);
   if (params.limit)        qs.set("limit",         String(params.limit));
   const query = qs.toString();
 
@@ -186,6 +195,133 @@ export function useBulkDeleteLeads() {
       if (vars.dryRun) return;               // preview must not disturb the list
       invalidateLeadQueries(qc);
     },
+  });
+}
+
+// ── Bulk actions ──────────────────────────────────────────
+
+export interface BulkUpdateResult {
+  updated:       number;
+  would_update?: number;
+  /** Selected ids that resolved to no row the caller may write. */
+  skipped:       number;
+  /** Which wire fields the server actually applied. */
+  fields:        string[];
+}
+
+/** The fields a bulk edit may change. See BulkLeadPatchInput on the backend. */
+export interface BulkLeadPatch {
+  stage?:       string;
+  assignee_id?: string | null;
+  category?:    string | null;
+  source?:      string | null;
+}
+
+/**
+ * Apply the same field changes to many leads.
+ *
+ * Server-side this is ONE `UPDATE ... WHERE id IN (...)`, which is why the UI
+ * shows a pending state and not a progress bar: there are no intermediate
+ * milestones to report, and a bar that fills on a timer would be an invention.
+ * The whole batch commits or none of it does.
+ */
+export function useBulkUpdateLeads() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, patch, dryRun }: { ids: string[]; patch: BulkLeadPatch; dryRun?: boolean }) =>
+      apiFetch<BulkUpdateResult>("/crm/leads/bulk-update", {
+        method: "POST",
+        body: JSON.stringify({ ids, patch, dry_run: !!dryRun }),
+      }),
+    onSuccess: (_res, vars) => {
+      if (vars.dryRun) return;               // a preview must not disturb the list
+      invalidateLeadQueries(qc);
+    },
+  });
+}
+
+export interface BulkCommentResult {
+  commented: number;
+  skipped:   number;
+}
+
+/**
+ * Add the SAME comment to every selected lead, as one activity per lead.
+ *
+ * Per-lead on purpose: the timeline is where anyone reviewing a lead six months
+ * later looks, and a history that pointed at a batch record kept somewhere else
+ * would be unreadable.
+ */
+export function useBulkCommentLeads() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { ids: string[]; description: string; type?: string; date?: string }) =>
+      apiFetch<BulkCommentResult>("/crm/leads/bulk-comment", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateLeadQueries(qc),
+  });
+}
+
+// ── Manual contact strikes ────────────────────────────────
+
+export interface StrikeResult {
+  strike:        ApiLeadStrike;
+  strike_count:  number;
+  strike_limit:  number;
+  limit_action:  StrikeLimitAction;
+  /** Non-null when this strike hit the limit and the action was applied. */
+  limit_applied: StrikeLimitAction | null;
+  strikes:       ApiLeadStrike[];
+}
+
+/**
+ * Record one manual contact attempt.
+ *
+ * Invalidated through the shared helper because a strike can change the lead's
+ * STAGE (the third one closes or archives it), which moves pipeline totals,
+ * Today's queue and the dashboard KPI — not just this lead's detail.
+ */
+export function useAddLeadStrike() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ leadId, ...body }: {
+      leadId:   string;
+      channel?: StrikeChannel;
+      note?:    string | null;
+      date?:    string;
+    }) =>
+      apiFetch<StrikeResult>(`/crm/leads/${leadId}/strikes`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (_res, { leadId }) => invalidateLeadQueries(qc, leadId),
+  });
+}
+
+/** Undo a strike recorded by mistake. Does not reopen a lead the limit closed. */
+export function useDeleteLeadStrike() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ leadId, strikeId }: { leadId: string; strikeId: string }) =>
+      apiFetch<{ strike_count: number; strike_limit: number }>(
+        `/crm/leads/${leadId}/strikes/${strikeId}`, { method: "DELETE" },
+      ),
+    onSuccess: (_res, { leadId }) => invalidateLeadQueries(qc, leadId),
+  });
+}
+
+/** Restore an archived lead to the list. `false` clears `archived_at`. */
+export function useSetLeadArchived() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, archived }: { id: string; archived: boolean }) =>
+      apiFetch<ApiLead>(`/crm/leads/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ archived }),
+      }),
+    onSuccess: (_res, { id }) => invalidateLeadQueries(qc, id),
   });
 }
 

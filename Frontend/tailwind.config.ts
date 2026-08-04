@@ -107,12 +107,22 @@ export default {
           from: { opacity: "0", transform: "translateX(-12px)" },
           to: { opacity: "1", transform: "translateX(0)" },
         },
+        // Indeterminate progress. Sweeps a short bar across the track without
+        // ever claiming a position — used where the work genuinely has no
+        // measurable progress (see BulkPendingNote.tsx). Percentages are in
+        // `left`, not `translateX`, so the sweep follows the writing direction
+        // and stays correct if the app is ever flipped to RTL.
+        "progress-sweep": {
+          "0%":   { left: "-35%" },
+          "100%": { left: "100%" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "fade-in": "fade-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards",
         "slide-in-left": "slide-in-left 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+        "progress-sweep": "progress-sweep 1.1s ease-in-out infinite",
       },
     },
   },

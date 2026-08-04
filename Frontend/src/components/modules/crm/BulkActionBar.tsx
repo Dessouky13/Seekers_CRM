@@ -1,8 +1,11 @@
 // Floating bulk-action bar shown while rows are selected: selection count,
-// "enroll in sequence" dropdown, admin-only bulk delete, and clear selection.
+// "enroll in sequence" dropdown, edit, comment, admin-only bulk delete, and
+// clear selection.
 
 import { createPortal } from "react-dom";
-import { Send, Trash2, ChevronDown as ChevronDownIcon, Loader2 } from "lucide-react";
+import {
+  Send, Trash2, ChevronDown as ChevronDownIcon, Loader2, Pencil, MessageSquarePlus,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -13,6 +16,7 @@ import type { Sequence } from "@/hooks/useOutreach";
 
 export function BulkActionBar({
   selectedCount, sequences, isLoadingSequences, onEnroll, isEnrolling,
+  onEdit, isEditing, onComment, isCommenting,
   canDelete, isDeleting, onDelete, onClear,
 }: {
   selectedCount:      number;
@@ -20,11 +24,22 @@ export function BulkActionBar({
   isLoadingSequences: boolean;
   onEnroll:           (sequenceId: string) => void;
   isEnrolling:        boolean;
+  /** Opens the bulk-edit dialog. Available to members on their own leads. */
+  onEdit:             () => void;
+  isEditing:          boolean;
+  /** Opens the bulk-comment dialog. */
+  onComment:          () => void;
+  isCommenting:       boolean;
   canDelete:          boolean;
   isDeleting:         boolean;
   onDelete:           () => void;
   onClear:            () => void;
 }) {
+  // Every action mutates the same selection, so one in flight disables the rest.
+  // Without this, tapping Edit while a comment was still posting would fire a
+  // second write against a selection the first one may already have changed.
+  const busy = isEnrolling || isEditing || isCommenting || isDeleting;
+
   // Rendered into document.body, not in place.
   //
   // Three things were wrong on a phone. It lived inside <main>, which carries
@@ -49,7 +64,7 @@ export function BulkActionBar({
           <DropdownMenuTrigger asChild>
             {/* Enabled while sequences load so the menu can show its loading
                 state instead of the misleading "no sequences" message. */}
-            <Button size="sm" className="gap-1.5 h-8" disabled={isEnrolling || (!isLoadingSequences && sequences.length === 0)}>
+            <Button size="sm" className="gap-1.5 h-8 min-h-11 md:min-h-0" disabled={busy || (!isLoadingSequences && sequences.length === 0)}>
               {isEnrolling ? (
                 <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Enrolling…</>
               ) : (
@@ -98,12 +113,38 @@ export function BulkActionBar({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        {/* Edit and Comment are NOT admin-gated: a member can already PATCH and
+            comment on their own leads one at a time, and the server scopes these
+            to exactly the same rows. Delete stays admin-only because it
+            cascades and cannot be undone. */}
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5 h-8 min-h-11 md:min-h-0"
+          disabled={busy}
+          onClick={onEdit}
+        >
+          {isEditing
+            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Editing…</>
+            : <><Pencil className="h-3.5 w-3.5" /> Edit</>}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5 h-8 min-h-11 md:min-h-0"
+          disabled={busy}
+          onClick={onComment}
+        >
+          {isCommenting
+            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Adding…</>
+            : <><MessageSquarePlus className="h-3.5 w-3.5" /> Comment</>}
+        </Button>
         {canDelete && (
           <Button
             size="sm"
             variant="destructive"
-            className="gap-1.5 h-8"
-            disabled={isDeleting}
+            className="gap-1.5 h-8 min-h-11 md:min-h-0"
+            disabled={busy}
             onClick={onDelete}
           >
             {isDeleting
@@ -113,7 +154,7 @@ export function BulkActionBar({
         )}
         <button
           onClick={onClear}
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          className="min-h-11 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground md:min-h-0"
         >
           Clear
         </button>
