@@ -45,7 +45,11 @@ function mockApi() {
     if (path === "/users")                  return Promise.resolve([{ id: "u-1", name: "Dessouky" }]);
     if (path === "/outreach/sequences")     return Promise.resolve([]);
     if (path === "/crm/leads/bulk-update")  return Promise.resolve({ updated: 2, skipped: 0, fields: ["stage"] });
-    if (path === "/crm/leads/bulk-comment") return Promise.resolve({ commented: 2, skipped: 0 });
+    if (path === "/crm/leads/bulk-comment") {
+      return Promise.resolve({
+        commented: 2, skipped: 0, strikes: 0, limit_reached: 0, limit_applied: null,
+      });
+    }
     void init;
     return Promise.resolve([]);
   }) as never);
@@ -123,6 +127,51 @@ describe("CRM bulk actions — the selection reaches the request", () => {
     // Defaults to `note`, not `call`: a comment on fifty leads at once is an
     // observation, and typing it as a call would inflate outreach volume.
     expect(body.type).toBe("note");
+    // And a plain note is NOT a contact attempt, so it strikes nobody. The
+    // third strike closes a lead — a default that could close leads on an
+    // observational note would be a very expensive surprise.
+    expect(body.strike).toBe(false);
+  });
+
+  it("counts a bulk email as a contact attempt on each lead", async () => {
+    // "I emailed these five" is five contact attempts. Before this, a bulk
+    // comment moved last_activity and wrote a timeline row but left every
+    // strike dot empty, so work done in bulk never counted toward the
+    // three-strike policy at all.
+    await selectBothLeads();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Comment$/ }));
+    fireEvent.change(await screen.findByLabelText("Comment"), {
+      target: { value: "Chased about the proposal" },
+    });
+    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "email" } });
+    fireEvent.click(screen.getByRole("button", { name: /Add to 2 leads/ }));
+
+    await waitFor(() => expect(bodyOf("/crm/leads/bulk-comment")).toBeTruthy());
+    const body = bodyOf("/crm/leads/bulk-comment");
+    expect(body.type).toBe("email");
+    expect(body.strike).toBe(true);
+  });
+
+  it("lets the user refuse the strike on a contact type, and keeps that decision", async () => {
+    // The checkbox follows the type until it is touched. After that it stays
+    // where the user put it — flipping the type back and forth must not
+    // silently undo a deliberate "do not strike these".
+    await selectBothLeads();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Comment$/ }));
+    fireEvent.change(await screen.findByLabelText("Comment"), { target: { value: "FYI only" } });
+    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "email" } });
+
+    const strikeBox = screen.getByRole("checkbox", { name: /Count as a contact attempt/ });
+    expect(strikeBox).toBeChecked();
+    fireEvent.click(strikeBox);                                    // user says no
+    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "call" } });
+    expect(strikeBox).not.toBeChecked();                           // and it stays no
+
+    fireEvent.click(screen.getByRole("button", { name: /Add to 2 leads/ }));
+    await waitFor(() => expect(bodyOf("/crm/leads/bulk-comment")).toBeTruthy());
+    expect(bodyOf("/crm/leads/bulk-comment").strike).toBe(false);
   });
 
   it("offers no bulk actions at all with nothing selected, so no empty request is possible", async () => {

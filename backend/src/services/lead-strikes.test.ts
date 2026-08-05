@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   STRIKE_LIMIT, DEFAULT_STRIKE_LIMIT_ACTION, normalizeStrikeLimitAction,
   strikeActivityType, strikeActivity, strikeLimitEffects,
+  strikeChannelForCommentType,
 } from "./lead-strikes";
 
 const NOW = new Date("2026-08-05T21:40:00Z");   // 23:40 in Cairo
@@ -146,5 +147,33 @@ describe("strikeLimitEffects — past the limit", () => {
     // counting for anything.
     expect(strikeLimitEffects({ count: 4, action: "close_lost", now: NOW }).reached).toBe(true);
     expect(strikeLimitEffects({ count: 9, action: "archive", now: NOW }).applied).toBe("archive");
+  });
+});
+
+describe("strikeChannelForCommentType — a bulk comment as a contact attempt", () => {
+  it("maps the three real channels to themselves", () => {
+    expect(strikeChannelForCommentType("email")).toBe("email");
+    expect(strikeChannelForCommentType("call")).toBe("call");
+    expect(strikeChannelForCommentType("meeting")).toBe("meeting");
+  });
+
+  it("does not let a form claim a channel — the lead did that, not us", () => {
+    expect(strikeChannelForCommentType("form")).toBe("other");
+  });
+
+  it("does not let a note claim a channel", () => {
+    expect(strikeChannelForCommentType("note")).toBe("other");
+    expect(strikeChannelForCommentType(undefined)).toBe("other");
+    expect(strikeChannelForCommentType(null)).toBe("other");
+  });
+
+  it("never produces an activity type that asserts a call nobody made", () => {
+    // The composition that matters: whatever a bulk comment claims, the
+    // activity type it ends up writing must still obey the conservative rule
+    // in strikeActivityType. /crm/insights counts call rows as real calls.
+    for (const type of ["form", "note", undefined] as const) {
+      expect(strikeActivityType(strikeChannelForCommentType(type))).toBe("note");
+    }
+    expect(strikeActivityType(strikeChannelForCommentType("call"))).toBe("call");
   });
 });

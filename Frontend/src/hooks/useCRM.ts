@@ -60,6 +60,28 @@ export interface CrmInsights {
   response_rate: { sent: number; replied: number; percentage: number };
 }
 
+/**
+ * One request's worth of leads. Matches the server's own maximum
+ * (routes/crm.ts clamps `limit` to 500), so a page is never silently smaller
+ * than asked for — which is what the "did we reach the end?" test below
+ * depends on.
+ */
+export const LEAD_PAGE_SIZE = 500;
+
+/**
+ * The most leads one view will load. A safety stop, not a product decision:
+ * without it a bad filter could pull an unbounded table into the browser.
+ * At 5,000 the Kanban is already past what anyone scrolls, and the UI says so
+ * (see `leadsTruncated`) rather than quietly showing a subset — quietly
+ * showing a subset is the exact bug this replaced.
+ */
+export const LEAD_FETCH_CEILING = 5_000;
+
+/** True when a lead list stopped at the ceiling and is therefore incomplete. */
+export function leadsTruncated(rows: { length: number } | undefined): boolean {
+  return (rows?.length ?? 0) >= LEAD_FETCH_CEILING;
+}
+
 export function useLeads(params: {
   stage?: string;
   assignee_id?: string;
@@ -72,21 +94,58 @@ export function useLeads(params: {
    * would be findable only by its id.
    */
   archived?: "only" | "include";
+  /**
+   * A hard cap on how many leads to fetch, for a caller that genuinely wants a
+   * handful. Omit it — which is what the CRM page does — to fetch the whole
+   * filtered set by paging.
+   */
   limit?: number;
 } = {}) {
-  const qs = new URLSearchParams();
-  if (params.stage)        qs.set("stage",        params.stage);
-  if (params.assignee_id)  qs.set("assignee_id",   params.assignee_id);
-  if (params.search)       qs.set("search",        params.search);
-  if (params.category)     qs.set("category",      params.category);
-  if (params.reachability) qs.set("reachability",  params.reachability);
-  if (params.archived)     qs.set("archived",      params.archived);
-  if (params.limit)        qs.set("limit",         String(params.limit));
-  const query = qs.toString();
+  const base = new URLSearchParams();
+  if (params.stage)        base.set("stage",        params.stage);
+  if (params.assignee_id)  base.set("assignee_id",   params.assignee_id);
+  if (params.search)       base.set("search",        params.search);
+  if (params.category)     base.set("category",      params.category);
+  if (params.reachability) base.set("reachability",  params.reachability);
+  if (params.archived)     base.set("archived",      params.archived);
 
   return useQuery<ApiLead[]>({
     queryKey: ["leads", params],
-    queryFn:  () => apiFetch(`/crm/leads${query ? `?${query}` : ""}`),
+    /**
+     * Pages until the server runs out, instead of asking for one capped page.
+     *
+     * The board previously requested `limit: 200` against a server that
+     * clamped at 200, so with 619 leads it drew 200 cards and there was no way
+     * — no scroll, no button, no message — to reach the other 419. The stage
+     * headers were separately fixed to count the whole pipeline, which made
+     * the numbers right and the discrepancy MORE visible: a column headed 612
+     * containing 193 cards.
+     *
+     * Paging here rather than in the page component keeps every existing
+     * caller unchanged: this still resolves to a plain ApiLead[], so the
+     * Kanban, the table, the CSV export and the select-all checkbox all
+     * continue to operate on the complete filtered set with no idea it arrived
+     * in pieces. A short page means the end — the server never returns fewer
+     * rows than asked for while more exist.
+     */
+    queryFn: async () => {
+      if (params.limit) {
+        const qs = new URLSearchParams(base);
+        qs.set("limit", String(params.limit));
+        return apiFetch<ApiLead[]>(`/crm/leads?${qs}`);
+      }
+
+      const all: ApiLead[] = [];
+      for (let offset = 0; offset < LEAD_FETCH_CEILING; offset += LEAD_PAGE_SIZE) {
+        const qs = new URLSearchParams(base);
+        qs.set("limit",  String(LEAD_PAGE_SIZE));
+        qs.set("offset", String(offset));
+        const page = await apiFetch<ApiLead[]>(`/crm/leads?${qs}`);
+        all.push(...page);
+        if (page.length < LEAD_PAGE_SIZE) break;
+      }
+      return all;
+    },
   });
 }
 
@@ -243,6 +302,11 @@ export function useBulkUpdateLeads() {
 export interface BulkCommentResult {
   commented: number;
   skipped:   number;
+  /** Contact strikes recorded, when the comment was marked as a contact attempt. */
+  strikes:   number;
+  /** Leads that took their third strike and were closed or archived by it. */
+  limit_reached: number;
+  limit_applied: StrikeLimitAction | null;
 }
 
 /**
@@ -255,7 +319,11 @@ export interface BulkCommentResult {
 export function useBulkCommentLeads() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { ids: string[]; description: string; type?: string; date?: string }) =>
+    mutationFn: (body: {
+      ids: string[]; description: string; type?: string; date?: string;
+      /** Also record one contact strike per lead. */
+      strike?: boolean;
+    }) =>
       apiFetch<BulkCommentResult>("/crm/leads/bulk-comment", {
         method: "POST",
         body: JSON.stringify(body),

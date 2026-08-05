@@ -266,6 +266,22 @@ export const bulkCommentLeadsSchema = z.object({
   description: z.string().trim().min(1, "Write a comment").max(1000),
   // A Cairo calendar day. Defaults server-side to cairoToday() when omitted.
   date:        z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD").optional(),
+  /**
+   * Also record one contact strike per lead.
+   *
+   * "I emailed these five" is a contact attempt on each of them, and until this
+   * existed a bulk comment left every strike dot empty — so work done in bulk
+   * never counted toward the three-strike policy and the dots understated what
+   * the team had actually done.
+   *
+   * Explicit rather than inferred from `type`, and defaulting to false, because
+   * the third strike CLOSES a lead: an API client that has been posting
+   * `type: "email"` comments must not start closing leads because the server
+   * changed its mind about what that meant. The UI ticks the box by default for
+   * a contact type, which is where the "of course that is a contact attempt"
+   * expectation actually belongs.
+   */
+  strike:      z.boolean().optional(),
 });
 
 /** One manual contact attempt. Everything except the lead is optional. */

@@ -26,6 +26,15 @@ import { BulkPendingNote } from "./BulkPendingNote";
  */
 const TYPES = ["note", "call", "email", "meeting", "form"] as const;
 
+/**
+ * The types that describe US reaching out, as opposed to something we merely
+ * observed. Ticking "count as a contact attempt" is offered for any type but
+ * pre-ticked only for these — "I emailed these five" is five attempts, whereas
+ * "all from the Cairo gyms list" is a note about a batch and nobody contacted
+ * anyone.
+ */
+const CONTACT_TYPES = new Set(["call", "email", "meeting"]);
+
 export function BulkCommentDialog({
   open, onOpenChange, selectedCount, isPending, onSubmit,
 }: {
@@ -33,15 +42,32 @@ export function BulkCommentDialog({
   onOpenChange:  (open: boolean) => void;
   selectedCount: number;
   isPending:     boolean;
-  onSubmit:      (body: { description: string; type: string; date: string }) => void;
+  onSubmit:      (body: {
+    description: string; type: string; date: string; strike: boolean;
+  }) => void;
 }) {
   const [description, setDescription] = useState("");
+  const [type,        setType]        = useState<string>("note");
+  // Follows the type until the user overrides it, then stays where they put it
+  // — changing the type back and forth must not silently undo a deliberate
+  // choice about whether leads get struck.
+  const [strike,      setStrike]      = useState(false);
+  const [strikeTouched, setStrikeTouched] = useState(false);
   const trimmed = description.trim();
+
+  const reset = () => {
+    setDescription(""); setType("note"); setStrike(false); setStrikeTouched(false);
+  };
+
+  const onTypeChange = (next: string) => {
+    setType(next);
+    if (!strikeTouched) setStrike(CONTACT_TYPES.has(next));
+  };
 
   return (
     <Dialog
       open={open}
-      onOpenChange={(o) => { onOpenChange(o); if (!o) setDescription(""); }}
+      onOpenChange={(o) => { onOpenChange(o); if (!o) reset(); }}
     >
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -61,11 +87,12 @@ export function BulkCommentDialog({
             const fd = new FormData(e.currentTarget);
             onSubmit({
               description: trimmed,
-              type: fd.get("type") as string,
+              type,
               // cairoToday(), never toISOString().slice(0,10): before 02:00
               // Cairo the UTC day is yesterday, and a comment logged at 00:30
               // would be filed against the previous day.
               date: (fd.get("date") as string) || cairoToday(),
+              strike,
             });
           }}
         >
@@ -92,7 +119,8 @@ export function BulkCommentDialog({
               <select
                 id="bulk-comment-type"
                 name="type"
-                defaultValue="note"
+                value={type}
+                onChange={(e) => onTypeChange(e.target.value)}
                 className="mt-1 min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
                 {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -109,6 +137,26 @@ export function BulkCommentDialog({
               />
             </div>
           </div>
+
+          {/* ── Count it as a contact attempt ──
+              Without this, "I emailed these five" left all five strike dots
+              empty: strikes could only be recorded one lead at a time, so work
+              done in bulk never counted toward the three-strike policy. */}
+          <label className="flex items-start gap-2.5 rounded-md border border-border/60 bg-muted/20 p-3 cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-primary"
+              checked={strike}
+              onChange={(e) => { setStrike(e.target.checked); setStrikeTouched(true); }}
+            />
+            <span className="text-sm">
+              <span className="font-medium">Count as a contact attempt</span>
+              <span className="block text-xs text-muted-foreground">
+                Adds one strike to each lead’s dots. A lead reaching its third
+                strike is closed automatically.
+              </span>
+            </span>
+          </label>
 
           {isPending && <BulkPendingNote count={selectedCount} verb="Adding" />}
 

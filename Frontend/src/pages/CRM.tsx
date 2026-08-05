@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import {
   useLeads, useCreateLead, useUpdateLead, useLeadCategories,
   usePipelineSummary, useBulkDeleteLeads, useBulkUpdateLeads, useBulkCommentLeads,
+  leadsTruncated, LEAD_FETCH_CEILING,
   type BulkLeadPatch,
 } from "@/hooks/useCRM";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
@@ -99,7 +100,8 @@ export default function CRM() {
     reachability: (reachability as "unreachable" | "reachable" | "") || undefined,
     archived:     (archivedFilter as "only" | "") || undefined,
     assignee_id:  assigneeFilter || undefined,
-    limit:        200,
+    // No `limit`. useLeads pages through the whole filtered set; passing one
+    // here is what capped the board at 200 cards while 619 leads existed.
   });
 
   // Pipeline-summary: accurate totals across ALL leads regardless of current filter
@@ -109,15 +111,14 @@ export default function CRM() {
    * True per-stage counts for the Kanban headers — but ONLY when nothing is
    * filtered.
    *
-   * The board's cards come from useLeads() above, which is capped at 200. With
-   * 619 leads the columns summed to exactly 200 (193 New Lead + 7 Contacted),
-   * because each header counted the page rather than the pipeline.
+   * The board's cards come from useLeads() above, which now pages through the
+   * whole filtered set — but the two numbers still cannot be the same query.
    *
-   * /crm/pipeline-summary counts in SQL over the whole table, so it fixes that —
-   * but it applies ONLY role scoping, not this page's search/stage/category/
-   * reachability/archived/assignee filters. Handing those totals to a filtered
-   * board would swap one wrong number for a worse one: search "clinic" and every
-   * header would still read the unfiltered pipeline.
+   * /crm/pipeline-summary counts in SQL over the whole table, and it applies
+   * ONLY role scoping, not this page's search/stage/category/reachability/
+   * archived/assignee filters. Handing those totals to a filtered board would
+   * be wrong in the obvious way: search "clinic" and every header would still
+   * read the unfiltered pipeline.
    *
    * So: undefined whenever any filter is active, which makes LeadKanban fall
    * back to counting the rows it was given — the correct basis for a filtered
@@ -230,7 +231,9 @@ export default function CRM() {
   const bulkComment = useBulkCommentLeads();
   const [bulkCommentOpen, setBulkCommentOpen] = useState(false);
 
-  const applyBulkComment = (body: { description: string; type: string; date: string }) => {
+  const applyBulkComment = (body: {
+    description: string; type: string; date: string; strike: boolean;
+  }) => {
     bulkComment.mutate(
       { ids: Array.from(selectedIds), ...body },
       {
@@ -239,8 +242,18 @@ export default function CRM() {
           clearSelection();
           toast.success(
             `Comment added to ${res.commented} lead${res.commented === 1 ? "" : "s"}` +
-            (res.skipped > 0 ? ` · ${res.skipped} skipped` : ""),
+            (res.skipped > 0 ? ` · ${res.skipped} skipped` : "") +
+            (res.strikes > 0 ? ` · ${res.strikes} strike${res.strikes === 1 ? "" : "s"}` : ""),
           );
+          // Reported separately and not as a success detail: the third strike
+          // CLOSES a lead, and a bulk action that quietly closed some of what
+          // it touched would be indistinguishable from a bug.
+          if (res.limit_reached > 0) {
+            toast.warning(
+              `${res.limit_reached} lead${res.limit_reached === 1 ? "" : "s"} reached the strike ` +
+              `limit and ${res.limit_applied === "archive" ? "were archived" : "were closed lost"}`,
+            );
+          }
         },
         onError: (err) => toast.error(err.message),
       },
@@ -375,6 +388,18 @@ export default function CRM() {
         }}
         resultCount={leads.length}
       />
+
+      {/* ── Truncation notice ─────────────────────────────────
+          Only ever shown at the safety ceiling. The point is that a list which
+          is not the whole list must SAY so — silently showing a subset is the
+          bug this page had for months, when 619 leads rendered as 200 cards
+          with nothing on screen to suggest anything was missing. */}
+      {leadsTruncated(leads) && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          Showing the first {LEAD_FETCH_CEILING.toLocaleString()} leads. Narrow the
+          filters or search to see the rest.
+        </div>
+      )}
 
       {/* ── Content ──────────────────────────────────────── */}
       {view === "kanban" ? (

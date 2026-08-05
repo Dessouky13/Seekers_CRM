@@ -72,6 +72,33 @@ export function strikeActivityType(
   return "note";
 }
 
+/** The `lead_activities.type` values a bulk comment may carry. */
+export type BulkCommentType = "email" | "call" | "meeting" | "form" | "note";
+
+/**
+ * The strike channel implied by a bulk comment's activity type.
+ *
+ * Bulk comment is where the team records "I contacted these five" — and until
+ * this existed, doing so moved `last_activity` and wrote a timeline row but
+ * left the strike dots empty, so five hand-made attempts counted as none and
+ * the three-strike policy never fired for anything done in bulk.
+ *
+ * `form` maps to "other", not to itself: a form submission is something the
+ * LEAD did, so it is not one of our contact attempts, and there is no channel
+ * to claim. `note` likewise — a note records that something happened without
+ * saying how. Both then resolve through strikeActivityType() to a plain
+ * `note` activity, which is the conservative direction this file argues for
+ * everywhere else: never assert a phone call that may not have happened.
+ */
+export function strikeChannelForCommentType(
+  type: BulkCommentType | null | undefined,
+): StrikeChannel {
+  if (type === "email")   return "email";
+  if (type === "call")    return "call";
+  if (type === "meeting") return "meeting";
+  return "other";
+}
+
 const CHANNEL_LABELS: Record<StrikeChannel, string> = {
   whatsapp: "WhatsApp",
   call:     "Call",

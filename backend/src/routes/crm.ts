@@ -18,6 +18,8 @@ import {
 } from "../services/bulk-leads";
 import {
   STRIKE_LIMIT, normalizeStrikeLimitAction, strikeActivity, strikeLimitEffects,
+  strikeChannelForCommentType,
+  type StrikeChannel, type StrikeLimitAction,
 } from "../services/lead-strikes";
 import { getCompanySettings } from "../services/documents";
 import { cairoToday, cairoDaysAgo } from "../utils/dates";
@@ -28,8 +30,17 @@ const crm = new Hono<AppEnv>();
 // GET /crm/leads
 crm.get("/leads", authMiddleware, async (c) => {
   const q = c.req.query() as Record<string, string>;
+  // 500, not 200. The Kanban board draws one card per lead, so the cap was
+  // also the number of leads a human could SEE: with 619 leads the board
+  // showed 200 cards and silently omitted 419 — the headers were fixed to
+  // count the pipeline rather than the page, which made the numbers honest but
+  // did nothing about the missing cards. The client pages through with
+  // `offset` (see Frontend/src/hooks/useCRM.ts), so this is now a page size
+  // rather than a ceiling on what exists.
   const rawLimit = Number(q.limit ?? 50);
-  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 200)) : 50;
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 500)) : 50;
+  const rawOffset = Number(q.offset ?? 0);
+  const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.trunc(rawOffset)) : 0;
   const search = q.search?.trim();
 
   const conditions = [];
@@ -116,8 +127,16 @@ crm.get("/leads", authMiddleware, async (c) => {
     .from(leads)
     .leftJoin(profiles, eq(leads.assigneeId, profiles.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(sql`${leads.updatedAt} DESC`)
-    .limit(limit);
+    // `id` is the tiebreaker, and it is what makes paging correct rather than
+    // merely ordered. `updated_at DESC` alone is not a TOTAL order: a bulk
+    // import writes hundreds of rows within the same transaction and they all
+    // share a timestamp to the microsecond. Postgres may then return tied rows
+    // in a different sequence for each page, so a lead could appear on both
+    // page 1 and page 2 while another appeared on neither — the board would
+    // show duplicates and drop real leads, with nothing to indicate it had.
+    .orderBy(sql`${leads.updatedAt} DESC, ${leads.id} DESC`)
+    .limit(limit)
+    .offset(offset);
 
   return c.json(rows.map(({ lead, assigneeName, strikeCount }) => ({
     ...lead,
@@ -645,6 +664,28 @@ crm.post("/leads/bulk-comment", authMiddleware, async (c) => {
     })))
     .returning({ id: leadActivities.id });
 
+  // ── Optionally, one contact strike each ──
+  //
+  // "I emailed these five" is five contact attempts, and without this the dots
+  // stayed empty for every one of them: strikes were only ever recordable one
+  // lead at a time, so the three-strike policy simply did not apply to work
+  // done in bulk.
+  //
+  // Reuses the same pure decisions as POST /crm/leads/:id/strikes — the count
+  // is derived from the rows after the insert, the limit action comes from
+  // company settings, and reaching the limit does exactly what it does for a
+  // single lead. Nothing about the policy is re-implemented here; only the
+  // batching is different.
+  const strikes = body.strike
+    ? await recordBulkStrikes({
+        leadIds: targets.map((t) => t.id),
+        channel: strikeChannelForCommentType(body.type),
+        note:    body.description,
+        date,
+        userId:  user.id,
+      })
+    : { recorded: 0, limitReached: [] as string[], applied: null as StrikeLimitAction | null };
+
   // Logging activity moves last_activity, exactly as the single-lead endpoint
   // does — otherwise commenting on 50 leads would leave all 50 still flagged as
   // going quiet.
@@ -653,8 +694,116 @@ crm.post("/leads/bulk-comment", authMiddleware, async (c) => {
     .set({ lastActivity: date, updatedAt: new Date() })
     .where(and(...conditions));
 
-  return c.json({ commented: inserted.length, skipped: body.ids.length - inserted.length });
+  return c.json({
+    commented:      inserted.length,
+    skipped:        body.ids.length - inserted.length,
+    strikes:        strikes.recorded,
+    // Reported, never silent. Reaching the third strike CLOSES a lead, and a
+    // bulk action that quietly closed some of the leads it touched would be
+    // indistinguishable from a bug.
+    limit_reached:  strikes.limitReached.length,
+    limit_applied:  strikes.applied,
+  });
 });
+
+interface BulkStrikeResult {
+  recorded:     number;
+  limitReached: string[];
+  applied:      StrikeLimitAction | null;
+}
+
+/**
+ * One strike on each of many leads, with the limit applied per lead.
+ *
+ * Batched into four statements regardless of how many leads are selected — one
+ * insert, one grouped count, one activity insert, one conditional update. The
+ * obvious alternative (call the single-lead path in a loop) is four round trips
+ * per lead, which for a 200-lead selection is 800 queries and a request that
+ * times out halfway through, leaving half the selection struck.
+ */
+async function recordBulkStrikes(input: {
+  leadIds: string[];
+  channel: StrikeChannel;
+  note:    string;
+  date:    string;
+  userId:  string;
+}): Promise<BulkStrikeResult> {
+  if (input.leadIds.length === 0) return { recorded: 0, limitReached: [], applied: null };
+
+  await db.insert(leadStrikes).values(input.leadIds.map((leadId) => ({
+    leadId,
+    channel:   input.channel,
+    note:      input.note.slice(0, 500),
+    date:      input.date,
+    createdBy: input.userId,
+  })));
+
+  // Counted from the rows AFTER the insert, per lead, so a lead that already
+  // had two strikes takes its third here and a lead that had none takes its
+  // first — the same derivation the single-lead endpoint uses, and the reason
+  // there is no counter column to drift.
+  const counts = await db
+    .select({ leadId: leadStrikes.leadId, count: sql<number>`COUNT(*)::int` })
+    .from(leadStrikes)
+    .where(inArray(leadStrikes.leadId, input.leadIds))
+    .groupBy(leadStrikes.leadId);
+
+  const action = normalizeStrikeLimitAction((await getCompanySettings()).strikeLimitAction);
+  const now    = new Date();
+
+  const timeline: {
+    leadId: string; type: "call" | "email" | "meeting" | "note";
+    description: string; date: string; createdBy: string;
+  }[] = [];
+  const limitReached: string[] = [];
+
+  for (const { leadId, count } of counts) {
+    const n = Number(count);
+    // No `note` here, unlike the single-lead endpoint. The comment the user
+    // typed is already its own activity row a few lines above — passing it
+    // again would print the same sentence twice in every lead's timeline. This
+    // row exists for the running count ("Strike 2/3"), which is the one thing
+    // the comment row cannot say and the one thing a reader needs to explain
+    // why a lead closed itself.
+    timeline.push({
+      leadId,
+      ...strikeActivity({ count: n, channel: input.channel }),
+      date:      input.date,
+      createdBy: input.userId,
+    });
+
+    const effects = strikeLimitEffects({ count: n, action, now });
+    if (!effects.reached) continue;
+    limitReached.push(leadId);
+    if (effects.activity) {
+      timeline.push({ leadId, ...effects.activity, date: input.date, createdBy: input.userId });
+    }
+  }
+
+  if (timeline.length > 0) await db.insert(leadActivities).values(timeline);
+
+  // Every lead that reached the limit takes the SAME patch — the action is a
+  // single company-wide setting — so one UPDATE covers them all.
+  if (limitReached.length > 0) {
+    const { patch } = strikeLimitEffects({ count: STRIKE_LIMIT, action, now });
+    await db.update(leads).set({ ...patch, updatedAt: now })
+      .where(inArray(leads.id, limitReached));
+
+    for (const leadId of limitReached) {
+      fireEventAsync("lead.stage_changed", {
+        lead_id:  leadId,
+        to_stage: "closed_lost",
+        reason:   `strike_limit_${action}`,
+      });
+    }
+  }
+
+  return {
+    recorded:     input.leadIds.length,
+    limitReached,
+    applied:      limitReached.length > 0 ? action : null,
+  };
+}
 
 // DELETE /crm/leads/:id — admin only
 crm.delete("/leads/:id", authMiddleware, adminOnly, async (c) => {
