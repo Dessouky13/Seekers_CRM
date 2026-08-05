@@ -12,7 +12,7 @@ import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import {
   outreachSequences, outreachSteps, outreachEnrollments, outreachSends,
-  leads, leadActivities, mailboxes, suppressions,
+  leads, leadActivities, mailboxes, suppressions, events,
 } from "../db/schema";
 import { authMiddleware, adminOnly, isAdmin } from "../middleware/auth";
 import { createMiddleware } from "hono/factory";
@@ -1325,7 +1325,7 @@ outreach.get("/deliverability", authMiddleware, adminOnly, async (c) => {
   const address = mailbox?.address ?? configuredSenderAddress();
   const domain  = address.split("@")[1] ?? "";
 
-  const [auth, sentToday, suppressionRows, failureRows] = await Promise.all([
+  const [auth, sentToday, suppressionRows, failureRows, bounceRows, markedBounced] = await Promise.all([
     domain ? checkDomainAuth(domain) : Promise.resolve([]),
 
     db.select({ n: sql<number>`COUNT(*)::int` })
@@ -1351,7 +1351,60 @@ outreach.get("/deliverability", authMiddleware, adminOnly, async (c) => {
         sql`${outreachSends.sentAt} > NOW() - INTERVAL '30 days'`,
       ))
       .groupBy(outreachSends.failureKind),
+
+    // ── Inbound bounces, grouped by what they permit ──
+    //
+    // The question this answers is the one that could not be answered before:
+    // 109 messages arrived in the inbox, 2 were replies, and nothing recorded
+    // what the other 107 were. Bounce events were written but never summarised,
+    // so a rising bounce rate — the single thing that can actually burn the
+    // sending domain — was invisible unless somebody read the events table by
+    // hand.
+    //
+    // `disposition` is the new field (services/inbox-classify.ts). Events
+    // written before it existed only carry the old `hard` boolean, so they are
+    // folded in via COALESCE rather than being dropped from the totals; a
+    // legacy row that was neither hard nor classified lands in `unknown`,
+    // which is honest about what is actually known.
+    //
+    // `unsuppressed` is the leak indicator: a permanent bounce whose address
+    // was never suppressed is an address the sequencer will mail again.
+    db.execute(sql`
+      SELECT COALESCE(
+               payload->>'disposition',
+               CASE WHEN payload->>'hard' = 'true' THEN 'permanent' ELSE 'unknown' END
+             )                                                            AS disposition,
+             COUNT(*)::int                                                AS n,
+             COUNT(*) FILTER (WHERE lead_id IS NULL)::int                 AS unmatched,
+             COUNT(*) FILTER (WHERE payload->>'suppressed' IS DISTINCT FROM 'true')::int
+                                                                          AS unsuppressed,
+             MAX(created_at)                                              AS latest
+        FROM events
+       WHERE type = 'bounce'
+         AND created_at > NOW() - INTERVAL '90 days'
+       GROUP BY 1`),
+
+    // The other half of the same discrepancy: how many leads actually carry
+    // the bounced flag. A large permanent-bounce count next to zero flagged
+    // leads means the write-back is not reaching the lead rows.
+    db.select({ n: sql<number>`COUNT(*)::int` })
+      .from(leads)
+      .where(eq(leads.emailStatus, "bounced")),
   ]);
+
+  type BounceRow = {
+    disposition: string; n: number; unmatched: number; unsuppressed: number; latest: string | null;
+  };
+  // node-postgres returns { rows }; drizzle's typings for execute() are looser.
+  const bounces = ((bounceRows as unknown as { rows?: BounceRow[] })?.rows ?? []).map((r) => ({
+    disposition:  r.disposition,
+    count:        Number(r.n),
+    /** Bounces whose dead address matched no lead row. */
+    unmatched:    Number(r.unmatched),
+    /** Permanent bounces that never retired their address — these still get mailed. */
+    unsuppressed: Number(r.unsuppressed),
+    latest:       r.latest,
+  }));
 
   const stage = (mailbox?.warmupStage ?? "recovery") as WarmupStage;
   // cleanWeeksFor(mailbox) — NOT a hardcoded 0 — so this panel reports the
@@ -1380,6 +1433,15 @@ outreach.get("/deliverability", authMiddleware, adminOnly, async (c) => {
       count: Number(r.n),
       example: r.latest,
     })),
+    // Inbound bounces over 90 days. `policy` is deliberately its own line and
+    // is NOT a reason to delete leads: it means our mail was rejected for
+    // reputation/SPF/DKIM/DMARC, so the fix is to the domain, not to the list.
+    bounces: {
+      window_days:          90,
+      total:                bounces.reduce((s, b) => s + b.count, 0),
+      by_disposition:       bounces,
+      leads_marked_bounced: Number(markedBounced[0]?.n ?? 0),
+    },
   });
 });
 
