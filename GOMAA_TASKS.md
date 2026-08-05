@@ -182,7 +182,10 @@ Subscribe your n8n webhook URLs in the CRM's **Settings → Webhooks** UI.
 4. ✅ **Done when:** you restore last night's dump into a scratch database and it opens clean.
 
 ### ▶ Step 5 — W4: OSM Lead Sourcing
-1. **Import** `Frontend/public/n8n/seekers-osm-leads.json` into n8n *(ready now)*.
+1. **Import** `seekers-osm-leads.json` into n8n *(ready now)*. Download it from the
+   Outreach → Setup & Ingestion tab in the CRM (signed in), or take it from
+   `backend/src/assets/n8n/` in the repo. It is no longer published at a public
+   URL — that directory once served a live API key to the open internet.
 2. Confirm the `Seekers CRM API Key` credential is attached to the *Ingest into Seekers CRM* node.
 3. Activate, then POST: `{ "area": "Cairo, Egypt", "category": "dentist", "limit": 100 }`
    ⚠️ **Always include the country.** Bare `"Cairo"` resolves to Cairo, **Georgia, USA** —

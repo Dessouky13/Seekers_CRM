@@ -1,9 +1,18 @@
-// Setup & Ingestion tab (admin) — static documentation for the lead-ingest and
+// Setup & Ingestion tab (admin) — documentation for the lead-ingest and
 // reply-detection webhooks, downloadable n8n workflow cards, and the CSV import
-// panel. No queries: everything here is copy plus static asset links.
-import { FileText, Settings } from "lucide-react";
-import { Button } from "@/components/ui/button";
+// panel.
+//
+// The workflow templates used to be static files under `public/n8n/`, which
+// Vercel serves to the whole internet — the same directory that once published
+// a live AUTOMATION_API_KEY at a URL anyone could fetch. They now come from
+// GET /outreach/n8n-workflows/:file, which requires a signed-in user, and the
+// download is assembled here from the JSON. The full setup guide left the
+// served bundle altogether and lives in the repository at docs/n8n/SETUP.md.
+import { useState } from "react";
+import { FileText, Loader2, Settings } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { apiFetch } from "@/lib/api";
 import { CsvImportPanel } from "@/components/modules/CsvImportPanel";
 
 export function IngestDocs() {
@@ -128,9 +137,11 @@ Response:
             tag="Firecrawl"
           />
         </div>
-        <a href="/n8n/SETUP.md" target="_blank" rel="noopener noreferrer" className="inline-block pt-1">
-          <Button size="sm" variant="ghost" className="gap-1.5 text-xs"><FileText className="h-3 w-3" /> Full setup guide</Button>
-        </a>
+        <p className="pt-1 text-[11px] text-muted-foreground">
+          Full setup guide: <code className="bg-muted px-1 py-0.5 rounded">docs/n8n/SETUP.md</code> in
+          the repository. It is deliberately not published with the app — it used
+          to be, and it exposed a production API key to anyone who asked for it.
+        </p>
       </div>
 
       {/* Already have a list — from one of the workflows above, a scrape, or a
@@ -150,8 +161,40 @@ function WorkflowCard({ file, title, description, tag }: {
   description: string;
   tag:         string;
 }) {
+  const [downloading, setDownloading] = useState(false);
+
+  /**
+   * Fetch the template through the authenticated API, then hand the browser a
+   * Blob to save.
+   *
+   * A plain `<a href download>` cannot carry the bearer token, which is the
+   * whole reason these files used to live in `public/` — and the whole reason
+   * they were readable by the internet. Building the download here is what lets
+   * the endpoint require a session.
+   */
+  const download = async () => {
+    setDownloading(true);
+    try {
+      const workflow = await apiFetch<unknown>(`/outreach/n8n-workflows/${file}`);
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(workflow, null, 2)], { type: "application/json" }),
+      );
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file;
+      a.click();
+      // Revoked on the next tick, not immediately: revoking synchronously after
+      // click() can cancel the save in some browsers before it has read the blob.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not download that workflow");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
-    <a href={`/n8n/${file}`} download className="block">
+    <button type="button" onClick={download} disabled={downloading} className="block w-full text-left">
       <div className="rounded-lg border border-border bg-muted/20 p-3 hover:border-primary/40 hover:bg-muted/40 transition-colors h-full">
         <div className="flex items-start justify-between gap-2 mb-1.5">
           <p className="text-sm font-medium text-foreground">{title}</p>
@@ -159,9 +202,11 @@ function WorkflowCard({ file, title, description, tag }: {
         </div>
         <p className="text-xs text-muted-foreground leading-snug">{description}</p>
         <div className="mt-2 flex items-center gap-1 text-[10px] text-primary">
-          <FileText className="h-3 w-3" /> Download .json
+          {downloading
+            ? <><Loader2 className="h-3 w-3 animate-spin" /> Downloading…</>
+            : <><FileText className="h-3 w-3" /> Download .json</>}
         </div>
       </div>
-    </a>
+    </button>
   );
 }

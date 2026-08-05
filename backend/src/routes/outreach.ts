@@ -26,6 +26,7 @@ import { fireEventAsync } from "../services/webhooks";
 import { checkDomainAuth } from "../services/domain-auth";
 import { effectiveDailyCap, slotsRemainingToday, type WarmupStage } from "../services/sending-policy";
 import { configuredSenderAddress, loadSendingMailbox } from "../services/mailbox";
+import { N8N_WORKFLOWS, n8nWorkflowNames } from "../services/n8n-workflows";
 import { phoneFields } from "../services/phone";
 import { cairoToday, cairoDaysAgo } from "../utils/dates";
 import {
@@ -1312,6 +1313,27 @@ outreach.get("/analytics/sequence/:id", jwtOrApiKey, adminOrApiKey, async (c) =>
       sent_at:      r.sent_at ?? r.enrolled_at,
     })),
   });
+});
+
+// ── n8n workflow templates ────────────────────────────────
+//
+// These were static files under Frontend/public/n8n/, which Vercel serves to
+// anyone at a guessable URL — the same directory that published a live
+// AUTOMATION_API_KEY. Being signed in is now the bar. See
+// services/n8n-workflows.ts for why they are bundled rather than read off disk.
+//
+// authMiddleware, not adminOnly: a member setting up a scraper needs the
+// template, and there is nothing secret in one. The point is that the internet
+// is not a member.
+outreach.get("/n8n-workflows", authMiddleware, (c) =>
+  c.json({ files: n8nWorkflowNames() }));
+
+outreach.get("/n8n-workflows/:file", authMiddleware, (c) => {
+  // A lookup in a fixed map. The parameter never becomes part of a path, so
+  // there is nothing to traverse out of.
+  const workflow = N8N_WORKFLOWS[c.req.param("file")];
+  if (!workflow) return c.json({ error: "Unknown workflow" }, 404);
+  return c.json(workflow);
 });
 
 // ── GET /outreach/deliverability ──────────────────────────
