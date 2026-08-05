@@ -3,11 +3,13 @@ import type { FetchMessageObject } from "imapflow";
 import { db } from "../db/client";
 import { events, leadActivities, leads, outreachSends } from "../db/schema";
 import { cairoToday } from "../utils/dates";
+import { fireEventAsync } from "./webhooks";
 import { LOOKBACK_DAYS, sweepMailbox } from "./mailbox-sweep";
 import {
   MANUAL_EMAIL_EVENT,
   crmSendFingerprint,
   importKey,
+  manualEmailStageAdvance,
   planManualSentImport,
   readSentMessageFacts,
   type ManualSentActivity,
@@ -227,21 +229,54 @@ function rowsOf<T>(result: unknown): T[] {
  * imported — and the next sweep on a keyword-less server would write it again.
  */
 async function writeManualEmailActivity(row: ManualSentActivity): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.insert(leadActivities).values({
-      leadId:      row.leadId,
-      type:        "email",
-      description: row.description,
-      // Cairo, not UTC: an email sent at 00:30 Cairo belongs to that morning.
-      // `new Date().toISOString().slice(0,10)` would file it under yesterday.
-      date:        cairoToday(),
-    });
+  const today = cairoToday();
+
+  const advance = await db.transaction(async (tx) => {
+    // Read inside the transaction, because the stage decides both the patch
+    // below and whether a second timeline row is written — the two must agree.
+    const [before] = await tx
+      .select({ stage: leads.stage })
+      .from(leads)
+      .where(eq(leads.id, row.leadId))
+      .limit(1);
+
+    const advance = manualEmailStageAdvance(before?.stage);
+
+    await tx.insert(leadActivities).values([
+      {
+        leadId:      row.leadId,
+        type:        "email" as const,
+        description: row.description,
+        // Cairo, not UTC: an email sent at 00:30 Cairo belongs to that morning.
+        // `new Date().toISOString().slice(0,10)` would file it under yesterday.
+        date:        today,
+      },
+      // The stage move gets its own row rather than being folded into the email
+      // one. A stage change is the event people scan a timeline for, and every
+      // other stage change in this CRM — manual, bulk, reply-driven, strike-driven
+      // — is already its own `note`. One that hid inside an email entry would be
+      // the only invisible one.
+      ...(advance ? [{
+        leadId:      row.leadId,
+        type:        "note" as const,
+        description: advance.description,
+        date:        today,
+      }] : []),
+    ]);
 
     // The whole point of the feature: a lead answered by hand is not stale. Same
     // field, same helper, same shape as every other touch — the sequencer
     // (services/outreach.ts) and the manual-touch handler both do exactly this.
+    //
+    // The stage rides along in the SAME update, so a lead can never end up with
+    // a fresh last_activity and a stale stage (or a stage-change note in its
+    // timeline that no column backs up).
     await tx.update(leads)
-      .set({ lastActivity: cairoToday(), updatedAt: new Date() })
+      .set({
+        lastActivity: today,
+        ...(advance ? { stage: advance.to } : {}),
+        updatedAt:    new Date(),
+      })
       .where(eq(leads.id, row.leadId));
 
     await tx.insert(events).values({
@@ -249,10 +284,25 @@ async function writeManualEmailActivity(row: ManualSentActivity): Promise<void> 
       type:    MANUAL_EMAIL_EVENT,
       source:  "sent-sync",
       payload: {
-        message_id: row.messageId,
-        recipient:  row.recipient,
-        subject:    row.subject || null,
+        message_id:     row.messageId,
+        recipient:      row.recipient,
+        subject:        row.subject || null,
+        stage_advanced: advance?.to ?? null,
       },
     });
+
+    return advance;
   });
+
+  // Fired AFTER the transaction commits, not inside it. A webhook that went out
+  // for a stage change the transaction then rolled back would be an event the
+  // outside world saw and the database never did.
+  if (advance) {
+    fireEventAsync("lead.stage_changed", {
+      lead_id:    row.leadId,
+      from_stage: "new_lead",
+      to_stage:   advance.to,
+      reason:     "manual_email_sent",
+    });
+  }
 }

@@ -141,6 +141,41 @@ export function manualEmailDescription(recipient: string, subject: string): stri
   return `${MANUAL_EMAIL_PREFIX} to ${recipient}${trimmed ? ` — ${trimmed}` : ""}`.slice(0, 1000);
 }
 
+export interface StageAdvance {
+  to:          "contacted";
+  description: string;
+}
+
+/**
+ * The stage move a manual email causes, or null for no move.
+ *
+ * ONE transition, `new_lead → contacted`, and the narrowness is the design.
+ *
+ * `new_lead` means "nobody has spoken to this person yet", and an email sent by
+ * hand falsifies exactly that — so leaving the lead there made the board lie
+ * about the one thing the first column asserts. It also made the New Lead
+ * column useless as a work queue, because the leads already written to were
+ * indistinguishable from the ones nobody had touched.
+ *
+ * Every LATER stage is a human judgement about where the deal stands
+ * (`call_scheduled`, `proposal_sent`, `closed_won`), and a sweep reading a mail
+ * folder knows nothing about that. Advancing `contacted → call_scheduled`
+ * because somebody sent a second email would be the sweep inventing sales
+ * progress; moving anything out of `closed_won` or `closed_lost` would be worse
+ * still. So the rule only ever fires on the one stage that is a statement of
+ * fact rather than a judgement, and only ever in the direction that fact points.
+ */
+export function manualEmailStageAdvance(stage: string | null | undefined): StageAdvance | null {
+  if (stage !== "new_lead") return null;
+  return {
+    to:          "contacted",
+    // Reads the same as the stage-change note routes/crm.ts writes on a manual
+    // move, with the cause appended — the timeline should not have two
+    // vocabularies for the same event.
+    description: "Stage moved to contacted — email sent manually",
+  };
+}
+
 export interface ManualSentPlanInput {
   messages:        readonly SentMessageFacts[];
   /** Normalised Message-IDs recorded in `outreach_sends` — the CRM's own sends. */

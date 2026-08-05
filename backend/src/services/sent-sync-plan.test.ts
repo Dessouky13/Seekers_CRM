@@ -8,6 +8,7 @@ import {
   normalizeMessageId,
   planManualSentImport,
   readSentMessageFacts,
+  manualEmailStageAdvance,
   type ManualSentPlanInput,
   type SentMessageFacts,
 } from "./sent-sync-plan";
@@ -347,5 +348,41 @@ describe("key builders", () => {
 
   it("crmSendFingerprint distinguishes different subjects to the same address", () => {
     expect(crmSendFingerprint("a@x.com", "one")).not.toBe(crmSendFingerprint("a@x.com", "two"));
+  });
+});
+
+// ── manualEmailStageAdvance ──────────────────────────────────────────────
+
+describe("manualEmailStageAdvance — a hand-sent email is proof of contact", () => {
+  it("moves a new lead to contacted", () => {
+    // The whole point: `new_lead` asserts nobody has spoken to this person, and
+    // an email sent by hand falsifies exactly that.
+    expect(manualEmailStageAdvance("new_lead")).toEqual({
+      to:          "contacted",
+      description: "Stage moved to contacted — email sent manually",
+    });
+  });
+
+  it("leaves every later stage alone", () => {
+    // A sweep reading a mail folder knows nothing about where a deal stands.
+    // Advancing contacted → call_scheduled because somebody sent a second email
+    // would be the sweep inventing sales progress.
+    for (const stage of [
+      "contacted", "call_scheduled", "proposal_sent", "negotiation",
+    ]) {
+      expect(manualEmailStageAdvance(stage)).toBeNull();
+    }
+  });
+
+  it("never reopens a closed lead", () => {
+    // Chasing somebody who already said no does not undo their answer.
+    expect(manualEmailStageAdvance("closed_won")).toBeNull();
+    expect(manualEmailStageAdvance("closed_lost")).toBeNull();
+  });
+
+  it("does nothing when the stage is unknown", () => {
+    expect(manualEmailStageAdvance(null)).toBeNull();
+    expect(manualEmailStageAdvance(undefined)).toBeNull();
+    expect(manualEmailStageAdvance("")).toBeNull();
   });
 });
