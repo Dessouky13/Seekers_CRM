@@ -25,11 +25,26 @@ import type { ApiLead } from "@/lib/types";
 const CARDS_PER_COLUMN = 25;
 
 export const LeadKanban = memo(function LeadKanban({
-  leads, onSelect, onMove,
+  leads, onSelect, onMove, stageTotals,
 }: {
   leads:    ApiLead[];
   onSelect: (id: string) => void;
   onMove:   (itemId: string, from: string, to: string) => void;
+  /**
+   * True per-stage counts, counted in SQL over the WHOLE table by
+   * /crm/pipeline-summary — not over the `leads` array above.
+   *
+   * `leads` is capped: CRM.tsx requests limit 200 and the API itself hard-caps
+   * at 200. With 619 leads in the database the board received 200 of them, so
+   * deriving the header from `all.length` reported 193 + 7 = exactly 200 —
+   * the page size, presented as the pipeline. The old comment here claimed the
+   * header "stays the true total even when the list is capped", which was the
+   * opposite of what the code did: `all` IS the capped set.
+   *
+   * Cards still come from `leads`, because rendering 619 of them is the waste
+   * CARDS_PER_COLUMN exists to avoid. Only the number is authoritative.
+   */
+  stageTotals?: Record<string, number>;
 }) {
   // Per-stage "show all" flags, so expanding one column does not mount the rest.
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -38,27 +53,42 @@ export const LeadKanban = memo(function LeadKanban({
     () => LEAD_STAGES.map((s) => {
       const all = leads.filter((l) => l.stage === s.key);
       const show = expanded[s.key] ? all : all.slice(0, CARDS_PER_COLUMN);
+      // Fall back to the fetched length only when the summary has not loaded,
+      // so the header is never blank on first paint.
+      const total = stageTotals?.[s.key] ?? all.length;
+      // Leads this column has in the database but did NOT receive in the page.
+      // "Show more" cannot reveal these — only searching or filtering can — so
+      // saying "show N more" about them would be a lie the button can't honour.
+      const beyondPage = Math.max(0, total - all.length);
+      const hiddenLocally = all.length - show.length;
       return {
         key:      s.key,
         label:    s.label,
         items:    show,
-        // The header count stays the true total even when the list is capped,
-        // otherwise the board would under-report the pipeline.
-        totalCount: all.length,
-        footer: all.length > show.length
+        totalCount: total,
+        footer: hiddenLocally > 0 || beyondPage > 0
           ? (
-            <button
-              type="button"
-              onClick={() => setExpanded((e) => ({ ...e, [s.key]: true }))}
-              className="w-full rounded-md py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/5"
-            >
-              Show {all.length - show.length} more
-            </button>
+            <div className="space-y-1">
+              {hiddenLocally > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setExpanded((e) => ({ ...e, [s.key]: true }))}
+                  className="min-h-11 w-full rounded-md py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/5"
+                >
+                  Show {hiddenLocally} more
+                </button>
+              )}
+              {beyondPage > 0 && (
+                <p className="px-2 pb-1 text-center text-[11px] text-muted-foreground">
+                  {beyondPage} more not loaded — search or filter to reach them
+                </p>
+              )}
+            </div>
           )
           : null,
       };
     }),
-    [leads, expanded],
+    [leads, expanded, stageTotals],
   );
 
   return (

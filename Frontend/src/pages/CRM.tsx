@@ -104,6 +104,32 @@ export default function CRM() {
 
   // Pipeline-summary: accurate totals across ALL leads regardless of current filter
   const { data: pipeline = [], isLoading: pipelineLoading } = usePipelineSummary();
+
+  /**
+   * True per-stage counts for the Kanban headers — but ONLY when nothing is
+   * filtered.
+   *
+   * The board's cards come from useLeads() above, which is capped at 200. With
+   * 619 leads the columns summed to exactly 200 (193 New Lead + 7 Contacted),
+   * because each header counted the page rather than the pipeline.
+   *
+   * /crm/pipeline-summary counts in SQL over the whole table, so it fixes that —
+   * but it applies ONLY role scoping, not this page's search/stage/category/
+   * reachability/archived/assignee filters. Handing those totals to a filtered
+   * board would swap one wrong number for a worse one: search "clinic" and every
+   * header would still read the unfiltered pipeline.
+   *
+   * So: undefined whenever any filter is active, which makes LeadKanban fall
+   * back to counting the rows it was given — the correct basis for a filtered
+   * view, since the API applied the same filters when selecting them.
+   */
+  const anyFilterActive = Boolean(
+    debouncedSearch || catFilter || stageFilter || reachability || archivedFilter || assigneeFilter,
+  );
+  const unfilteredStageTotals = useMemo(() => {
+    if (anyFilterActive) return undefined;
+    return Object.fromEntries(pipeline.map((r) => [r.stage, r.count]));
+  }, [anyFilterActive, pipeline]);
   const { data: users    = [] } = useUsers();
   const { data: categories = [] } = useLeadCategories();
   const createLead = useCreateLead();
@@ -352,7 +378,12 @@ export default function CRM() {
 
       {/* ── Content ──────────────────────────────────────── */}
       {view === "kanban" ? (
-        <LeadKanban leads={leads} onSelect={setSelectedId} onMove={handleMove} />
+        <LeadKanban
+          leads={leads}
+          onSelect={setSelectedId}
+          onMove={handleMove}
+          stageTotals={unfilteredStageTotals}
+        />
       ) : leads.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border/60 bg-muted/10 p-12 text-center">
           <p className="text-sm font-medium text-foreground">No leads match these filters</p>
